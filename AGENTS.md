@@ -311,5 +311,252 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 
 ---
 
+## 12. Zero Secrets Policy
+
+Every config variable **must** be environment-bound. **Zero exceptions.**
+
+| Rule | Enforcement |
+|---|---|
+| No hardcoded API keys, tokens, passwords, or credentials in any file | `detect-private-key` pre-commit hook + manual review fail |
+| No test tokens, sandbox keys, or dev secrets in code | `.env.example` uses placeholder values only (`your_key_here`, `<secret>`) |
+| No `.env` files committed | `.env*` in `.gitignore` except `.env.example` |
+| Secrets in CI via GitHub Secrets, never in workflow YAML | `${{ secrets.* }}` only — no inline values |
+| Fail the build/PR if any secret pattern is detected | CI job scans for `api[_-]?key`, `token`, `secret`, `password` patterns in code |
+
+Every engineer and every AI agent must fail immediately if they see hardcoded credentials — **do not ship, do not commit, flag it.**
+
+---
+
+## 13. Structural & Complexity Guardrails
+
+### 13.1 Max Function Lines: 40
+- **Every function must be ≤40 lines** (including signature, docstring, body).
+- If a function exceeds 40 lines, refactor into smaller named helpers.
+- Exception: data-heavy mapper functions (max 50 lines).
+
+### 13.2 Max File Size: 400 Lines
+- **Every file must be ≤400 lines** of actual code (comments/docs don't count).
+- Files exceeding 400 lines must be split into focused modules.
+- Exception: auto-generated files (migrations, lock files, schemas).
+
+### 13.3 Max Indentation Depth: 3 Levels
+- **Never nest deeper than 3 levels** of indentation.
+- ```
+  ❌ function() {       // level 1
+  ❌   for (...) {       // level 2
+  ❌     if (...) {      // level 3
+  ❌       try {         // level 4 — VIOLATION
+  ```
+- Solution: extract inner logic to a named function, use guard clauses.
+
+### 13.4 Guard Clauses & Early Returns
+- Handle **errors, edge cases, and invalid inputs first** — before the core logic.
+- Keep the **happy path (primary workflow) unindented at the bottom** of the function.
+- ```python
+  # ✅ GOOD
+  def process_confession(raw: str) -> Confession:
+      if not raw or not raw.strip():
+          raise ValueError("empty confession text")
+      if detect_pii(raw):
+          raw = strip_pii(raw)
+      sanitized = sanitize_text(raw)        # core logic — flush left
+      return Confession(text=sanitized)
+
+  # ❌ BAD
+  def process_confession(raw: str) -> Confession:
+      if raw and raw.strip():                # main logic inside if
+          s = sanitize_text(raw)
+          return Confession(text=s)
+      else:
+          raise ValueError("empty")          # error at the end
+  ```
+
+---
+
+## 14. Naming & Anti-Laziness Standards
+
+### 14.1 Banned Generic Names
+The following terms are **banned** in file names, class names, function names, and module directories:
+
+| Banned | Instead Use |
+|---|---|
+| `helpers` | `formatters`, `validators`, `parsers`, `transformers` |
+| `utils` | `sanitizer`, `hasher`, `normalizer`, `date_utils` (only if scoped) |
+| `data` | `payload`, `record`, `entity`, `dto`, `schema` |
+| `manager` | `orchestrator`, `coordinator`, `handler`, `service`, `controller` |
+| `common` | `shared`, `base`, `core` or nothing — put it in the domain module |
+| `misc` | Name the actual category |
+| `stuff` / `things` | Never acceptable |
+
+### 14.2 Descriptive Naming
+- A name must describe **what** the thing does, not **how**.
+- `fetch_authenticated_user()` ✅ — `get_data()` ❌
+- `ConfessionProcessor` ✅ — `DataManager` ❌
+- `sanitize_html()` ✅ — `clean_input()` ❌ (clean what?)
+
+### 14.3 No Placeholders
+- `// TODO: implement later` — **not allowed** in committed code.
+- `# FIXME` — only if a GitHub issue number is attached: `# FIXME(#123)`.
+- `// Implement this` — never. Write the full implementation or don't merge.
+- If a function is genuinely deferred, gate it behind a feature flag and raise `NotImplementedError` with tracking issue.
+
+### 14.4 Explicit Parameters
+- **Never** use generic `**kwargs`, `dict[str, Any]`, or `data` bundle for function inputs.
+- Every parameter must be explicitly named and typed.
+- ```python
+  # ✅ GOOD
+  def create_confession(text: str, voice_mask: VoiceMask, device_token: str) -> Confession: ...
+
+  # ❌ BAD
+  def create_confession(data: dict, opts: dict[str, Any]) -> Any: ...
+  ```
+
+---
+
+## 15. Error Handling & Security Guardrails
+
+### 15.1 No Swallowed Exceptions
+- **Bare `except:`** — banned.
+- **`except Exception:` without re-raise or log** — banned.
+- Every exception handler must do one of:
+  - Log + raise a domain-specific exception
+  - Log + return a safe fallback (graceful degradation)
+  - Log + retry with backoff
+- ```python
+  # ✅ GOOD
+  try:
+      result = await llm_service.deidentify(text)
+  except LLMServiceError as e:
+      logger.error("deidentification failed", request_id=request_id, error=str(e))
+      raise ProcessingError("deidentification failed, confession quarantined") from e
+
+  # ❌ BAD
+  try:
+      result = await llm_service.deidentify(text)
+  except:
+      pass
+  ```
+
+### 15.2 Custom Exception Hierarchy
+- Every domain layer defines its own exception types.
+- ```
+  AuriError (base)
+   ├── ProcessingError
+   │    ├── DeidentificationError
+   │    ├── CategorizationError
+   │    └── SummarizationError
+   ├── DatabaseError
+   │    ├── ConfessionNotFoundError
+   │    └── DuplicateConfessionError
+   ├── ServiceError
+   │    ├── STTError
+   │    ├── TTSError
+   │    └── VoiceModulationError
+   └── ValidationError
+        ├── EmptyConfessionError
+        └── RateLimitError
+  ```
+- Catch specific types — never `except Exception`.
+- All custom exceptions inherit from `AuriError` which extends `Exception`.
+
+### 15.3 Input Validation at Entry
+- Every API endpoint, bot command, and service boundary validates input **at the entry point**.
+- FastAPI: use Pydantic models for request bodies (already Section 7.3).
+- Telegram bot: validate `update` payload before processing.
+- Internal services: validate with `pydantic.TypeAdapter` or `dataclass` frozen validation.
+- **Reject early, reject loudly** — return 400 with structured error message.
+
+### 15.4 Zero Secrets (Reinforced)
+- Fail CI if any committed file contains a pattern matching `(sk-|api_key=|password=|token=|secret=|BEGIN RSA)`
+- Use `pre-commit` hook `detect-private-key` as mandatory gate.
+- `.env` files are loaded via `python-dotenv` and never committed. See Section 12.
+
+---
+
+## 16. Testing Verification Mandates
+
+### 16.1 AAA (Arrange-Act-Assert) Structure
+Every test **must** follow this exact structure, separated by blank lines:
+
+```python
+# ✅ GOOD
+def test_deidentify_strips_email() -> None:
+    # Arrange
+    text = "My email is user@example.com"
+    service = DeidentifyService()
+    expected = "My email is [redacted]"
+
+    # Act
+    result = service.deidentify(text)
+
+    # Assert
+    assert result.text == expected
+    assert result.pii_found == 1
+```
+
+- **Arrange** — Set up inputs, mocks, preconditions. Only code between `# Arrange` and `# Act`.
+- **Act** — Execute the single behavior under test. Only code between `# Act` and `# Assert`.
+- **Assert** — Verify results with specific assertions. Only code after `# Assert`.
+- **No mixing**: Act code must not contain setup logic. Assert must not modify state.
+
+### 16.2 No Generic Asserts
+- **`assert True` / `assert False` / `assertTrue()` / `assertFalse()`** — banned.
+- Use specific assertions:
+  | Instead of | Use |
+  |---|---|
+  | `assert result is not None` | `assert result.field == expected_value` |
+  | `assert len(items) > 0` | `assert items[0].status == ConfessionStatus.PENDING` |
+  | `assertTrue(condition)` | `assert condition is True` |
+  | `assertEqual(a, b)` | `assert a.field == b.field` |
+- Every assertion must check a **meaningful business outcome**, not a tautology.
+
+### 16.3 Zero Test Interdependencies
+- **Tests must not share state.** No global variables, no ordered test suites, no `@pytest.mark.dependency`.
+- Each test creates its own fixtures (or uses `pytest.fixture` with `scope="function"`).
+- Running a single test in isolation must produce the same result as running the full suite.
+- Use `pytest-randomly` to detect hidden ordering dependencies.
+- Database tests: each test creates and destroys its own data (rollback or truncate between tests).
+
+### 16.4 Mock External Boundaries — Never Core Domain
+- **Mock**: HTTP calls, databases, filesystem, third-party APIs, time/clocks.
+- **Never mock**: business rules, validation logic, de-identification algorithms, category assignment.
+- ```python
+  # ✅ GOOD — mock network boundary
+  with patch("app.services.stt.WhisperTranscriber._call_api") as mock_api:
+      mock_api.return_value = "transcribed text"
+      result = transcriber.transcribe("audio.wav")
+
+  # ❌ BAD — mock domain logic
+  with patch("app.services.deidentify.DeidentifyService._strip_emails") as mock_strip:
+      mock_strip.return_value = "text without email"
+      # This test proves nothing about de-identification
+  ```
+
+### 16.5 Deterministic Tests — Freeze Time & Inject Clocks
+- **Never use `datetime.now()`, `Date.now()`, `time.time()`, or `timezone.localtime()` directly in testable code.**
+- Inject a clock or time provider:
+  ```python
+  # ✅ GOOD
+  class ConfessionService:
+      def __init__(self, clock: Callable[[], datetime] = datetime.now):
+          self._now = clock
+
+  def test_expired_confession_is_auto_deleted() -> None:
+      # Arrange
+      fixed_time = datetime(2026, 6, 15, 12, 0, 0, tzinfo=UTC)
+      service = ConfessionService(clock=lambda: fixed_time)
+      ...
+  ```
+- For TypeScript/JavaScript, use `vi.useFakeTimers()` (Vitest) or `jest.useFakeTimers()`.
+- For Python, use `freezegun` / `time-machine` libraries, or pass an explicit clock.
+- UUID generation must use seeded/testable generators in tests.
+
+### 16.6 Test Size Caps
+- Maximum **20 assertions per test**.
+- Maximum **80 lines per test function** (including AAA comments).
+- Maximum **3 mock patches per test** — if you need more, refactor the code under test.
+
+---
+
 *Last updated: 2026-07-17*
 *This file is reviewed every sprint and updated as practices evolve.*
