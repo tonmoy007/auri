@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Auri",
+    "slug": "auri",
+    "scheme": "auri",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0F172A"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.auri.mobile",
+      "infoPlist": {
+        "NSMicrophoneUsageDescription": "Auri needs microphone access to record your anonymous confession."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0F172A"
+      },
+      "package": "com.auri.mobile",
+      "permissions": ["RECORD_AUDIO"]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-av",
+      "expo-file-system"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

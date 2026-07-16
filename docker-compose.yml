@@ -1,0 +1,124 @@
+services:
+  # ---------------------------------------------------------------------------
+  # API — FastAPI backend
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    image: auri-api:latest
+    container_name: auri-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-auri}:${DB_PASSWORD:-auri}@db:5432/${DB_NAME:-auri}
+    depends_on:
+      db:
+        condition: service_healthy
+      nats:
+        condition: service_started
+    networks:
+      - auri-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # Bot — Telegram delivery agent
+  # ---------------------------------------------------------------------------
+  bot:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    image: auri-bot:latest
+    container_name: auri-bot
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - BACKEND_URL=http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - auri-net
+
+  # ---------------------------------------------------------------------------
+  # DB — PostgreSQL with pgcrypto
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: auri-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-auri}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-auri}
+      POSTGRES_DB: ${DB_NAME:-auri}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/db-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - auri-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-auri}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ---------------------------------------------------------------------------
+  # NATS — inter-service messaging
+  # ---------------------------------------------------------------------------
+  nats:
+    image: nats:latest
+    container_name: auri-nats
+    restart: unless-stopped
+    ports:
+      - "4222:4222"
+    networks:
+      - auri-net
+
+  # ---------------------------------------------------------------------------
+  # Ollama — local LLM (optional)
+  # ---------------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    container_name: auri-ollama
+    restart: unless-stopped
+    profiles:
+      - optional
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks:
+      - auri-net
+
+# ---------------------------------------------------------------------------
+# Networks
+# ---------------------------------------------------------------------------
+networks:
+  auri-net:
+    name: auri-net
+    driver: bridge
+
+# ---------------------------------------------------------------------------
+# Volumes
+# ---------------------------------------------------------------------------
+volumes:
+  pgdata:
+    name: auri-pgdata
+  ollama-models:
+    name: auri-ollama-models

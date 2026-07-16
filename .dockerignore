@@ -1,0 +1,61 @@
+# ---------------------------------------------------------------------------
+# Docker ignore rules for Auri project
+# ---------------------------------------------------------------------------
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+*.egg
+
+# Node
+node_modules/
+.npm/
+.yarn/
+
+# Environment files
+.env
+.env.local
+.env.production
+.env.staging
+
+# Version control
+.git/
+.gitignore
+.gitattributes
+
+# Build artifacts
+dist/
+build/
+*.so
+*.whl
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Agent / tooling
+.agents/
+.kiro/
+.hermes/
+
+# Logs
+*.log
+
+# Mobile
+mobile/.expo/
+mobile/web-build/
+mobile/android/app/build/
+mobile/ios/Pods/
+
+# Docker
+.dockerignore

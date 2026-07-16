@@ -1,0 +1,21 @@
+# Auri MCP Servers
+mcp_servers:
+  postgres:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/auri"]
+    timeout: 60
+  docker:
+    command: "npx"
+    args: ["-y", "@hypnosis/docker-mcp-server"]
+    timeout: 60
+  git:
+    command: "uvx"
+    args: ["mcp-server-git", "--repository", "/Users/tonmoy/projects/auri"]
+    timeout: 60
+  filesystem:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/tonmoy/projects/auri"]
+    timeout: 30
+  fetch:
+    command: "uvx"
+    args: ["mcp-server-fetch"]
