@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>🕯️ Auri — Whisper in the Ear</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { overflow: hidden; background: #0a0a0a; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+  #canvas-container { width: 100vw; height: 100vh; display: block; }
+  
+  #ui-overlay {
+    position: fixed; bottom: 60px; left: 0; right: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 20px;
+    pointer-events: none; z-index: 10;
+  }
+  
+  #greeting {
+    color: rgba(255,200,150,0.9); font-size: 14px; letter-spacing: 2px;
+    text-transform: uppercase; text-shadow: 0 0 30px rgba(255,150,80,0.4);
+    font-weight: 300; transition: opacity 0.8s; opacity: 0;
+  }
+  #greeting.show { opacity: 1; }
+  
+  #record-btn {
+    pointer-events: all; width: 80px; height: 80px; border-radius: 50%;
+    border: none; cursor: pointer; position: relative;
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.15), transparent 70%),
+                radial-gradient(circle, rgba(255,80,60,0.3), rgba(180,30,20,0.6) 60%, rgba(80,10,5,0.8));
+    box-shadow: 0 0 40px rgba(255,60,40,0.3), 0 0 80px rgba(255,60,40,0.1), inset 0 -2px 4px rgba(0,0,0,0.5);
+    transition: all 0.3s ease; backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,200,150,0.15);
+  }
+  #record-btn::before {
+    content: ''; position: absolute; inset: -4px; border-radius: 50%;
+    border: 1px solid rgba(255,200,150,0.1);
+    animation: pulse-ring 3s ease-in-out infinite;
+  }
+  @keyframes pulse-ring {
+    0%, 100% { transform: scale(1); opacity: 0.3; }
+    50% { transform: scale(1.15); opacity: 0; }
+  }
+  #record-btn::after {
+    content: '🎙️'; font-size: 32px; position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    filter: drop-shadow(0 0 10px rgba(255,150,100,0.5));
+  }
+  #record-btn.recording {
+    background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.2), transparent 70%),
+                radial-gradient(circle, rgba(255,40,30,0.5), rgba(200,10,5,0.8) 60%, rgba(100,5,0,0.9));
+    box-shadow: 0 0 60px rgba(255,40,20,0.6), 0 0 120px rgba(255,40,20,0.2);
+    animation: record-pulse 1s ease-in-out infinite;
+  }
+  @keyframes record-pulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+  }
+  #record-btn.recording::after { content: '⏹️'; }
+  
+  #status-text {
+    color: rgba(255,200,150,0.5); font-size: 12px; letter-spacing: 3px;
+    text-transform: uppercase; transition: all 0.5s;
+    text-shadow: 0 0 20px rgba(255,150,80,0.2);
+  }
+  #status-text.active { color: rgba(255,80,60,0.8); text-shadow: 0 0 30px rgba(255,60,40,0.4); }
+  
+  /* Stats hint */
+  #hint {
+    position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+    color: rgba(255,200,150,0.2); font-size: 11px; letter-spacing: 3px;
+    text-transform: uppercase; font-weight: 300; z-index: 10;
+    text-shadow: 0 0 20px rgba(255,150,80,0.1);
+    pointer-events: none; white-space: nowrap;
+  }
+  
+  /* Environment selector */
+  #env-selector {
+    position: fixed; top: 60px; right: 20px;
+    display: flex; flex-direction: column; gap: 8px; z-index: 20;
+  }
+  .env-btn {
+    pointer-events: all; width: 36px; height: 36px; border-radius: 50%;
+    border: 1px solid rgba(255,200,150,0.15); cursor: pointer;
+    transition: all 0.3s; position: relative;
+    backdrop-filter: blur(4px);
+  }
+  .env-btn:hover { transform: scale(1.15); border-color: rgba(255,200,150,0.4); }
+  .env-btn.active { border-color: rgba(255,200,150,0.6); box-shadow: 0 0 20px rgba(255,150,80,0.2); }
+  .env-btn[data-env="booth"] { background: radial-gradient(circle, #3a2010, #1a0e08); }
+  .env-btn[data-env="forest"] { background: radial-gradient(circle, #1a3a18, #0a1a08); }
+  .env-btn[data-env="rooftop"] { background: radial-gradient(circle, #1a1a3a, #08081a); }
+  .env-btn .tooltip {
+    position: absolute; right: 44px; top: 50%; transform: translateY(-50%);
+    color: rgba(255,200,150,0.6); font-size: 10px; letter-spacing: 2px;
+    text-transform: uppercase; white-space: nowrap; opacity: 0;
+    transition: opacity 0.3s; background: rgba(0,0,0,0.6);
+    padding: 4px 10px; border-radius: 4px; pointer-events: none;
+  }
+  .env-btn:hover .tooltip { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div id="canvas-container"></div>
+
+<div id="hint">✦ TOUCH THE ORB TO SPEAK ✦</div>
+
+<div id="env-selector">
+  <button class="env-btn active" data-env="booth"><span class="tooltip">Confessional</span></button>
+  <button class="env-btn" data-env="forest"><span class="tooltip">Forest Glade</span></button>
+  <button class="env-btn" data-env="rooftop"><span class="tooltip">Rooftop Night</span></button>
+</div>
+
+<div id="ui-overlay">
+  <div id="greeting">✦ Speak freely. This is sacred. ✦</div>
+  <button id="record-btn"></button>
+  <div id="status-text">tap to enter the booth</div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// --- Setup ---
+const container = document.getElementById('canvas-container');
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0a0806);
+scene.fog = new THREE.FogExp2(0x0a0806, 0.025);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+camera.position.set(3, 1.8, 4.5);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.8;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+container.appendChild(renderer.domElement);
+
+// Post-processing — bloom for that magical glow
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloom = new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.6, 0.3, 0.15);
+composer.addPass(bloom);
+
+// Simple orbit but locked to booth interior feel
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+controls.rotateSpeed = 0.5;
+controls.minPolarAngle = 0.8;
+controls.maxPolarAngle = 2.2;
+controls.minDistance = 1.5;
+controls.maxDistance = 6;
+controls.target.set(0, 0.8, 0);
+controls.update();
+
+// --- Build the Booth ---
+
+// Floor — aged wood planks
+const floorGeo = new THREE.PlaneGeometry(8, 8, 40, 40);
+const floorMat = new THREE.MeshStandardMaterial({
+  color: 0x2a1a0e,
+  roughness: 0.9,
+  metalness: 0.0,
+  side: THREE.DoubleSide,
+});
+const floor = new THREE.Mesh(floorGeo, floorMat);
+floor.rotation.x = -Math.PI / 2;
+floor.receiveShadow = true;
+scene.add(floor);
+
+// Random plank lines
+const plankMat = new THREE.MeshStandardMaterial({ color: 0x1a0e06, roughness: 1, metalness: 0 });
+for (let i = 0; i < 20; i++) {
+  const line = new THREE.Mesh(new THREE.PlaneGeometry(6, 0.02), plankMat);
+  line.rotation.x = -Math.PI / 2;
+  line.position.set((Math.random() - 0.5) * 5, 0.001, (Math.random() - 0.5) * 5);
+  scene.add(line);
+}
+
+// Walls — curved booth interior (like a phone booth)
+function createWallSection(angle, radius, height, color) {
+  const curve = new THREE.EllipseCurve(0, 0, radius, radius, angle - 0.2, angle + 0.2, false, 0);
+  const points = curve.getPoints(16);
+  const shape = new THREE.Shape();
+  shape.moveTo(points[0].x, 0);
+  points.forEach(p => shape.lineTo(p.x, 0));
+  points.reverse().forEach(p => shape.lineTo(p.x, height));
+  shape.lineTo(points[points.length-1].x, 0);
+  
+  // Simple approach: curved plane
+  const wallGeo = new THREE.CylinderGeometry(radius, radius, height, 24, 1, true, angle - 0.25, 0.5);
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: color,
+    roughness: 0.85,
+    metalness: 0.05,
+    side: THREE.DoubleSide,
+    transparent: true,
+    opacity: 0.92,
+  });
+  const wall = new THREE.Mesh(wallGeo, wallMat);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  return wall;
+}
+
+const wallRadius = 2.2;
+const wallHeight = 3.2;
+const wallColor = 0x3a2818;
+
+// Curved wall panels — create a circular booth
+const panelCount = 10;
+const boothWalls = [];
+for (let i = 0; i < panelCount; i++) {
+  const angle = (i / panelCount) * Math.PI * 2;
+  // Skip a section for the "door"
+  if (i > panelCount - 3 && i < panelCount) continue;
+  
+  const wall = createWallSection(angle, wallRadius, wallHeight, wallColor);
+  boothWalls.push(wall);
+  scene.add(wall);
+}
+
+// Wall trim — top and bottom rings
+function createRing(radius, y, color, height = 0.06) {
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(radius, height, 8, 48),
+    new THREE.MeshStandardMaterial({ color, roughness: 0.7, metalness: 0.3 })
+  );
+  ring.position.y = y;
+  ring.rotation.x = Math.PI / 2;
+  return ring;
+}
+
+scene.add(createRing(wallRadius - 0.05, 0.05, 0x5a3a20));
+scene.add(createRing(wallRadius - 0.05, wallHeight - 0.05, 0x5a3a20));
+
+// Vertical trim pieces (like panel joints)
+for (let i = 0; i < panelCount; i++) {
+  const angle = (i / panelCount) * Math.PI * 2;
+  if (i > panelCount - 3 && i < panelCount) continue;
+  const pillar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.04, wallHeight - 0.1, 0.04),
+    new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 0.6, metalness: 0.2 })
+  );
+  pillar.position.set(Math.cos(angle) * (wallRadius - 0.02), wallHeight / 2, Math.sin(angle) * (wallRadius - 0.02));
+  scene.add(pillar);
+}
+
+// --- Door frame ---
+const doorAngle = 0;
+const doorWidth = 0.8;
+const doorPillarMat = new THREE.MeshStandardMaterial({ color: 0x6a4a2a, roughness: 0.6, metalness: 0.2 });
+for (let side = -1; side <= 1; side += 2) {
+  const pillar = new THREE.Mesh(new THREE.BoxGeometry(0.06, wallHeight, 0.06), doorPillarMat);
+  pillar.position.set(side * doorWidth / 2, wallHeight / 2, wallRadius - 0.05);
+  scene.add(pillar);
+}
+const doorTop = new THREE.Mesh(new THREE.BoxGeometry(doorWidth, 0.06, 0.06), doorPillarMat);
+doorTop.position.set(0, wallHeight - 0.05, wallRadius - 0.05);
+scene.add(doorTop);
+
+// Door arch
+const archPoints = [];
+for (let t = 0; t <= 1; t += 0.05) {
+  const a = t * Math.PI;
+  archPoints.push(new THREE.Vector3(
+    Math.cos(a) * doorWidth / 2,
+    wallHeight - 0.3 + Math.sin(a) * 0.3,
+    wallRadius - 0.03
+  ));
+}
+const archCurve = new THREE.CatmullRomCurve3(archPoints);
+const archGeo = new THREE.TubeGeometry(archCurve, 20, 0.03, 6, false);
+const archMat = new THREE.MeshStandardMaterial({ color: 0x7a5a3a, roughness: 0.5, metalness: 0.2 });
+const arch = new THREE.Mesh(archGeo, archMat);
+scene.add(arch);
+
+// --- Candle ---
+const candleGroup = new THREE.Group();
+candleGroup.position.set(0, 0.35, -0.6);
+
+// Candle body
+const candleMat = new THREE.MeshStandardMaterial({ 
+  color: 0xf5e6d0, roughness: 0.3, metalness: 0.0,
+  emissive: 0xf5e6d0, emissiveIntensity: 0.02
+});
+const candle = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.4, 12), candleMat);
+candle.position.y = 0.2;
+candle.castShadow = true;
+candleGroup.add(candle);
+
+// Wax drips
+for (let i = 0; i < 5; i++) {
+  const drip = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.015, 0.02, 0.05 + Math.random() * 0.08, 6),
+    new THREE.MeshStandardMaterial({ color: 0xf0dcc8, roughness: 0.4 })
+  );
+  const angle = Math.random() * Math.PI * 2;
+  drip.position.set(Math.cos(angle) * 0.065, 0.35 + Math.random() * 0.05, Math.sin(angle) * 0.065);
+  drip.rotation.z = (Math.random() - 0.5) * 0.2;
+  drip.rotation.x = Math.random() * 0.2;
+  candleGroup.add(drip);
+}
+
+// Candle holder
+const holderMat = new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 0.6, metalness: 0.5 });
+const holder = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.15, 0.04, 12), holderMat);
+holder.position.y = 0.02;
+candleGroup.add(holder);
+const holderBase = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.18, 0.02, 12), holderMat);
+holderBase.position.y = 0.0;
+candleGroup.add(holderBase);
+
+scene.add(candleGroup);
+
+// --- Flame ---
+const flameGroup = new THREE.Group();
+flameGroup.position.set(0, 0.55, -0.6);
+
+// Core flame (bright)
+const flameMat = new THREE.MeshStandardMaterial({
+  color: 0xffcc88,
+  emissive: 0xff8800,
+  emissiveIntensity: 2.0,
+  transparent: true,
+  opacity: 0.9,
+});
+const flameGeo = new THREE.SphereGeometry(0.04, 8, 8);
+const flameCore = new THREE.Mesh(flameGeo, flameMat);
+flameCore.scale.y = 2.5;
+flameCore.position.y = 0.04;
+flameGroup.add(flameCore);
+
+// Outer glow (larger, softer)
+const glowMat = new THREE.MeshStandardMaterial({
+  color: 0xff6600,
+  emissive: 0xff4400,
+  emissiveIntensity: 1.0,
+  transparent: true,
+  opacity: 0.3,
+});
+const glowMesh = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 8), glowMat);
+glowMesh.scale.y = 3.0;
+glowMesh.position.y = 0.04;
+flameGroup.add(glowMesh);
+
+scene.add(flameGroup);
+
+// --- Candle light (point light) ---
+const candleLight = new THREE.PointLight(0xff6600, 2.0, 5);
+candleLight.position.set(0, 0.8, -0.6);
+candleLight.castShadow = true;
+scene.add(candleLight);
+
+const ambientLight = new THREE.AmbientLight(0x1a1008, 0.3);
+scene.add(ambientLight);
+
+// Fill light from top
+const fillLight = new THREE.DirectionalLight(0x443322, 0.2);
+fillLight.position.set(0, 4, 0);
+scene.add(fillLight);
+
+// --- Dust Particles ---
+const particleCount = 300;
+const particlePos = new Float32Array(particleCount * 3);
+const particleSizes = new Float32Array(particleCount);
+const particleSpeeds = new Float32Array(particleCount);
+for (let i = 0; i < particleCount; i++) {
+  const theta = Math.random() * Math.PI * 2;
+  const r = Math.random() * wallRadius * 0.7;
+  particlePos[i*3] = Math.cos(theta) * r;
+  particlePos[i*3+1] = Math.random() * wallHeight * 0.7 + 0.2;
+  particlePos[i*3+2] = Math.sin(theta) * r;
+  particleSizes[i] = Math.random() * 2 + 1;
+  particleSpeeds[i] = Math.random() * 0.3 + 0.1;
+}
+const particleGeo = new THREE.BufferGeometry();
+particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+particleGeo.setAttribute('size', new THREE.BufferAttribute(particleSizes, 1));
+
+const particleMat = new THREE.PointsMaterial({
+  color: 0xffcc88,
+  size: 0.008,
+  transparent: true,
+  opacity: 0.15,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+});
+const particles = new THREE.Points(particleGeo, particleMat);
+scene.add(particles);
+
+// --- Voice Rings ---
+const ringGroup = new THREE.Group();
+ringGroup.position.set(0, 0.8, -0.3);
+const rings = [];
+const ringCount = 5;
+for (let i = 0; i < ringCount; i++) {
+  const ringMat = new THREE.MeshBasicMaterial({
+    color: 0xff8844,
+    transparent: true,
+    opacity: 0,
+    side: THREE.DoubleSide,
+    wireframe: true,
+  });
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.1 + i * 0.06, 0.005, 8, 24), ringMat);
+  ring.rotation.x = Math.PI / 2;
+  ring.rotation.z = i * 0.3;
+  ring.userData = { baseRadius: 0.1 + i * 0.06, targetScale: 1, speed: 0.5 + i * 0.15, phase: i * 0.8 };
+  ringGroup.add(ring);
+  rings.push(ring);
+}
+scene.add(ringGroup);
+
+// --- Confessional screen / tablet prop ---
+const tabletMat = new THREE.MeshStandardMaterial({ color: 0x1a1410, roughness: 0.7, metalness: 0.3 });
+const tablet = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.22, 0.02), tabletMat);
+tablet.position.set(0, 0.6, -0.2);
+tablet.rotation.x = -0.15;
+scene.add(tablet);
+const screenMat = new THREE.MeshStandardMaterial({ 
+  color: 0x332211, emissive: 0x442200, emissiveIntensity: 0.1,
+  roughness: 0.1, metalness: 0.8 
+});
+const screen_ = new THREE.Mesh(new THREE.PlaneGeometry(0.26, 0.18), screenMat);
+screen_.position.set(0, 0.6, -0.19);
+screen_.rotation.x = -0.15;
+scene.add(screen_);
+
+// Hanging lamp (dim)
+const lampMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.8, metalness: 0.1, emissive: 0x3a2010, emissiveIntensity: 0.3 });
+const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 12), lampMat);
+lamp.position.set(0.6, wallHeight - 0.2, 0.4);
+scene.add(lamp);
+const lampCord = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.3, 4), new THREE.MeshStandardMaterial({ color: 0x2a1a0a }));
+lampCord.position.set(0.6, wallHeight - 0.45, 0.4);
+scene.add(lampCord);
+const lampLight = new THREE.PointLight(0x886644, 0.3, 2);
+lampLight.position.set(0.6, wallHeight - 0.3, 0.4);
+scene.add(lampLight);
+
+// --- Cushion / kneeler ---
+const cushionMat = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, roughness: 0.95, metalness: 0 });
+const cushion = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.08, 0.4), cushionMat);
+cushion.position.set(0, 0.04, 1.2);
+scene.add(cushion);
+// Cushion top rounded
+const cushionTop = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 0.06, 12), cushionMat);
+cushionTop.position.set(0, 0.07, 1.2);
+cushionTop.rotation.x = Math.PI / 2;
+scene.add(cushionTop);
+
+// --- State ---
+let isRecording = false;
+let env = 'booth';
+let time = 0;
+const clock = new THREE.Clock();
+
+// Environment colors
+const envConfigs = {
+  booth: {
+    bg: 0x0a0806, fog: 0x0a0806, fogDensity: 0.025,
+    wall: 0x3a2818, accent: 0x7a5a3a,
+    lightColor: 0xff6600, ambient: 0x1a1008,
+    bloomStrength: 0.6,
+  },
+  forest: {
+    bg: 0x0a1208, fog: 0x0a1a0a, fogDensity: 0.015,
+    wall: 0x2a3a1a, accent: 0x4a6a2a,
+    lightColor: 0x88ff44, ambient: 0x0a1a08,
+    bloomStrength: 0.4,
+  },
+  rooftop: {
+    bg: 0x060610, fog: 0x060610, fogDensity: 0.02,
+    wall: 0x1a1a2a, accent: 0x3a3a6a,
+    lightColor: 0x4488ff, ambient: 0x08081a,
+    bloomStrength: 0.8,
+  },
+};
+
+function setEnvironment(name) {
+  const cfg = envConfigs[name];
+  scene.background = new THREE.Color(cfg.bg);
+  scene.fog = new THREE.FogExp2(cfg.fog, cfg.fogDensity);
+  candleLight.color.setHex(cfg.lightColor);
+  ambientLight.color.setHex(cfg.ambient);
+  bloom.strength = cfg.bloomStrength;
+  
+  boothWalls.forEach(w => {
+    w.material.color.setHex(cfg.wall);
+  });
+  
+  // Update accent pieces
+  const accentColor = new THREE.Color(cfg.accent);
+  scene.children.forEach(child => {
+    if (child.material && child.material.color) {
+      if (child.material.color.getHex() === 0x7a5a3a || child.material.color.getHex() === 0x6a4a2a) {
+        child.material.color.copy(accentColor);
+      }
+    }
+  });
+}
+
+// --- UI Controls ---
+const recordBtn = document.getElementById('record-btn');
+const statusText = document.getElementById('status-text');
+const greeting = document.getElementById('greeting');
+
+recordBtn.addEventListener('click', () => {
+  isRecording = !isRecording;
+  recordBtn.classList.toggle('recording', isRecording);
+  statusText.classList.toggle('active', isRecording);
+  statusText.textContent = isRecording ? '✦ you are heard ✦' : 'tap to speak';
+  greeting.classList.toggle('show', !isRecording);
+  
+  if (isRecording) {
+    greeting.textContent = '✦ You are heard. Speak freely. ✦';
+    setTimeout(() => greeting.classList.remove('show'), 100);
+  } else {
+    greeting.textContent = '✦ Your confession is received ✦';
+    greeting.classList.add('show');
+    setTimeout(() => {
+      greeting.textContent = '✦ Speak freely. This is sacred. ✦';
+    }, 3000);
+  }
+});
+
+// Environment switching
+document.querySelectorAll('.env-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.env-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    setEnvironment(btn.dataset.env);
+  });
+});
+
+// --- Audio simulation (mic input for visualizer) ---
+let audioCtx = null;
+let analyser = null;
+let dataArray = null;
+let audioSource = null;
+let stream = null;
+
+async function initAudio() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 128;
+    audioSource = audioCtx.createMediaStreamSource(stream);
+    audioSource.connect(analyser);
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+  } catch (e) {
+    console.log('No mic access — using simulated audio');
+  }
+}
+
+// Auto-init audio on first tap
+let audioInitialized = false;
+recordBtn.addEventListener('click', async () => {
+  if (!audioInitialized) {
+    await initAudio();
+    audioInitialized = true;
+  }
+}, { once: true });
+
+function getAudioLevel() {
+  if (analyser && dataArray) {
+    analyser.getByteTimeDomainData(dataArray);
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      const val = (dataArray[i] - 128) / 128;
+      sum += val * val;
+    }
+    const rms = Math.sqrt(sum / dataArray.length);
+    return Math.min(rms * 3, 1);
+  }
+  // Simulated audio for demo
+  return isRecording ? (Math.sin(time * 3) * 0.3 + 0.3 + Math.sin(time * 7) * 0.15) : 0;
+}
+
+// --- Animation Loop ---
+function animate() {
+  const delta = clock.getDelta();
+  time += delta;
+
+  // Flame animation
+  const flameScaleY = 2.5 + Math.sin(time * 12) * 0.6 + Math.sin(time * 7) * 0.3;
+  const flameScaleX = 1 + Math.sin(time * 15) * 0.1;
+  flameCore.scale.y = flameScaleY;
+  flameCore.scale.x = flameScaleX;
+  flameCore.position.y = 0.02 + Math.sin(time * 10) * 0.005;
+  glowMesh.scale.y = flameScaleY * 1.2;
+  glowMesh.scale.x = flameScaleX * 1.3;
+  glowMesh.position.y = flameCore.position.y;
+
+  // Candle light flicker
+  const flicker = 1.5 + Math.sin(time * 20) * 0.4 + Math.sin(time * 13) * 0.2 + Math.sin(time * 31) * 0.1;
+  candleLight.intensity = isRecording ? flicker * 2.5 : flicker;
+  
+  // Flame glow pulse on record
+  if (isRecording) {
+    const pulse = 1 + Math.sin(time * 4) * 0.3;
+    flameMat.emissiveIntensity = 2.0 * pulse;
+    glowMat.emissiveIntensity = 1.0 * pulse;
+    glowMat.opacity = 0.3 * pulse;
+  } else {
+    flameMat.emissiveIntensity = 2.0;
+    glowMat.emissiveIntensity = 1.0;
+    glowMat.opacity = 0.3;
+  }
+
+  // Dust particles — gentle float
+  const positions = particles.geometry.attributes.position.array;
+  for (let i = 0; i < particleCount; i++) {
+    positions[i*3+1] += Math.sin(time * particleSpeeds[i] + i) * delta * 0.05;
+    positions[i*3] += Math.cos(time * particleSpeeds[i] * 0.5 + i * 1.3) * delta * 0.02;
+    positions[i*3+2] += Math.sin(time * particleSpeeds[i] * 0.7 + i * 0.7) * delta * 0.02;
+    // Keep within bounds
+    if (positions[i*3+1] > wallHeight * 0.7 + 0.2) positions[i*3+1] = 0.2;
+    if (positions[i*3+1] < 0.2) positions[i*3+1] = wallHeight * 0.7 + 0.2;
+  }
+  particles.geometry.attributes.position.needsUpdate = true;
+
+  // Voice rings
+  const audioLevel = getAudioLevel();
+  const targetRadius = isRecording ? 0.15 + audioLevel * 0.5 : 0.08;
+  
+  rings.forEach((ring, i) => {
+    const base = ring.userData.baseRadius;
+    const speed = ring.userData.speed;
+    const phase = ring.userData.phase;
+    
+    // Ring expands with audio
+    const expand = isRecording ? audioLevel * 0.4 : 0;
+    const pulse = Math.sin(time * speed + phase) * 0.03;
+    const radius = base + expand + pulse;
+    
+    // Update geometry
+    const newGeo = new THREE.TorusGeometry(radius, 0.005, 8, 24);
+    ring.geometry.dispose();
+    ring.geometry = newGeo;
+    
+    // Opacity based on audio
+    const targetOpacity = isRecording ? 0.15 + audioLevel * 0.5 : 0.02;
+    ring.material.opacity += (targetOpacity - ring.material.opacity) * 0.05;
+    
+    // Color shifts with intensity
+    const hue = isRecording ? 0.08 - audioLevel * 0.05 : 0.08;
+    ring.material.color.setHSL(hue, 0.8, 0.5 + audioLevel * 0.3);
+    
+    ring.rotation.z += delta * (0.2 + audioLevel * 0.5);
+  });
+
+  // Candle rotation (subtle)
+  flameGroup.rotation.y = Math.sin(time * 0.3) * 0.05;
+  candleGroup.rotation.y = Math.sin(time * 0.3) * 0.03;
+
+  // Camera gentle sway when not interacting
+  if (!controls.isDragging) {
+    controls.target.y = 0.8 + Math.sin(time * 0.15) * 0.05;
+  }
+
+  controls.update();
+  composer.render();
+  requestAnimationFrame(animate);
+}
+
+animate();
+
+// --- Resize ---
+window.addEventListener('resize', () => {
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w, h);
+  composer.setSize(w, h);
+});
+
+// Init
+setTimeout(() => greeting.classList.add('show'), 1500);
+</script>
+</body>
+</html>
