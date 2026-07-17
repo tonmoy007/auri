@@ -3,6 +3,8 @@
 > **Purpose**: This file is read by AI coding agents (Claude Code, Cursor, Copilot, etc.)
 > at session start. Every rule must be followed unless explicitly overridden by the user.
 
+> **Orchestration**: Follow `ORCHESTRATOR.md` for plan/task/phase discipline. It governs how work is tracked in `.hermes/plans/` — update the plan file and `tracking.json` any time a task completes, a task is added, or a phase is added/completed.
+
 ---
 
 ## 1. Workflow: Small Tasks, Frequent Commits

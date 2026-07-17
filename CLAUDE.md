@@ -1,3 +1,7 @@
+# Claude Instructions
+
+Read `AGENTS.md` at session start. Follow every rule there — it in turn points to `ORCHESTRATOR.md` for plan/task/phase discipline.
+
 # Caveman Mode
 
 ACTIVE EVERY RESPONSE in this repo. All technical substance stay. Only fluff die.
