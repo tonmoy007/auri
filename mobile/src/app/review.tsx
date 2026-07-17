@@ -14,6 +14,7 @@ import {
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
 import * as Crypto from 'expo-crypto';
+import * as SecureStore from 'expo-secure-store';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { API_BASE_URL, ENDPOINTS } from '../config/api';
@@ -33,26 +34,39 @@ function readStringParam(
   return typeof value === 'string' ? value : undefined;
 }
 
+const DEVICE_TOKEN_STORAGE_KEY = 'auri_device_token';
+
 let sessionDeviceToken: string | null = null;
 
 /**
- * Return a stable device identifier for the current app session.
+ * Return a stable device identifier that survives app restarts.
  *
- * FIXME(TASK-11): this UUID lives only for the current process — persist it
- * via expo-secure-store so device_token_hash (and confession ownership
- * checks on delete/forward) survives app restarts.
+ * Cached in-memory per process; backed by expo-secure-store so
+ * device_token_hash (and confession ownership checks on delete/forward)
+ * stays the same across app launches.
  */
-function getSessionDeviceToken(): string {
-  const token = sessionDeviceToken ?? Crypto.randomUUID();
-  sessionDeviceToken = token;
-  return token;
+async function getSessionDeviceToken(): Promise<string> {
+  if (sessionDeviceToken !== null) {
+    return sessionDeviceToken;
+  }
+
+  const storedToken = await SecureStore.getItemAsync(DEVICE_TOKEN_STORAGE_KEY);
+  if (storedToken !== null) {
+    sessionDeviceToken = storedToken;
+    return storedToken;
+  }
+
+  const newToken = Crypto.randomUUID();
+  await SecureStore.setItemAsync(DEVICE_TOKEN_STORAGE_KEY, newToken);
+  sessionDeviceToken = newToken;
+  return newToken;
 }
 
 /** SHA-256 hex digest of the device token, matching the backend's device_token_hash contract. */
 async function hashDeviceToken(): Promise<string> {
   return Crypto.digestStringAsync(
     Crypto.CryptoDigestAlgorithm.SHA256,
-    getSessionDeviceToken(),
+    await getSessionDeviceToken(),
   );
 }
 
