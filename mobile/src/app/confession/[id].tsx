@@ -10,7 +10,7 @@ import {
   Pressable,
   SafeAreaView,
 } from 'react-native';
-import { Stack } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { colors } from '../../theme/colors';
 import { typography, spacing } from '../../theme';
 import { ConfessionBooth } from '../../components/ConfessionBooth';
@@ -22,10 +22,26 @@ import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 const { height } = Dimensions.get('window');
 
 /**
+ * Extract a single string param from expo-router's raw params object.
+ *
+ * expo-router types local search params as `Record<string, string | string[]>`
+ * (repeated query keys become arrays); this app only ever sends single values.
+ */
+function readStringParam(
+  rawParams: Record<string, string | string[]>,
+  key: string,
+): string | undefined {
+  const value = rawParams[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+/**
  * Confession booth screen — the core recording experience.
  * Manages recording state, voice mask selection, and status feedback.
  */
 export default function ConfessionScreen(): React.JSX.Element {
+  const rawParams = useLocalSearchParams();
+  const id = readStringParam(rawParams, 'id') ?? '';
   const [voiceMask, setVoiceMask] = useState<VoiceMask>('ethereal');
   const [environment, setEnvironment] = useState<Environment>('classic');
   const [status, setStatus] = useState<ConfessionStatus>('idle');
@@ -43,12 +59,20 @@ export default function ConfessionScreen(): React.JSX.Element {
   const handleStopRecording = useCallback(async () => {
     setStatus('processing');
     try {
-      const _audioUri = await recorder.stopRecording();
+      const audioUri = await recorder.stopRecording();
+      if (!audioUri) {
+        setStatus('idle');
+        return;
+      }
       setStatus('done');
+      router.push({
+        pathname: '/review',
+        params: { id, audioUri, voiceMask },
+      });
     } catch (_error: unknown) {
       setStatus('idle');
     }
-  }, [recorder]);
+  }, [recorder, id, voiceMask]);
 
   const handleToggleEnvironment = useCallback(() => {
     setEnvironment((prev: Environment) => {
