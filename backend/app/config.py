@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     # ── Telegram ──────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
     MODERATOR_TELEGRAM_CHAT_ID: str = ""  # flagged confessions relay here for review
+    MODERATION_API_KEY: str = ""  # shared secret the bot uses to call /moderation/*
 
     # ── Recipient directory ──────────────────────────────────────────────
     DEPARTMENTS: str = "HR,Engineering,Management"  # comma-separated, admin-managed

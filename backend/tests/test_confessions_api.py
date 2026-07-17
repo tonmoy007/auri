@@ -80,9 +80,17 @@ async def _create_confession(
         "voice_mask": "warm",
         "transcript": "raw with john@example.com",
     }
-    with patch(
-        "app.api.v1.confessions.LLMService.deidentify",
-        return_value=DEIDENTIFIED_TEXT,
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
     return response.json()
@@ -100,9 +108,17 @@ async def test_create_confession_returns_201_with_deidentified_transcript(
     }
 
     # Act
-    with patch(
-        "app.api.v1.confessions.LLMService.deidentify",
-        return_value=DEIDENTIFIED_TEXT,
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
 
@@ -112,6 +128,8 @@ async def test_create_confession_returns_201_with_deidentified_transcript(
     assert body["pii_stripped"] is True
     assert body["transcript"] == DEIDENTIFIED_TEXT
     assert body["status"] == "pending"
+    assert body["category"] == "work"
+    assert body["ai_summary"] == "A brief summary."
 
 
 @pytest.mark.asyncio
