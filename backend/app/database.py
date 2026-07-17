@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
-# Build the async database URL from config.
-DATABASE_URL: str = (
-    f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASS}"
+logger = logging.getLogger(__name__)
+
+# Prefer an explicit DATABASE_URL (e.g. set by CI); otherwise build it from parts.
+DATABASE_URL: str = settings.DATABASE_URL or (
+    f"postgresql+asyncpg://{settings.DB_USER}:{settings.DB_PASSWORD}"
     f"@{settings.DB_HOST}:{settings.DB_PORT}/{settings.DB_NAME}"
 )
 
@@ -47,9 +51,8 @@ async def check_db_connected() -> bool:
     """Return ``True`` if the database engine can execute a simple query."""
     try:
         async with engine.connect() as conn:
-            await conn.execute(
-                __import__("sqlalchemy").text("SELECT 1")
-            )
+            await conn.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except Exception as exc:
+        logger.error("Database connectivity check failed: %s", exc)
         return False

@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
-import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
 import structlog
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
 
 from app.api.v1 import router as api_v1_router
 from app.config import settings
 from app.database import engine
+from app.exceptions import RateLimitError
 
 # ── Logging initialisation ───────────────────────────────────────────────
 
@@ -36,6 +37,12 @@ structlog.configure(
 logger = structlog.get_logger()
 
 
+class RootHealthResponse(BaseModel):
+    """Response body for the root-level liveness probe."""
+
+    status: str
+
+
 # ── Lifespan ─────────────────────────────────────────────────────────────
 
 
@@ -43,21 +50,25 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application startup/shutdown lifecycle handler.
 
-    On **startup**: create database tables if they don't exist (idempotent).
+    On **startup**: in ``development`` only, create database tables if they
+    don't exist (idempotent convenience for local work). Staging and
+    production schemas are managed exclusively via ``alembic upgrade head``
+    (AGENTS.md §7.4) — this block does not run there.
     On **shutdown**: dispose the database connection pool.
     """
     logger.info("Starting Auri backend", environment=settings.ENVIRONMENT)
 
-    # Create tables (idempotent — uses SQLAlchemy's ``CREATE TABLE IF NOT EXISTS``
-    # behaviour when called via ``Base.metadata.create_all``).
-    from app.models.base import Base
+    if settings.ENVIRONMENT == "development":
+        from app.models.base import Base
 
-    try:
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-        logger.info("Database tables ensured")
-    except Exception as exc:
-        logger.warning("Could not create database tables (DB may not be ready)", error=str(exc))
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(Base.metadata.create_all)
+            logger.info("Database tables ensured (development auto-create)")
+        except Exception as exc:
+            logger.warning("Could not create database tables (DB may not be ready)", error=str(exc))
+    else:
+        logger.info("Skipping auto-create; run 'alembic upgrade head' to apply migrations")
 
     yield
 
@@ -83,22 +94,38 @@ def create_app() -> FastAPI:
     )
 
     # ── CORS ──────────────────────────────────────────────────────────────
+    # Never wildcard origins while allow_credentials=True — that combination
+    # is rejected by browsers and is a CSRF risk. Origins come from settings.
+    origins = [
+        origin.strip()
+        for origin in settings.CORS_ORIGINS.split(",")
+        if origin.strip()
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # Tighten in production.
+        allow_origins=origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
+    # ── Exception handlers ───────────────────────────────────────────────
+
+    @app.exception_handler(RateLimitError)
+    async def rate_limit_error_handler(
+        request: Request, exc: RateLimitError
+    ) -> JSONResponse:
+        """Map a domain ``RateLimitError`` to an HTTP 429 response."""
+        return JSONResponse(status_code=429, content={"detail": str(exc)})
+
     # ── Routers ───────────────────────────────────────────────────────────
     app.include_router(api_v1_router)
 
     # Health endpoint at root level.
-    @app.get("/health")
-    async def health() -> dict:
+    @app.get("/health", response_model=RootHealthResponse)
+    async def health() -> RootHealthResponse:
         """Simple liveness probe (detailed check under ``/api/v1/health``)."""
-        return {"status": "ok"}
+        return RootHealthResponse(status="ok")
 
     # ── WebSocket: live confession stream ─────────────────────────────────
 
