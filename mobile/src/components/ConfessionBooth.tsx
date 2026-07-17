@@ -3,7 +3,7 @@
 
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Float, Rings, Text } from '@react-three/drei';
+import { Float, Ring, Text } from '@react-three/drei';
 import { Group, Mesh, PointLight } from 'three';
 import { Candle } from './Candle';
 import { colors } from '../theme/colors';
@@ -100,11 +100,13 @@ function Door({ position }: { position: [number, number, number] }): React.JSX.E
 function FloatingRings(): React.JSX.Element {
   return (
     <group position={[0, 0.5, -1]}>
-      <Rings
-        color={colors.candleGlow}
+      <Ring
+        args={[0.8, 1, 32]}
         position={[0, 0, 0]}
         scale={[1.5, 1.5, 1.5]}
-      />
+      >
+        <meshBasicMaterial color={colors.candleGlow} transparent opacity={0.4} />
+      </Ring>
     </group>
   );
 }

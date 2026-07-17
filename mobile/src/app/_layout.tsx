@@ -20,7 +20,6 @@ export default function RootLayout(): React.JSX.Element {
           animation: 'fade',
           animationDuration: 300,
           navigationBarColor: colors.boothDark,
-          statusBarColor: colors.boothDark,
           statusBarStyle: 'light',
         }}
       >

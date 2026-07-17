@@ -78,7 +78,7 @@ export function useWebSocket({
    * Handle incoming WebSocket messages.
    * Dispatches based on event type.
    */
-  const handleMessage = useCallback((event: MessageEvent) => {
+  const handleMessage = useCallback((event: WebSocketMessageEvent) => {
     try {
       const message: WebSocketMessage = JSON.parse(event.data as string);
       const { event: eventType, payload } = message;
