@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import Field, HttpUrl
+from pydantic import Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -20,6 +20,11 @@ class BotSettings(BaseSettings):
     webhook_url: str = Field(
         ..., description="Public HTTPS URL for Telegram webhook"
     )
+    webhook_secret: str | None = Field(
+        None,
+        description="Secret token used to validate incoming webhook requests "
+        "(required when environment=production)",
+    )
 
     # Server
     host: str = Field("0.0.0.0", description="Bind address for the webhook server")
@@ -28,6 +33,11 @@ class BotSettings(BaseSettings):
     # Backend API
     backend_url: HttpUrl = Field(
         ..., description="Auri backend API base URL"
+    )
+
+    # Web
+    web_url: str = Field(
+        "https://auri.app", description="Public URL of the Auri confession booth"
     )
 
     # Runtime
@@ -42,3 +52,11 @@ class BotSettings(BaseSettings):
     @property
     def is_development(self) -> bool:
         return self.environment.lower() == "development"
+
+    @model_validator(mode="after")
+    def _require_webhook_secret_in_production(self) -> "BotSettings":
+        if self.is_production and not self.webhook_secret:
+            raise ValueError(
+                "webhook_secret (env WEBHOOK_SECRET) is required when environment=production"
+            )
+        return self
