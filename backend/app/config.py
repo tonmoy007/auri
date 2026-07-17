@@ -43,10 +43,23 @@ class Settings(BaseSettings):
 
     # ── Telegram ──────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""
+    MODERATOR_TELEGRAM_CHAT_ID: str = ""  # flagged confessions relay here for review
+
+    # ── Recipient directory ──────────────────────────────────────────────
+    DEPARTMENTS: str = "HR,Engineering,Management"  # comma-separated, admin-managed
 
     # ── Environment / Logging ─────────────────────────────────────────────
     ENVIRONMENT: str = "development"  # development | staging | production
     LOG_LEVEL: str = "INFO"
+
+
+def parse_comma_separated_list(raw: str) -> list[str]:
+    """Split a comma-separated settings value into a trimmed, non-empty list.
+
+    Shared by ``CORS_ORIGINS`` and ``DEPARTMENTS`` parsing so both follow
+    the same whitespace/empty-entry handling.
+    """
+    return [item.strip() for item in raw.split(",") if item.strip()]
 
 
 settings = Settings()  # Singleton – import this everywhere.

@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.confessions import router as confessions_router
+from app.api.v1.departments import router as departments_router
 from app.api.v1.health import router as health_router
 from app.api.v1.tts import router as tts_router
 
@@ -12,4 +13,5 @@ router = APIRouter(prefix="/api/v1")
 
 router.include_router(health_router)
 router.include_router(confessions_router)
+router.include_router(departments_router)
 router.include_router(tts_router)

@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import settings
+from app.config import parse_comma_separated_list, settings
 from app.database import get_async_session
 from app.exceptions import DeidentificationError, RateLimitError
 from app.models.confession import Confession, ConfessionStatus
@@ -298,6 +298,13 @@ async def forward_confession(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot forward confession in status '{confession.status.value}'",
+        )
+
+    known_departments = parse_comma_separated_list(settings.DEPARTMENTS)
+    if body.department not in known_departments:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"Unknown department '{body.department}'; see GET /api/v1/departments",
         )
 
     confession.status = ConfessionStatus.forwarded
