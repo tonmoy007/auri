@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Callable
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.database import get_async_session
+from app.exceptions import DeidentificationError, RateLimitError
 from app.models.confession import Confession, ConfessionStatus
 from app.models.user import AnonymousUser
+from app.services.llm import LLMService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/confessions", tags=["confessions"])
+
+ClockDependency = Callable[[], datetime]
 
 
 # ── Pydantic request/response schemas ────────────────────────────────────
@@ -64,6 +73,116 @@ class ConfessionForward(BaseModel):
     )
 
 
+# ── Dependencies ─────────────────────────────────────────────────────────
+
+
+def get_clock() -> ClockDependency:
+    """FastAPI dependency providing the current-time function.
+
+    Tests can override this dependency (``app.dependency_overrides``) to
+    freeze time per AGENTS.md §16.5, instead of calling ``datetime.now()``
+    directly inside route handlers.
+    """
+    return lambda: datetime.now(timezone.utc)
+
+
+# ── Internal helpers ─────────────────────────────────────────────────────
+
+
+async def _fetch_confession_or_404(
+    session: AsyncSession, confession_id: uuid.UUID
+) -> Confession:
+    """Fetch a confession by ID or raise ``404``.
+
+    Args:
+        session: Active database session.
+        confession_id: UUID of the confession to fetch.
+
+    Returns:
+        The matching :class:`Confession` row.
+
+    Raises:
+        HTTPException: 404 if no confession matches *confession_id*.
+    """
+    stmt = select(Confession).where(Confession.id == confession_id)
+    result = await session.execute(stmt)
+    confession = result.scalar_one_or_none()
+
+    if confession is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Confession not found",
+        )
+    return confession
+
+
+def _verify_ownership(confession: Confession, device_token_hash: str) -> None:
+    """Raise ``403`` if *device_token_hash* does not own *confession*.
+
+    Args:
+        confession: The confession being accessed.
+        device_token_hash: Value of the ``X-Device-Token-Hash`` request header.
+
+    Raises:
+        HTTPException: 403 if the hashes do not match.
+    """
+    if confession.device_token_hash != device_token_hash:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have access to this confession",
+        )
+
+
+def _check_rate_limit(user: AnonymousUser | None, now: datetime) -> None:
+    """Raise ``RateLimitError`` if *user* submitted within the rate-limit window.
+
+    Args:
+        user: Existing anonymous-user record, or ``None`` for first-time
+            devices.
+        now: Current time, from the injected clock.
+
+    Raises:
+        RateLimitError: If the device's last confession is too recent
+            (AGENTS.md §8.5 — 1 confession per configurable window).
+    """
+    if user is None:
+        return
+
+    window = timedelta(seconds=settings.CONFESSION_RATE_LIMIT_SECONDS)
+    elapsed = now - user.last_confession_at
+    if elapsed < window:
+        retry_after = (window - elapsed).seconds
+        raise RateLimitError(f"rate limit exceeded; retry in {retry_after}s")
+
+
+def _upsert_anonymous_user(
+    session: AsyncSession,
+    user: AnonymousUser | None,
+    device_token_hash: str,
+    now: datetime,
+) -> None:
+    """Create or refresh the anonymous-user usage record for a device.
+
+    Args:
+        session: Active database session (mutations flushed by the caller).
+        user: Existing record for this device, or ``None`` to create one.
+        device_token_hash: SHA-256 hash identifying the device.
+        now: Current time, from the injected clock.
+    """
+    if user is None:
+        session.add(
+            AnonymousUser(
+                device_token_hash=device_token_hash,
+                last_confession_at=now,
+                confession_count=1,
+            )
+        )
+        return
+
+    user.last_confession_at = now
+    user.confession_count += 1
+
+
 # ── Endpoints ────────────────────────────────────────────────────────────
 
 
@@ -76,37 +195,38 @@ class ConfessionForward(BaseModel):
 async def create_confession(
     body: ConfessionCreate,
     session: AsyncSession = Depends(get_async_session),
+    clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
-    """Persist a new confession and upsert the anonymous user record.
+    """Persist a new confession after de-identifying its transcript.
 
-    The ``device_token_hash`` is used to track usage frequency without
-    identifying the user.  Future steps will run Whisper STT, de-identify
-    the transcript via LLM, and assign a category.
+    The transcript is de-identified (regex pass, then an LLM pass via
+    OpenAI) before being stored, and the submitting device is rate-limited
+    to one confession per configured window (AGENTS.md §8.5).
     """
-    confession = Confession(
-        device_token_hash=body.device_token_hash,
-        voice_mask=body.voice_mask,
-        transcript=body.transcript,
-    )
-    session.add(confession)
+    now = clock()
 
-    # Upsert anonymous user stats.
     stmt = select(AnonymousUser).where(
         AnonymousUser.device_token_hash == body.device_token_hash
     )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
+    _check_rate_limit(user, now)
 
-    if user is None:
-        user = AnonymousUser(
-            device_token_hash=body.device_token_hash,
-            last_confession_at=datetime.now(timezone.utc),
-            confession_count=1,
-        )
-        session.add(user)
-    else:
-        user.last_confession_at = datetime.now(timezone.utc)
-        user.confession_count += 1
+    llm_service = LLMService(provider="openai")
+    try:
+        deidentified_transcript = llm_service.deidentify(body.transcript)
+    except Exception as exc:
+        logger.error("confession de-identification failed: %s", exc)
+        raise DeidentificationError("could not de-identify confession") from exc
+
+    confession = Confession(
+        device_token_hash=body.device_token_hash,
+        voice_mask=body.voice_mask,
+        transcript=deidentified_transcript,
+        pii_stripped=True,
+    )
+    session.add(confession)
+    _upsert_anonymous_user(session, user, body.device_token_hash, now)
 
     await session.flush()
     await session.refresh(confession)
@@ -120,18 +240,16 @@ async def create_confession(
 )
 async def get_confession(
     confession_id: uuid.UUID,
+    x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
     session: AsyncSession = Depends(get_async_session),
 ) -> Confession:
-    """Return a single confession identified by ``confession_id``."""
-    stmt = select(Confession).where(Confession.id == confession_id)
-    result = await session.execute(stmt)
-    confession = result.scalar_one_or_none()
+    """Return a single confession identified by ``confession_id``.
 
-    if confession is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Confession not found",
-        )
+    Requires the ``X-Device-Token-Hash`` header to match the confession's
+    owning device.
+    """
+    confession = await _fetch_confession_or_404(session, confession_id)
+    _verify_ownership(confession, x_device_token_hash)
     return confession
 
 
@@ -142,23 +260,17 @@ async def get_confession(
 )
 async def delete_confession(
     confession_id: uuid.UUID,
+    x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
     session: AsyncSession = Depends(get_async_session),
 ) -> None:
     """Mark a confession as ``deleted`` without removing the row.
 
     The original transcript is retained for audit purposes but will not
-    appear in any forward-facing query.
+    appear in any forward-facing query. Requires the ``X-Device-Token-Hash``
+    header to match the confession's owning device.
     """
-    stmt = select(Confession).where(Confession.id == confession_id)
-    result = await session.execute(stmt)
-    confession = result.scalar_one_or_none()
-
-    if confession is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Confession not found",
-        )
-
+    confession = await _fetch_confession_or_404(session, confession_id)
+    _verify_ownership(confession, x_device_token_hash)
     confession.status = ConfessionStatus.deleted
 
 
@@ -170,22 +282,17 @@ async def delete_confession(
 async def forward_confession(
     confession_id: uuid.UUID,
     body: ConfessionForward,
+    x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
     session: AsyncSession = Depends(get_async_session),
 ) -> Confession:
     """Change a confession's status to ``forwarded`` and assign a department.
 
     The confession must currently be in ``pending`` status; otherwise the
-    request is rejected with a ``409 Conflict``.
+    request is rejected with a ``409 Conflict``. Requires the
+    ``X-Device-Token-Hash`` header to match the confession's owning device.
     """
-    stmt = select(Confession).where(Confession.id == confession_id)
-    result = await session.execute(stmt)
-    confession = result.scalar_one_or_none()
-
-    if confession is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Confession not found",
-        )
+    confession = await _fetch_confession_or_404(session, confession_id)
+    _verify_ownership(confession, x_device_token_hash)
 
     if confession.status != ConfessionStatus.pending:
         raise HTTPException(

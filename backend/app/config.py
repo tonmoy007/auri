@@ -24,10 +24,15 @@ class Settings(BaseSettings):
     DB_PORT: int = 5432
     DB_NAME: str = "auri"
     DB_USER: str = "auri"
-    DB_PASS: str = ""
+    DB_PASSWORD: str = ""
+    DATABASE_URL: str = ""  # If set (e.g. by CI), overrides the DB_* parts above.
 
     # ── Security ──────────────────────────────────────────────────────────
     SECRET_KEY: str = "change-me-in-production"
+    CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8081"
+
+    # ── Rate limiting ─────────────────────────────────────────────────────
+    CONFESSION_RATE_LIMIT_SECONDS: int = 300  # 1 confession per 5 min (AGENTS.md §8.5)
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3

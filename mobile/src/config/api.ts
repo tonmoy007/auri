@@ -6,13 +6,13 @@
  * In production, this would be set via environment variable.
  */
 export const API_BASE_URL: string =
-  process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:8000';
+  process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:8000';
 
 /**
  * WebSocket URL for real-time audio streaming.
  */
 export const WS_URL: string =
-  process.env.EXPO_PUBLIC_WS_URL ?? 'ws://localhost:8000/ws';
+  process.env['EXPO_PUBLIC_WS_URL'] ?? 'ws://localhost:8000/ws/confession';
 
 /**
  * API endpoint paths.
@@ -25,8 +25,8 @@ export const ENDPOINTS = {
   confessions: '/api/v1/confessions',
   /** Get a specific confession by ID */
   confession: (id: string): string => `/api/v1/confessions/${id}`,
-  /** Voice mask processing status */
-  maskStatus: (id: string): string => `/api/v1/confessions/${id}/mask-status`,
+  /** Forward a confession to a recipient department */
+  forward: (id: string): string => `/api/v1/confessions/${id}/forward`,
   /** Delete a confession */
   deleteConfession: (id: string): string => `/api/v1/confessions/${id}`,
 } as const;

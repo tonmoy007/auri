@@ -1,7 +1,7 @@
 // Auri — Review screen
 // Shows transcript, AI summary, masked audio playback, forward/delete controls, anonymity toggle
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -12,39 +12,143 @@ import {
   SafeAreaView,
 } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { Audio } from 'expo-av';
+import * as Crypto from 'expo-crypto';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
+import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import type { VoiceMask } from '../types';
+
+/**
+ * Extract a single string param from expo-router's raw params object.
+ *
+ * expo-router types local search params as `Record<string, string | string[]>`
+ * (repeated query keys become arrays); this app only ever sends single values.
+ */
+function readStringParam(
+  rawParams: Record<string, string | string[]>,
+  key: string,
+): string | undefined {
+  const value = rawParams[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+let sessionDeviceToken: string | null = null;
+
+/**
+ * Return a stable device identifier for the current app session.
+ *
+ * FIXME(TASK-11): this UUID lives only for the current process — persist it
+ * via expo-secure-store so device_token_hash (and confession ownership
+ * checks on delete/forward) survives app restarts.
+ */
+function getSessionDeviceToken(): string {
+  const token = sessionDeviceToken ?? Crypto.randomUUID();
+  sessionDeviceToken = token;
+  return token;
+}
+
+/** SHA-256 hex digest of the device token, matching the backend's device_token_hash contract. */
+async function hashDeviceToken(): Promise<string> {
+  return Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    getSessionDeviceToken(),
+  );
+}
 
 /**
  * Review screen — allows user to review their anonymous confession
  * before submitting or discarding it.
  */
 export default function ReviewScreen(): React.JSX.Element {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const rawParams = useLocalSearchParams();
+  const id = readStringParam(rawParams, 'id') ?? '';
+  const audioUri = readStringParam(rawParams, 'audioUri');
+  const transcriptParam = readStringParam(rawParams, 'transcript');
+  const voiceMaskParam = readStringParam(rawParams, 'voiceMask') as VoiceMask | undefined;
   const [anonymityEnabled, setAnonymityEnabled] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const soundRef = useRef<Audio.Sound | null>(null);
 
-  // Placeholder data — will be replaced with real data from WebSocket/API
-  const transcript = '… your anonymous confession transcript will appear here …';
+  // Placeholder text is shown until real transcript/summary data flows in via params.
+  const transcript =
+    transcriptParam ?? '… your anonymous confession transcript will appear here …';
   const summary =
     'An AI-generated summary of your confession will be displayed here after processing.';
+  const voiceMask: VoiceMask = voiceMaskParam ?? 'warm';
+
+  useEffect(() => {
+    return () => {
+      void soundRef.current?.unloadAsync();
+    };
+  }, []);
 
   const handleForward = useCallback(async () => {
     setIsSubmitting(true);
-    // TODO: Submit confession via API
-    // await api.submitConfession(id, { anonymityEnabled });
-    setIsSubmitting(false);
-    router.back();
-  }, [id, anonymityEnabled]);
+    setActionError(null);
+    try {
+      const deviceTokenHash = await hashDeviceToken();
+      const response = await fetch(`${API_BASE_URL}${ENDPOINTS.confessions}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          device_token_hash: deviceTokenHash,
+          voice_mask: voiceMask,
+          transcript,
+        }),
+      });
 
-  const handleDelete = useCallback(() => {
-    // TODO: Delete recording and navigate home
-    router.replace('/');
-  }, []);
+      if (response.status !== 201) {
+        const problem = (await response.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(problem?.detail ?? `Submission failed (${response.status})`);
+      }
 
-  const handlePlayback = useCallback(() => {
-    // TODO: Play masked audio via expo-av
-  }, []);
+      router.back();
+    } catch (error: unknown) {
+      setActionError(
+        error instanceof Error ? error.message : 'Failed to submit confession',
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, [transcript, voiceMask]);
+
+  const handleDelete = useCallback(async () => {
+    try {
+      const deviceTokenHash = await hashDeviceToken();
+      await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
+        method: 'DELETE',
+        headers: { 'X-Device-Token-Hash': deviceTokenHash },
+      });
+    } catch (error: unknown) {
+      setActionError(
+        error instanceof Error ? error.message : 'Failed to delete confession',
+      );
+    } finally {
+      router.replace('/');
+    }
+  }, [id]);
+
+  const handlePlayback = useCallback(async () => {
+    if (!audioUri) {
+      setActionError('No recording available to play');
+      return;
+    }
+    try {
+      if (soundRef.current) {
+        await soundRef.current.replayAsync();
+        return;
+      }
+      const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
+      soundRef.current = sound;
+      await sound.playAsync();
+    } catch (_error: unknown) {
+      setActionError('Failed to play masked audio');
+    }
+  }, [audioUri]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -111,6 +215,12 @@ export default function ReviewScreen(): React.JSX.Element {
           />
         </View>
       </ScrollView>
+
+      {actionError !== null && (
+        <Text style={styles.errorText} accessibilityRole="alert">
+          {actionError}
+        </Text>
+      )}
 
       {/* Action buttons */}
       <View style={styles.actionRow}>
@@ -259,5 +369,12 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  errorText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.rose400,
+    textAlign: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
   },
 });

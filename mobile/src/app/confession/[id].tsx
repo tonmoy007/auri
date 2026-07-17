@@ -7,6 +7,7 @@ import {
   Text,
   StyleSheet,
   Dimensions,
+  Pressable,
   SafeAreaView,
 } from 'react-native';
 import { Stack } from 'expo-router';
@@ -75,10 +76,15 @@ export default function ConfessionScreen(): React.JSX.Element {
         }}
       />
 
-      {/* 3D booth scene */}
-      <View style={styles.threeContainer}>
+      {/* 3D booth scene — tapping it cycles the environment */}
+      <Pressable
+        style={styles.threeContainer}
+        onPress={handleToggleEnvironment}
+        accessibilityRole="button"
+        accessibilityLabel="Change booth environment"
+      >
         <ConfessionBooth environment={environment} />
-      </View>
+      </Pressable>
 
       {/* Status overlay */}
       <View style={styles.statusBar}>
@@ -108,7 +114,7 @@ export default function ConfessionScreen(): React.JSX.Element {
 
       {/* Environment toggle hint */}
       <Text style={styles.environmentHint}>
-        Tap the candle to change environment
+        Tap the booth to change environment
       </Text>
     </SafeAreaView>
   );

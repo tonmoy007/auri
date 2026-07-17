@@ -4,8 +4,13 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from app.config import settings
+from app.exceptions import STTError
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel  # type: ignore[import-untyped]
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +30,7 @@ class WhisperTranscriber:
                 (defaults to ``settings.WHISPER_MODEL``).
         """
         self._model_name: str = model_name or settings.WHISPER_MODEL
-        self._model = None  # Lazy-loaded on first call.
+        self._model: WhisperModel | None = None  # Lazy-loaded on first call.
 
     def _load_model(self) -> None:
         """Import and cache the faster-whisper model instance."""
@@ -47,9 +52,17 @@ class WhisperTranscriber:
 
         Returns:
             The transcribed text, or an empty string if transcription failed.
+
+        Raises:
+            STTError: If the local Whisper model cannot be loaded.
         """
         if self._model is None:
             self._load_model()
+
+        model = self._model
+        if model is None:
+            logger.error("Whisper model failed to load for %s", audio_path)
+            raise STTError("Whisper model is not available")
 
         audio_path = Path(audio_path)
         if not audio_path.exists():
@@ -57,10 +70,12 @@ class WhisperTranscriber:
             return ""
 
         try:
-            segments, _ = self._model.transcribe(str(audio_path))
+            segments, _ = model.transcribe(str(audio_path))
             text = " ".join(segment.text for segment in segments).strip()
             if not text:
-                logger.warning("Local Whisper returned empty transcript; trying API fallback.")
+                logger.warning(
+                    "Local Whisper returned empty transcript; trying API fallback."
+                )
                 return self._api_fallback(audio_path)
             return text
         except Exception as exc:

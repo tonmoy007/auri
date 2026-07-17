@@ -7,9 +7,7 @@ It supports webhook-based operation for production and polling fallback for deve
 from __future__ import annotations
 
 import logging
-from typing import Final
 
-import httpx
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -32,24 +30,27 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-AURI_WEB_URL: Final[str] = "https://auri.app"  # TODO: read from config / env
-
-# ---------------------------------------------------------------------------
 # Command handlers
 # ---------------------------------------------------------------------------
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Welcome message & link to open Auri."""
-    assert update.effective_user is not None
+    if update.effective_user is None:
+        logger.debug("start: update has no effective_user, ignoring")
+        return
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("start: update has no effective_message, ignoring")
+        return
+
+    settings: BotSettings = context.bot_data["settings"]
     user = update.effective_user
-    await update.effective_message.reply_text(
+    await msg.reply_text(
         f"🕯️ *Welcome to Auri, {user.first_name}!*\n\n"
         "I'm the anonymous delivery arm of Auri — the AI confession booth.\n\n"
         "🔹 Speak your truth in the booth, then forward anonymously here.\n"
-        f"🔹 Open the booth: [{AURI_WEB_URL}]({AURI_WEB_URL})\n"
+        f"🔹 Open the booth: [{settings.web_url}]({settings.web_url})\n"
         "🔹 Use /help to learn what I can do.\n\n"
         "Your identity is never stored. Your voice is masked. "
         "What you share stays between you and whoever you send it to.",
@@ -59,7 +60,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show available commands."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("help: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "🕯️ *Auri Bot — Help*\n\n"
         "/start — Welcome & link to the booth\n"
         "/help — This message\n"
@@ -73,7 +78,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Explain how confession works."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("confess: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "📜 *How to Confess*\n\n"
         "1. Open the Auri booth at the link from /start\n"
         "2. Pick a voice mask (Warm, Robotic, Ethereal, Deep, or Random)\n"
@@ -87,7 +96,11 @@ async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Confirm receipt of a forwarded confession."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("forward: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "✅ *Confession Received*\n\n"
         "Your anonymous message has been delivered. "
         "The recipient will see it without knowing who sent it.\n\n"
@@ -109,7 +122,12 @@ async def handle_confession_message(
     These arrive as plain text or media captions containing the confession.
     We acknowledge receipt and log delivery for observability.
     """
-    assert update.effective_message is not None
+    if update.effective_message is None:
+        logger.debug(
+            "handle_confession_message: update has no effective_message, ignoring"
+        )
+        return
+
     msg = update.effective_message
 
     # Log the event (no PII stored in logs — just message id and timestamp)
@@ -144,16 +162,16 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 def build_application(settings: BotSettings) -> Application:
     """Create the Telegram Application with all handlers registered."""
-    builder = (
+    application = (
         ApplicationBuilder()
         .token(settings.bot_token)
+        .post_init(post_init)
         .read_timeout(30)
         .write_timeout(30)
         .connect_timeout(30)
         .pool_timeout(30)
+        .build()
     )
-
-    application = builder.build()
 
     # --- Register command handlers ---
     application.add_handler(CommandHandler("start", start))
@@ -196,44 +214,15 @@ async def post_init(application: Application) -> None:
         logger.info("Running in polling mode (development)")
 
 
-def _build_and_run(settings: BotSettings) -> Application:
-    """Build application, wire up post_init, and return it ready to run."""
+def main() -> None:
+    """Application entry point.
+
+    ``run_webhook``/``run_polling`` are blocking calls that own the event
+    loop themselves — they must not be awaited or wrapped in ``asyncio.run``.
+    """
+    settings = BotSettings()
     application = build_application(settings)
     application.bot_data["settings"] = settings
-
-    # Patch post_init via the builder's internal mechanism by re-building
-    builder = (
-        ApplicationBuilder()
-        .token(settings.bot_token)
-        .post_init(post_init)
-        .read_timeout(30)
-        .write_timeout(30)
-        .connect_timeout(30)
-        .pool_timeout(30)
-    )
-    application = builder.build()
-
-    # Re-register handlers on the new builder-built application
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(CommandHandler("confess", confess))
-    application.add_handler(CommandHandler("forward", forward))
-    application.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            handle_confession_message,
-        )
-    )
-    application.add_error_handler(error_handler)
-    application.bot_data["settings"] = settings
-
-    return application
-
-
-async def main() -> None:
-    """Application entry point."""
-    settings = BotSettings()
-    application = _build_and_run(settings)
 
     if settings.is_production:
         logger.info(
@@ -241,22 +230,20 @@ async def main() -> None:
             settings.host,
             settings.port,
         )
-        await application.run_webhook(
+        application.run_webhook(
             listen=settings.host,
             port=settings.port,
-            url_path=settings.bot_token,
+            url_path="telegram-webhook",
             webhook_url=settings.webhook_url,
-            secret_token=settings.bot_token,
+            secret_token=settings.webhook_secret,
         )
     else:
         logger.info("Starting polling on %s:%s", settings.host, settings.port)
-        await application.run_polling(
+        application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()

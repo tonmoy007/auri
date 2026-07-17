@@ -21,9 +21,7 @@ RE_PHONE: Final[re.Pattern] = re.compile(
 RE_SSN: Final[re.Pattern] = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
 
 # IP addresses (IPv4).
-RE_IP: Final[re.Pattern] = re.compile(
-    r"\b(?:\d{1,3}\.){3}\d{1,3}\b"
-)
+RE_IP: Final[re.Pattern] = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 
 # Simple name patterns — "My name is X" / "I'm Y".
 RE_NAME_PATTERN: Final[re.Pattern] = re.compile(

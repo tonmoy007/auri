@@ -63,7 +63,7 @@ export function useAudioRecorder() {
     // Cleanup: stop recording if component unmounts
     return () => {
       if (recordingRef.current) {
-        void recordingRef.current.stopAndUnloadRecording();
+        void recordingRef.current.stopAndUnloadAsync();
         recordingRef.current = null;
       }
       if (durationIntervalRef.current) {
@@ -92,7 +92,7 @@ export function useAudioRecorder() {
 
       // Unload any previous recording
       if (recordingRef.current) {
-        await recordingRef.current.stopAndUnloadRecording();
+        await recordingRef.current.stopAndUnloadAsync();
       }
 
       const recording = new Audio.Recording();
@@ -112,9 +112,9 @@ export function useAudioRecorder() {
           sampleRate: AUDIO_CONFIG.sampleRate,
           numberOfChannels: AUDIO_CONFIG.channels,
           bitRate: AUDIO_CONFIG.bitRate,
-          linerPCMBitDepth: 16,
-          linerPCMIsBigEndian: false,
-          linerPCMIsFloat: false,
+          linearPCMBitDepth: 16,
+          linearPCMIsBigEndian: false,
+          linearPCMIsFloat: false,
         },
         web: {
           mimeType: 'audio/webm',
@@ -163,7 +163,7 @@ export function useAudioRecorder() {
         return null;
       }
 
-      await recordingRef.current.stopAndUnloadRecording();
+      await recordingRef.current.stopAndUnloadAsync();
       const uri = recordingRef.current.getURI();
 
       // Clean up interval
