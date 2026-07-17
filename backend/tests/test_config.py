@@ -73,7 +73,10 @@ def test_database_module_builds_url_from_parts_when_unset(monkeypatch) -> None:
     resolved = database_module.DATABASE_URL
 
     # Assert
-    assert resolved == "postgresql+asyncpg://parts-user:parts-pass@parts-host:6543/parts-db"
+    assert (
+        resolved
+        == "postgresql+asyncpg://parts-user:parts-pass@parts-host:6543/parts-db"
+    )
 
     # Cleanup — restore modules to their non-overridden state.
     monkeypatch.delenv("DB_HOST", raising=False)
@@ -89,9 +92,7 @@ def test_cors_origins_are_split_and_stripped_into_middleware_config(
     monkeypatch,
 ) -> None:
     # Arrange
-    monkeypatch.setenv(
-        "CORS_ORIGINS", "https://auri.app, https://staging.auri.app ,, "
-    )
+    monkeypatch.setenv("CORS_ORIGINS", "https://auri.app, https://staging.auri.app ,, ")
     import app.config as config_module
 
     importlib.reload(config_module)
@@ -100,7 +101,9 @@ def test_cors_origins_are_split_and_stripped_into_middleware_config(
     # Act
     app = create_app()
     cors_middleware = next(
-        m for m in app.user_middleware if m.cls.__name__ == "CORSMiddleware"
+        m
+        for m in app.user_middleware
+        if getattr(m.cls, "__name__", "") == "CORSMiddleware"
     )
 
     # Assert

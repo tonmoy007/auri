@@ -3,24 +3,24 @@
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
+from pydantic import HttpUrl, ValidationError
 
 from bot.config import BotSettings
 
 
 def test_production_without_webhook_secret_raises() -> None:
     # Arrange
-    kwargs = {
-        "_env_file": None,
-        "bot_token": "t",
-        "webhook_url": "https://bot.test/webhook",
-        "backend_url": "https://backend.test",
-        "environment": "production",
-    }
+    environment = "production"
 
     # Act
     with pytest.raises(ValidationError) as exc_info:
-        BotSettings(**kwargs)
+        BotSettings(
+            _env_file=None,
+            bot_token="t",
+            webhook_url="https://bot.test/webhook",
+            backend_url=HttpUrl("https://backend.test"),
+            environment=environment,
+        )
 
     # Assert
     assert "webhook_secret" in str(exc_info.value)
@@ -28,17 +28,17 @@ def test_production_without_webhook_secret_raises() -> None:
 
 def test_production_with_webhook_secret_passes() -> None:
     # Arrange
-    kwargs = {
-        "_env_file": None,
-        "bot_token": "t",
-        "webhook_url": "https://bot.test/webhook",
-        "webhook_secret": "s3cr3t",
-        "backend_url": "https://backend.test",
-        "environment": "production",
-    }
+    environment = "production"
 
     # Act
-    settings = BotSettings(**kwargs)
+    settings = BotSettings(
+        _env_file=None,
+        bot_token="t",
+        webhook_url="https://bot.test/webhook",
+        webhook_secret="s3cr3t",
+        backend_url=HttpUrl("https://backend.test"),
+        environment=environment,
+    )
 
     # Assert
     assert settings.webhook_secret == "s3cr3t"

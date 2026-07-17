@@ -24,7 +24,7 @@ repos:
     rev: v1.10.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests]
+        additional_dependencies: [types-requests, pydantic, pydantic-settings]
         args: [--ignore-missing-imports]
         files: ^(backend|bot)/
 
