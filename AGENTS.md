@@ -24,8 +24,8 @@
 **Scope**: `api`, `web`, `mobile`, `bot`, `db`, `infra`, `ui`, `llm`, `config`
 
 **Rules**:
-- Every commit **must build** (`npm run build || true`).
-- Every commit **must pass its own tests** (`npm run test:related`).
+- Every commit **must pass lint and type checks** — `ruff check backend/ bot/ && mypy backend/ bot/ --ignore-missing-imports` for Python; `npm run typecheck` in `mobile/` for the Expo app.
+- Every commit **must pass its own tests** — `pytest <changed-path>` for Python; `npx vitest related <changed-path>` in `mobile/` for the Expo app.
 - No `--no-verify` unless upstream CI is broken and you're unblocking yourself.
 - No "WIP" or "temp" commits. If you must checkpoint, use `git stash` or a patch file.
 - ✅ `feat(ui): add confession booth 3D scene with environment cycling`
@@ -48,26 +48,25 @@
 Examples: `feat/confession-3d-scene`, `fix/ios-layout-bleed`, `refactor/llm-prompt-chain`
 
 ### 2.2 Branch Rules
-- **`main`** is production-ready. Only merge via pull request. Never commit directly. Protected.
-- **`develop`** is integration branch. Feature branches merge here for testing. Protected.
-- **Feature branches** branch from `develop`, PR back to `develop`.
-- **Release branches** cut from `develop` → `main` when green.
+- **Trunk-based flow**: this repo currently has only `main`. Only merge via pull request. Never commit directly. Protected.
+- **Feature branches** branch from `main`, PR back to `main`.
 - Delete branches after merge (`git branch -d`).
+- A `develop` integration branch is **optional** and should only be introduced once the team is large enough that direct-to-`main` PRs cause contention (see §11 for how CI would need to change if adopted).
 
 ### 2.3 Before Branching
 ```bash
-git checkout develop
-git pull --rebase origin develop
+git checkout main
+git pull --rebase origin main
 git checkout -b feat/my-feature
 ```
 
 ### 2.4 During Development
-- Rebase onto `develop` daily to avoid long-lived divergence:
+- Rebase onto `main` daily to avoid long-lived divergence:
   ```bash
-  git fetch origin develop
-  git rebase origin/develop
+  git fetch origin main
+  git rebase origin/main
   ```
-- Force-push is allowed ONLY on feature branches (never on `main` or `develop`).
+- Force-push is allowed ONLY on feature branches (never on `main`).
 
 ---
 
@@ -107,7 +106,7 @@ git checkout -b feat/my-feature
 - Reviewer must **run the code** (or verify CI passed) before approving.
 - Comments must be addressed — explicitly resolve or justify "won't fix."
 - **48h max turnaround** for reviews. If unreviewed, ping after 24h.
-- Use **squash merge** to keep `develop` history clean. Use **merge commit** only for `develop → main`.
+- Use **squash merge** to keep `main` history clean.
 
 ---
 
@@ -151,31 +150,39 @@ Configured via GitHub branch protection rules:
 - **Flaky tests** must be quarantined or fixed within 24h.
 
 ### 5.3 CI Pipeline
-| Stage | Command | Required |
-|---|---|---|
-| Lint | `npm run lint` | ✅ |
-| Type check | `npm run typecheck` | ✅ |
-| Unit tests | `npm run test:unit` | ✅ |
-| Integration tests | `npm run test:integration` | ✅ |
-| Build | `npm run build` | ✅ |
-| E2E (on merge to develop) | `npm run test:e2e` | ✅ |
+Defined in `.github/workflows/ci.yml`, four parallel jobs:
 
-### 5.4 Pre-commit Hook (via husky + lint-staged)
-- `eslint --fix` on staged files
-- `prettier --check` on staged files
-- TypeScript type check on changed files
-- Quick unit test for changed modules
+| Job | Stage | Command | Required |
+|---|---|---|---|
+| Lint | Python lint | `ruff check backend/ bot/` | ✅ |
+| Lint | Python format check | `ruff format --check backend/ bot/` | ✅ |
+| Lint | Python type check | `mypy backend/ bot/ --ignore-missing-imports` | ✅ |
+| Lint | Mobile lint | `npx eslint . --ext .ts,.tsx` (in `mobile/`) | ✅ |
+| Lint | Mobile type check | `npx tsc --noEmit` (in `mobile/`) | ✅ |
+| Test | Python tests | `pytest backend/ bot/ --cov=backend --cov=bot` | ✅ |
+| Test | Mobile tests | `npx vitest --coverage` (in `mobile/`) | ✅ |
+| Build | Docker image build | `docker compose build` | ✅ |
+| Security | Trivy filesystem scan (HIGH/CRITICAL) | — | ✅ |
+
+### 5.4 Pre-commit Hook (via the `pre-commit` framework, `.pre-commit-config.yaml`)
+- `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, `check-added-large-files`, `detect-private-key`, `check-merge-conflict`, `check-toml`
+- `ruff --fix` and `ruff-format` on staged Python files
+- `mypy --ignore-missing-imports` on `backend/` and `bot/`
+- `prettier` on staged JS/TS/JSON/CSS/Markdown/YAML files
+- `eslint` on staged `mobile/**/*.{ts,tsx}` files
 
 ---
 
 ## 6. Pixel-Perfect Responsive UI
 
 ### 6.1 Design Constraints
-- **Mobile-first** breakpoints: 320px, 375px, 414px, 768px, 1024px, 1440px.
-- Every component must render correctly on all breakpoints — no horizontal scroll.
-- Use **relative units** (`rem`, `em`, `vh`, `vw`, `%`). Never use `px` for spacing/margins.
-- Text must be readable at **200% browser zoom** without truncation.
-- Touch targets: **minimum 44×44px** (iOS HIG) / **48×48px** (Material Design).
+The Auri frontend is **Expo / React Native**, not a web app — most of this section applies conditionally, noted per rule.
+- **Mobile-first** breakpoints: 320px, 375px, 414px, 768px, 1024px, 1440px. Applies only if a web build (`expo start --web` target or a separate web app) ships; React Native layout uses `Dimensions`/flexbox breakpoints instead of CSS media queries.
+- Every component must render correctly on all breakpoints — no horizontal scroll. *(Web-only rule — see above.)*
+- **If a web app is added**: use relative CSS units (`rem`, `em`, `vh`, `vw`, `%`); never use `px` for spacing/margins.
+- **In React Native code** (current `mobile/` app): use density-independent numbers (React Native's default unit — not CSS `px`) for `StyleSheet` values; there is no `rem`/`em` equivalent in RN.
+- Text must be readable at **200% browser zoom** without truncation. *(Web-only rule — see above.)*
+- Touch targets: **minimum 44×44 dp** (iOS HIG) / **48×48 dp** (Material Design) — applies to both RN and any web surface.
 
 ### 6.2 Device Support — Tier System
 
@@ -204,7 +211,7 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 - **No `any`** in TypeScript. Use `unknown` and narrow with type guards.
 - **No `console.log`** in committed code. Use a proper logger.
 - **No dead code**. Remove commented-out blocks. Git history has everything.
-- **No secrets** in code. Use env vars referenced via `os.getenv()`.
+- **No secrets** in code. Use env vars referenced via `os.getenv()`. See §12 for the full policy and CI enforcement pattern.
 - **No circular dependencies**. Use `madge` or `dpdm` to detect them.
 
 ### 7.2 Component Architecture
@@ -243,13 +250,13 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 - If stuck on a bug >15min, stop and explain: the human may see the issue faster.
 
 ### 8.3 Tool Use
-- Terminal commands must use pat envy (`.env.development`) — never prod credentials.
+- Terminal commands must use development env files (`.env.development`) — never prod credentials.
 - API calls to LLM endpoints must include a `request_id` for tracing.
-- MCP servers are loaded in Hermes config — do not install them at project level.
+- MCP servers are configured via the AI agent's own settings (e.g. `.claude/settings.json`) — do not install them at project level.
 - Use `npx`/`uvx` for MCP servers; never pin them in devDependencies.
 
 ### 8.4 Prompt Engineering Rules
-- All LLM prompts live in `src/llm/prompts/` as `.md` files with frontmatter.
+- All LLM prompts live in `backend/app/llm/prompts/` as `.md` files with frontmatter. *(Create this directory when the first prompt lands — it does not exist yet.)*
 - Every prompt has a version comment (`# v1.2`).
 - Prompt templates use `{mustache}` syntax — never f-string interpolation in templates.
 - System prompts must include output format constraints (JSON schema / markdown structure).
@@ -266,7 +273,7 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 ## 9. LLM & AI Specific
 
 ### 9.1 Model Configuration
-- All model names, endpoints, and parameters in `config/` YAML files. Never hardcoded.
+- All model names, endpoints, and parameters in `backend/config/` YAML files. Never hardcoded. *(Create this directory when the first config file lands — it does not exist yet.)*
 - Fallback chain: primary → secondary → failover → error response.
 - Retry with exponential backoff (3 attempts, 1s → 2s → 4s).
 - Timeout: 30s for simple tasks, 120s for generation.
@@ -295,23 +302,23 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 ## 11. CI/CD
 
 ### 11.1 GitHub Actions
-| Trigger | Workflow |
-|---|---|
-| Push to feature branch | Lint + typecheck + unit tests |
-| PR to develop | Full test suite + build + preview deploy |
-| Merge to develop | Integration tests + deploy staging |
-| Merge to main | E2E tests + deploy production + tag release |
+Currently implemented in `.github/workflows/ci.yml` (see §5.3): `lint`, `test`, `build`, and `security` jobs run on every push and on PRs to `main`. The deploy stages below are **aspirational** — no deploy job exists in `ci.yml` yet.
+
+| Trigger | Workflow | Status |
+|---|---|---|
+| Push to any branch | Lint + type check + unit/integration tests (§5.3) | ✅ implemented |
+| PR to `main` | Full test suite + Docker build + security scan | ✅ implemented |
+| Merge to `main` | E2E tests + deploy production + tag release | ⏳ not yet implemented |
 
 ### 11.2 Deployment
-- Staging: auto-deployed on merge to `develop`.
-- Production: auto-deployed on merge to `main`.
+- Production: auto-deployed on merge to `main`. *(Not yet implemented — no deploy job in `ci.yml`.)*
 - Rollback: `git revert <merge-commit>` and push.
 - Zero-downtime deploys via blue-green.
 - Health check endpoint (`/health`) must pass before traffic routes.
 
 ---
 
-## 12. Zero Secrets Policy
+## 12. Zero Secrets Policy (Canonical — §7.1 and §15.4 cross-reference this section)
 
 Every config variable **must** be environment-bound. **Zero exceptions.**
 
@@ -321,7 +328,7 @@ Every config variable **must** be environment-bound. **Zero exceptions.**
 | No test tokens, sandbox keys, or dev secrets in code | `.env.example` uses placeholder values only (`your_key_here`, `<secret>`) |
 | No `.env` files committed | `.env*` in `.gitignore` except `.env.example` |
 | Secrets in CI via GitHub Secrets, never in workflow YAML | `${{ secrets.* }}` only — no inline values |
-| Fail the build/PR if any secret pattern is detected | CI job scans for `api[_-]?key`, `token`, `secret`, `password` patterns in code |
+| Fail the build/PR if any secret pattern is detected | CI job scans changed files for **literal-value assignments**: `(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*['"][^'"]{8,}['"]` (a quoted literal of 8+ chars, not a bare identifier). Excludes `.env.example`, `*.md`, and `docs/**`, so placeholder values and field/parameter names alone (`bot_token: str`, `device_token_hash`) don't false-positive. |
 
 Every engineer and every AI agent must fail immediately if they see hardcoded credentials — **do not ship, do not commit, flag it.**
 
@@ -467,9 +474,9 @@ The following terms are **banned** in file names, class names, function names, a
 - **Reject early, reject loudly** — return 400 with structured error message.
 
 ### 15.4 Zero Secrets (Reinforced)
-- Fail CI if any committed file contains a pattern matching `(sk-|api_key=|password=|token=|secret=|BEGIN RSA)`
+- Also fail CI if any committed file contains a private key block (`BEGIN RSA` / `BEGIN OPENSSH PRIVATE KEY`, etc.) — the general secret-literal scan pattern is defined once, in §12.
 - Use `pre-commit` hook `detect-private-key` as mandatory gate.
-- `.env` files are loaded via `python-dotenv` and never committed. See Section 12.
+- `.env` files are loaded via `python-dotenv` and never committed. See §12.
 
 ---
 
@@ -506,7 +513,7 @@ def test_deidentify_strips_email() -> None:
   |---|---|
   | `assert result is not None` | `assert result.field == expected_value` |
   | `assert len(items) > 0` | `assert items[0].status == ConfessionStatus.PENDING` |
-  | `assertTrue(condition)` | `assert condition is True` |
+  | `assertTrue(user.is_active)` | `assert user.status == UserStatus.ACTIVE` |
   | `assertEqual(a, b)` | `assert a.field == b.field` |
 - Every assertion must check a **meaningful business outcome**, not a tautology.
 
