@@ -7,12 +7,11 @@ can detect schema changes automatically.
 from __future__ import annotations
 
 import asyncio
-import re
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # Alembic Config object.
 config = context.config
@@ -22,10 +21,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # ── Import all models so autogenerate can see them ─────────────────────────
-from app.config import settings
-from app.models.base import Base
-from app.models.confession import Confession  # noqa: F401
-from app.models.user import AnonymousUser  # noqa: F401
+from app.models.base import Base  # noqa: E402
+from app.models.confession import Confession  # noqa: F401,E402
+from app.models.user import AnonymousUser  # noqa: F401,E402
 
 # Convenience reference.
 target_metadata = Base.metadata
@@ -69,8 +67,6 @@ async def run_migrations_online() -> None:
     Uses the asyncpg driver for compatibility with the application's
     async session stack.
     """
-    from sqlalchemy import text
-
     connectable = create_async_engine(
         ASYNC_URL,
         poolclass=pool.NullPool,
