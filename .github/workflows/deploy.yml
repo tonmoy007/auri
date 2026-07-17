@@ -122,7 +122,10 @@ jobs:
     name: Notify
     needs: [build-and-push, deploy]
     runs-on: ubuntu-latest
-    if: always()
+    # Skip cleanly when Telegram notifications aren't configured, matching
+    # the DEPLOY_ENABLED gate on the deploy job above — otherwise this job
+    # hard-fails the whole workflow on every push with no creds set.
+    if: ${{ always() && vars.TELEGRAM_NOTIFY_ENABLED == 'true' }}
 
     steps:
       - name: Send Telegram notification
