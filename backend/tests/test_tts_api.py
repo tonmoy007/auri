@@ -37,9 +37,7 @@ async def test_synthesize_speech_returns_audio_wav(
     payload = {"text": "Speak freely, this is sacred."}
 
     # Act
-    with patch(
-        "app.api.v1.tts.EdgeTTS.synthesize", return_value=str(fake_audio)
-    ):
+    with patch("app.api.v1.tts.EdgeTTS.synthesize", return_value=str(fake_audio)):
         response = await client.post("/api/v1/tts", json=payload)
 
     # Assert
@@ -58,9 +56,7 @@ async def test_synthesize_speech_deletes_file_after_response(
     payload = {"text": "This message should not persist server-side."}
 
     # Act
-    with patch(
-        "app.api.v1.tts.EdgeTTS.synthesize", return_value=str(fake_audio)
-    ):
+    with patch("app.api.v1.tts.EdgeTTS.synthesize", return_value=str(fake_audio)):
         response = await client.post("/api/v1/tts", json=payload)
 
     # Assert
@@ -85,9 +81,7 @@ async def test_synthesize_speech_returns_500_when_service_fails(
     payload = {"text": "This will fail to synthesize."}
 
     # Act
-    with patch(
-        "app.api.v1.tts.EdgeTTS.synthesize", side_effect=RuntimeError("boom")
-    ):
+    with patch("app.api.v1.tts.EdgeTTS.synthesize", side_effect=RuntimeError("boom")):
         response = await client.post("/api/v1/tts", json=payload)
 
     # Assert
