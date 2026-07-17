@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.api.v1 import router as api_v1_router
-from app.config import settings
+from app.config import parse_comma_separated_list, settings
 from app.database import engine
 from app.exceptions import RateLimitError
 
@@ -100,9 +100,7 @@ def create_app() -> FastAPI:
     # ── CORS ──────────────────────────────────────────────────────────────
     # Never wildcard origins while allow_credentials=True — that combination
     # is rejected by browsers and is a CSRF risk. Origins come from settings.
-    origins = [
-        origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()
-    ]
+    origins = parse_comma_separated_list(settings.CORS_ORIGINS)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,

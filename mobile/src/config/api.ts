@@ -31,6 +31,8 @@ export const ENDPOINTS = {
   deleteConfession: (id: string): string => `/api/v1/confessions/${id}`,
   /** Synthesize an AI agent voice response */
   tts: '/api/v1/tts',
+  /** List configured recipient departments for the Forward flow */
+  departments: '/api/v1/departments',
 } as const;
 
 /**

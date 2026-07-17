@@ -257,7 +257,7 @@ async def test_forward_confession_returns_409_when_not_pending(
 ) -> None:
     # Arrange
     created = await _create_confession(client)
-    body = {"department": "pastoral"}
+    body = {"department": "HR"}
     await client.post(
         f"/api/v1/confessions/{created['id']}/forward",
         json=body,
@@ -281,7 +281,7 @@ async def test_forward_confession_sets_recipient_department(
 ) -> None:
     # Arrange
     created = await _create_confession(client)
-    body = {"department": "counseling"}
+    body = {"department": "Engineering"}
 
     # Act
     response = await client.post(
@@ -292,5 +292,25 @@ async def test_forward_confession_sets_recipient_department(
 
     # Assert
     assert response.status_code == 200
-    assert response.json()["recipient_dept"] == "counseling"
+    assert response.json()["recipient_dept"] == "Engineering"
     assert response.json()["status"] == "forwarded"
+
+
+@pytest.mark.asyncio
+async def test_forward_confession_rejects_unknown_department(
+    client: AsyncClient,
+) -> None:
+    # Arrange — regression: department must come from the configured
+    # directory (GET /api/v1/departments), not arbitrary free text.
+    created = await _create_confession(client)
+    body = {"department": "Nonexistent Dept"}
+
+    # Act
+    response = await client.post(
+        f"/api/v1/confessions/{created['id']}/forward",
+        json=body,
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Assert
+    assert response.status_code == 422
