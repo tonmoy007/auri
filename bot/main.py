@@ -39,10 +39,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if update.effective_user is None:
         logger.debug("start: update has no effective_user, ignoring")
         return
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("start: update has no effective_message, ignoring")
+        return
 
     settings: BotSettings = context.bot_data["settings"]
     user = update.effective_user
-    await update.effective_message.reply_text(
+    await msg.reply_text(
         f"🕯️ *Welcome to Auri, {user.first_name}!*\n\n"
         "I'm the anonymous delivery arm of Auri — the AI confession booth.\n\n"
         "🔹 Speak your truth in the booth, then forward anonymously here.\n"
@@ -56,7 +60,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show available commands."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("help: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "🕯️ *Auri Bot — Help*\n\n"
         "/start — Welcome & link to the booth\n"
         "/help — This message\n"
@@ -70,7 +78,11 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Explain how confession works."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("confess: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "📜 *How to Confess*\n\n"
         "1. Open the Auri booth at the link from /start\n"
         "2. Pick a voice mask (Warm, Robotic, Ethereal, Deep, or Random)\n"
@@ -84,7 +96,11 @@ async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Confirm receipt of a forwarded confession."""
-    await update.effective_message.reply_text(
+    msg = update.effective_message
+    if msg is None:
+        logger.debug("forward: update has no effective_message, ignoring")
+        return
+    await msg.reply_text(
         "✅ *Confession Received*\n\n"
         "Your anonymous message has been delivered. "
         "The recipient will see it without knowing who sent it.\n\n"
@@ -107,7 +123,9 @@ async def handle_confession_message(
     We acknowledge receipt and log delivery for observability.
     """
     if update.effective_message is None:
-        logger.debug("handle_confession_message: update has no effective_message, ignoring")
+        logger.debug(
+            "handle_confession_message: update has no effective_message, ignoring"
+        )
         return
 
     msg = update.effective_message
@@ -196,8 +214,12 @@ async def post_init(application: Application) -> None:
         logger.info("Running in polling mode (development)")
 
 
-async def main() -> None:
-    """Application entry point."""
+def main() -> None:
+    """Application entry point.
+
+    ``run_webhook``/``run_polling`` are blocking calls that own the event
+    loop themselves — they must not be awaited or wrapped in ``asyncio.run``.
+    """
     settings = BotSettings()
     application = build_application(settings)
     application.bot_data["settings"] = settings
@@ -208,7 +230,7 @@ async def main() -> None:
             settings.host,
             settings.port,
         )
-        await application.run_webhook(
+        application.run_webhook(
             listen=settings.host,
             port=settings.port,
             url_path="telegram-webhook",
@@ -217,13 +239,11 @@ async def main() -> None:
         )
     else:
         logger.info("Starting polling on %s:%s", settings.host, settings.port)
-        await application.run_polling(
+        application.run_polling(
             allowed_updates=Update.ALL_TYPES,
             drop_pending_updates=True,
         )
 
 
 if __name__ == "__main__":
-    import asyncio
-
-    asyncio.run(main())
+    main()
