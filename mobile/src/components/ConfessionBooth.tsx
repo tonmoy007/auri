@@ -3,8 +3,8 @@
 
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Float, Ring, Text } from '@react-three/drei';
-import { Group, Mesh, PointLight } from 'three';
+import { Ring, Text } from '@react-three/drei';
+import { Group } from 'three';
 import { Candle } from './Candle';
 import { colors } from '../theme/colors';
 import type { Environment } from '../types';
@@ -148,7 +148,7 @@ function Particles({
     }
   }, [environment]);
 
-  useFrame((state) => {
+  useFrame(() => {
     if (particlesRef.current) {
       particlesRef.current.rotation.y += 0.0005;
     }

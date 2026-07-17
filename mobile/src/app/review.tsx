@@ -19,13 +19,6 @@ import { typography, spacing } from '../theme';
 import { API_BASE_URL, ENDPOINTS } from '../config/api';
 import type { VoiceMask } from '../types';
 
-interface ReviewScreenParams {
-  id: string;
-  audioUri?: string;
-  transcript?: string;
-  voiceMask?: VoiceMask;
-}
-
 /**
  * Extract a single string param from expo-router's raw params object.
  *
