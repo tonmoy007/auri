@@ -33,6 +33,7 @@ class Settings(BaseSettings):
 
     # ── Rate limiting ─────────────────────────────────────────────────────
     CONFESSION_RATE_LIMIT_SECONDS: int = 300  # 1 confession per 5 min (AGENTS.md §8.5)
+    TTS_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/tts
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3
