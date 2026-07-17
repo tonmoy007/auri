@@ -66,9 +66,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables ensured (development auto-create)")
         except Exception as exc:
-            logger.warning("Could not create database tables (DB may not be ready)", error=str(exc))
+            logger.warning(
+                "Could not create database tables (DB may not be ready)", error=str(exc)
+            )
     else:
-        logger.info("Skipping auto-create; run 'alembic upgrade head' to apply migrations")
+        logger.info(
+            "Skipping auto-create; run 'alembic upgrade head' to apply migrations"
+        )
 
     yield
 
@@ -97,9 +101,7 @@ def create_app() -> FastAPI:
     # Never wildcard origins while allow_credentials=True — that combination
     # is rejected by browsers and is a CSRF risk. Origins come from settings.
     origins = [
-        origin.strip()
-        for origin in settings.CORS_ORIGINS.split(",")
-        if origin.strip()
+        origin.strip() for origin in settings.CORS_ORIGINS.split(",") if origin.strip()
     ]
     app.add_middleware(
         CORSMiddleware,
@@ -144,11 +146,13 @@ def create_app() -> FastAPI:
             while True:
                 data = await websocket.receive_text()
                 logger.debug("WebSocket received", data_len=len(data))
-                await websocket.send_json({
-                    "type": "ack",
-                    "received_length": len(data),
-                    "message": "Confession data received. Processing…",
-                })
+                await websocket.send_json(
+                    {
+                        "type": "ack",
+                        "received_length": len(data),
+                        "message": "Confession data received. Processing…",
+                    }
+                )
         except WebSocketDisconnect:
             logger.info("WebSocket client disconnected")
 

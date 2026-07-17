@@ -17,9 +17,7 @@ class BotSettings(BaseSettings):
 
     # Telegram
     bot_token: str = Field(..., description="Telegram Bot API token")
-    webhook_url: str = Field(
-        ..., description="Public HTTPS URL for Telegram webhook"
-    )
+    webhook_url: str = Field(..., description="Public HTTPS URL for Telegram webhook")
     webhook_secret: str | None = Field(
         None,
         description="Secret token used to validate incoming webhook requests "
@@ -31,9 +29,7 @@ class BotSettings(BaseSettings):
     port: int = Field(8080, description="Port for the webhook server")
 
     # Backend API
-    backend_url: HttpUrl = Field(
-        ..., description="Auri backend API base URL"
-    )
+    backend_url: HttpUrl = Field(..., description="Auri backend API base URL")
 
     # Web
     web_url: str = Field(
@@ -42,7 +38,8 @@ class BotSettings(BaseSettings):
 
     # Runtime
     environment: str = Field(
-        "development", description="Runtime environment (development/staging/production)"
+        "development",
+        description="Runtime environment (development/staging/production)",
     )
 
     @property

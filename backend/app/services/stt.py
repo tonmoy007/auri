@@ -73,7 +73,9 @@ class WhisperTranscriber:
             segments, _ = model.transcribe(str(audio_path))
             text = " ".join(segment.text for segment in segments).strip()
             if not text:
-                logger.warning("Local Whisper returned empty transcript; trying API fallback.")
+                logger.warning(
+                    "Local Whisper returned empty transcript; trying API fallback."
+                )
                 return self._api_fallback(audio_path)
             return text
         except Exception as exc:

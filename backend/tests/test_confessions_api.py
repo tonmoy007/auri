@@ -58,7 +58,7 @@ async def client() -> AsyncIterator[AsyncClient]:
                 raise
 
     app.dependency_overrides[get_async_session] = override_get_session
-    app.dependency_overrides[get_clock] = lambda: (lambda: FROZEN_NOW)
+    app.dependency_overrides[get_clock] = lambda: lambda: FROZEN_NOW
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -69,7 +69,7 @@ async def client() -> AsyncIterator[AsyncClient]:
 
 
 def _set_clock(now: datetime) -> None:
-    app.dependency_overrides[get_clock] = lambda: (lambda: now)
+    app.dependency_overrides[get_clock] = lambda: lambda: now
 
 
 async def _create_confession(

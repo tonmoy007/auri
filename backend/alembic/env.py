@@ -32,9 +32,9 @@ target_metadata = Base.metadata
 
 # Convert the sync URL from alembic.ini to an async URL for asyncpg.
 SYNC_URL = config.get_main_option("sqlalchemy.url")
-ASYNC_URL = SYNC_URL.replace(
-    "postgresql://", "postgresql+asyncpg://"
-) if SYNC_URL else ""
+ASYNC_URL = (
+    SYNC_URL.replace("postgresql://", "postgresql+asyncpg://") if SYNC_URL else ""
+)
 
 
 def run_migrations_offline() -> None:

@@ -16,7 +16,9 @@ from bot.main import (
 )
 
 
-def test_build_application_registers_command_handlers(bot_settings: BotSettings) -> None:
+def test_build_application_registers_command_handlers(
+    bot_settings: BotSettings,
+) -> None:
     # Arrange — bot_settings comes from conftest fixture
 
     # Act

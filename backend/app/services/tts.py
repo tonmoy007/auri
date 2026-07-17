@@ -23,8 +23,8 @@ class EdgeTTS:
             output_dir: Directory to write generated audio files.
                 Defaults to ``{cwd}/data/tts_output/``.
         """
-        self._output_dir: Path = Path(output_dir) if output_dir else (
-            Path.cwd() / "data" / "tts_output"
+        self._output_dir: Path = (
+            Path(output_dir) if output_dir else (Path.cwd() / "data" / "tts_output")
         )
         self._output_dir.mkdir(parents=True, exist_ok=True)
 
