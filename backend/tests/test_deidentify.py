@@ -121,3 +121,39 @@ def test_mask_pii_llm_fallback_uses_llm_response_when_good() -> None:
 
     # Assert
     assert result == llm_response
+
+
+def test_mask_pii_llm_fallback_rejects_refusal_and_falls_back_to_regex() -> None:
+    # Arrange — regression (2026-07-18): live-tested against a local Ollama
+    # model, which refused a self-harm-adjacent redaction prompt outright.
+    # The refusal is long enough to pass the length check, so without this
+    # guard it would have been stored as if it were the redacted transcript.
+    text = "I think about ending it all some nights and don't know who to tell"
+    llm_response = (
+        "I can't help with that. If you or someone you know is struggling "
+        "with suicidal thoughts, please reach out to a trusted adult or "
+        "call a helpline."
+    )
+
+    # Act
+    result = mask_pii_llm_fallback(text, llm_response)
+
+    # Assert
+    assert result == strip_pii_regex(text)
+    assert "I can't help" not in result
+
+
+def test_mask_pii_llm_fallback_rejects_prompt_delimiter_leakage() -> None:
+    # Arrange — regression: a response that echoes the prompt-injection-
+    # defense delimiter markers means the model looped the scaffolding back
+    # instead of redacting, and must not be stored verbatim.
+    text = "hello world this is a test with more than enough words"
+    llm_response = (
+        "<<<BEGIN_USER_CONTENT>>>\nhello world this is a test\n<<<END_USER_CONTENT>>>"
+    )
+
+    # Act
+    result = mask_pii_llm_fallback(text, llm_response)
+
+    # Assert
+    assert result == strip_pii_regex(text)

@@ -263,7 +263,12 @@ async def create_confession(
 
     category = _safe_categorize(llm_service, deidentified_transcript)
     ai_summary = _safe_summarize(llm_service, deidentified_transcript)
-    is_flagged = _safe_moderate(llm_service, deidentified_transcript)
+    # Moderation runs on the ORIGINAL transcript, not the de-identified one:
+    # discovered via live testing (2026-07-18) that a de-identify call can
+    # itself fail (refusal, meta-commentary) and corrupt its output, which
+    # would silently blind the safety check reading it. Moderating raw text
+    # instead makes this check's reliability independent of deidentify's.
+    is_flagged = _safe_moderate(llm_service, body.transcript)
 
     confession = Confession(
         device_token_hash=body.device_token_hash,
