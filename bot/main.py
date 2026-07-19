@@ -12,6 +12,7 @@ from telegram import Update
 from telegram.ext import (
     Application,
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     MessageHandler,
@@ -19,6 +20,7 @@ from telegram.ext import (
 )
 
 from bot.config import BotSettings
+from bot.moderation_handlers import handle_moderation_callback, poll_moderation_queue
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -187,6 +189,13 @@ def build_application(settings: BotSettings) -> Application:
         )
     )
 
+    # --- Register moderation queue Approve/Reject buttons ---
+    application.add_handler(
+        CallbackQueryHandler(
+            handle_moderation_callback, pattern=r"^mod(approve|reject):"
+        )
+    )
+
     # --- Register error handler ---
     application.add_error_handler(error_handler)
 
@@ -212,6 +221,20 @@ async def post_init(application: Application) -> None:
         logger.info("Webhook set to %s", bot_settings.webhook_url)
     else:
         logger.info("Running in polling mode (development)")
+
+    if bot_settings.moderation_enabled and application.job_queue is not None:
+        application.job_queue.run_repeating(
+            poll_moderation_queue,
+            interval=bot_settings.moderation_poll_seconds,
+            first=10,
+            name="poll_moderation_queue",
+        )
+        logger.info(
+            "Moderation queue polling enabled (every %ss)",
+            bot_settings.moderation_poll_seconds,
+        )
+    else:
+        logger.info("Moderation queue polling disabled (not configured)")
 
 
 def main() -> None:
