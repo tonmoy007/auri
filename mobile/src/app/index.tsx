@@ -26,12 +26,27 @@ export default function HomeScreen(): React.JSX.Element {
     router.push(`/confession/${sessionId}`);
   }, []);
 
+  const handleOpenSettings = useCallback(() => {
+    router.push('/settings');
+  }, []);
+
   return (
     <View style={styles.container}>
       {/* 3D atmospheric background */}
       <View style={styles.threeContainer}>
         <ThreeCanvas />
       </View>
+
+      {/* Settings entry point */}
+      <TouchableOpacity
+        style={styles.settingsButton}
+        onPress={handleOpenSettings}
+        accessibilityRole="button"
+        accessibilityLabel="Open settings"
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Text style={styles.settingsIcon}>⚙</Text>
+      </TouchableOpacity>
 
       {/* Overlay content */}
       <View style={styles.overlay}>
@@ -78,6 +93,22 @@ const styles = StyleSheet.create({
   threeContainer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 0,
+  },
+  settingsButton: {
+    position: 'absolute',
+    top: 56,
+    right: spacing.lg,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  settingsIcon: {
+    fontSize: typography.fontSize.xl,
+    color: colors.slate300,
   },
   overlay: {
     flex: 1,

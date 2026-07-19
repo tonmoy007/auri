@@ -38,6 +38,13 @@ export default function RootLayout(): React.JSX.Element {
             animation: 'slide_from_bottom',
           }}
         />
+        <Stack.Screen
+          name="settings"
+          options={{
+            title: 'Settings',
+            animation: 'slide_from_right',
+          }}
+        />
       </Stack>
     </>
   );

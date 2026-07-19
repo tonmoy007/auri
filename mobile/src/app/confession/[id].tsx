@@ -1,7 +1,7 @@
 // Auri — Confession booth screen
 // 3D scene with record button, voice mask selector, and status display
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,6 +17,7 @@ import { ConfessionBooth } from '../../components/ConfessionBooth';
 import { RecordButton } from '../../components/RecordButton';
 import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import { useSettings } from '../../hooks/useSettings';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
 const { height } = Dimensions.get('window');
@@ -42,10 +43,21 @@ function readStringParam(
 export default function ConfessionScreen(): React.JSX.Element {
   const rawParams = useLocalSearchParams();
   const id = readStringParam(rawParams, 'id') ?? '';
-  const [voiceMask, setVoiceMask] = useState<VoiceMask>('ethereal');
-  const [environment, setEnvironment] = useState<Environment>('classic');
+  const { defaultVoiceMask, defaultEnvironment, isLoaded } = useSettings();
+  const [voiceMask, setVoiceMask] = useState<VoiceMask>(defaultVoiceMask);
+  const [environment, setEnvironment] = useState<Environment>(defaultEnvironment);
   const [status, setStatus] = useState<ConfessionStatus>('idle');
   const recorder = useAudioRecorder();
+
+  // Seed live selection from the persisted Settings defaults once they load.
+  // Deliberately keyed on `isLoaded` alone (not the values) so this fires
+  // once on load-completion and never fights the user's in-screen picks.
+  useEffect(() => {
+    if (isLoaded) {
+      setVoiceMask(defaultVoiceMask);
+      setEnvironment(defaultEnvironment);
+    }
+  }, [isLoaded]);
 
   const handleStartRecording = useCallback(async () => {
     setStatus('recording');
