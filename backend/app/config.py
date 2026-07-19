@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     TTS_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/tts
     STT_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/stt
 
+    # ── Data retention ────────────────────────────────────────────────────
+    RETENTION_HOURS: int = 24  # purge forwarded/deleted confessions after this long
+
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3
     STT_MAX_UPLOAD_BYTES: int = (
