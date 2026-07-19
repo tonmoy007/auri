@@ -80,9 +80,17 @@ async def _create_confession(
         "voice_mask": "warm",
         "transcript": "raw with john@example.com",
     }
-    with patch(
-        "app.api.v1.confessions.LLMService.deidentify",
-        return_value=DEIDENTIFIED_TEXT,
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
     return response.json()
@@ -100,9 +108,17 @@ async def test_create_confession_returns_201_with_deidentified_transcript(
     }
 
     # Act
-    with patch(
-        "app.api.v1.confessions.LLMService.deidentify",
-        return_value=DEIDENTIFIED_TEXT,
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
 
@@ -112,6 +128,8 @@ async def test_create_confession_returns_201_with_deidentified_transcript(
     assert body["pii_stripped"] is True
     assert body["transcript"] == DEIDENTIFIED_TEXT
     assert body["status"] == "pending"
+    assert body["category"] == "work"
+    assert body["ai_summary"] == "A brief summary."
 
 
 @pytest.mark.asyncio
@@ -314,3 +332,41 @@ async def test_forward_confession_rejects_unknown_department(
 
     # Assert
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_confession_moderates_raw_transcript_not_deidentified(
+    client: AsyncClient,
+) -> None:
+    # Arrange — regression (2026-07-18): moderation must run on the original
+    # transcript, not the de-identified one, so a broken/refused deidentify
+    # call can never blind the safety check. Found via live testing against
+    # a local Ollama model, which refused a self-harm-adjacent redaction
+    # prompt outright, silently causing moderate() to miss it.
+    raw_transcript = "raw transcript carrying the real safety signal"
+    payload = {
+        "device_token_hash": DEVICE_HASH,
+        "voice_mask": "warm",
+        "transcript": raw_transcript,
+    }
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate", return_value=False
+        ) as mock_moderate,
+    ):
+        response = await client.post("/api/v1/confessions", json=payload)
+
+    # Assert
+    assert response.status_code == 201
+    mock_moderate.assert_called_once_with(raw_transcript)

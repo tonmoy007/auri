@@ -121,6 +121,43 @@ class LLMService:
             raise SummarizationError("LLM summarization failed to produce a summary")
         return result
 
+    def moderate(self, text: str) -> bool:
+        """Decide whether *text* needs human moderator review before delivery.
+
+        Flags content indicating imminent self-harm, threats of violence,
+        harassment naming a specific coworker, or illegal activity.
+
+        Fails **closed**: any LLM error or unparseable response returns
+        ``True`` (flagged) rather than letting borderline content skip
+        review — the opposite fallback direction from :meth:`categorize`/
+        :meth:`summarize`, which fail open to avoid losing a confession.
+
+        Args:
+            text: Already de-identified transcript.
+
+        Returns:
+            ``True`` if the confession should be queued for moderator
+            review instead of delivered directly.
+        """
+        prompt = self._build_delimited_prompt(
+            instruction=(
+                "Does the following confession contain any of: imminent "
+                "self-harm or suicidal intent, threats of violence, "
+                "harassment naming a specific coworker, or illegal "
+                "activity? Answer with exactly one word: YES or NO."
+            ),
+            content=text,
+        )
+        result = self._call_llm(prompt).strip().upper()
+
+        if result not in {"YES", "NO"}:
+            logger.warning(
+                "moderation check returned an unparseable result %r; failing closed",
+                result,
+            )
+            return True
+        return result == "YES"
+
     # ── Internal helpers ──────────────────────────────────────────────────
 
     @staticmethod

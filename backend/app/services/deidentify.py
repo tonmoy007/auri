@@ -5,6 +5,25 @@ from __future__ import annotations
 import re
 from typing import Final
 
+# Signals that an LLM response is a refusal or meta-commentary rather than
+# the redacted text itself — discovered via live testing against a local
+# Ollama model (2026-07-18): a smaller/weaker model will sometimes refuse
+# the redaction prompt outright (self-harm content) or narrate its own
+# reasoning instead of returning only the redacted result. Either failure
+# mode previously passed the length-only check below and got stored as the
+# "de-identified" transcript, corrupting every downstream step that reads
+# it (categorization, summarization, and — most seriously — moderation).
+_REFUSAL_MARKERS: Final[tuple[str, ...]] = (
+    "i can't help",
+    "i cannot help",
+    "i can't assist",
+    "i cannot assist",
+    "i'm not able to",
+    "i am not able to",
+    "as an ai",
+    "<<<begin_user_content>>>",
+)
+
 # ── Regex patterns ───────────────────────────────────────────────────────
 
 # Email addresses.
@@ -71,7 +90,9 @@ def mask_pii_llm_fallback(text: str, llm_response: str) -> str:
     """Merge LLM de-identification output with the original text.
 
     If the LLM returns a non-empty, plausible result it is used; otherwise
-    the regex-pass result is kept as a fallback.
+    the regex-pass result is kept as a fallback. "Plausible" excludes
+    refusals and prompt meta-commentary (see :data:`_REFUSAL_MARKERS`) —
+    those must never be stored as if they were the redacted transcript.
 
     Args:
         text: Original text (pre-regex pass).
@@ -81,6 +102,7 @@ def mask_pii_llm_fallback(text: str, llm_response: str) -> str:
         The best-effort de-identified text.
     """
     cleaned = llm_response.strip()
-    if cleaned and len(cleaned) > len(text) * 0.5:
+    looks_like_refusal = any(marker in cleaned.lower() for marker in _REFUSAL_MARKERS)
+    if cleaned and not looks_like_refusal and len(cleaned) > len(text) * 0.5:
         return cleaned
     return strip_pii_regex(text)

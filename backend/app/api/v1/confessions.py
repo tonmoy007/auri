@@ -155,6 +155,48 @@ def _check_rate_limit(user: AnonymousUser | None, now: datetime) -> None:
         raise RateLimitError(f"rate limit exceeded; retry in {retry_after}s")
 
 
+def _safe_categorize(llm_service: LLMService, text: str) -> str | None:
+    """Categorize *text*, returning ``None`` on failure instead of blocking creation.
+
+    Categorization is a nice-to-have enrichment — a transient LLM failure
+    must never prevent the confession itself from being saved
+    (AGENTS.md §15.1 "safe fallback" pattern).
+    """
+    try:
+        return llm_service.categorize(text)
+    except Exception as exc:
+        logger.warning(
+            "confession categorization failed, continuing without it: %s", exc
+        )
+        return None
+
+
+def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
+    """Summarize *text*, returning ``None`` on failure instead of blocking creation."""
+    try:
+        return llm_service.summarize(text)
+    except Exception as exc:
+        logger.warning(
+            "confession summarization failed, continuing without it: %s", exc
+        )
+        return None
+
+
+def _safe_moderate(llm_service: LLMService, text: str) -> bool:
+    """Run the moderation check, failing **closed** (flagged) on error.
+
+    Unlike categorization/summarization, a moderation failure must not
+    silently let content through — ``LLMService.moderate`` already fails
+    closed internally, but any exception escaping it (network error, etc.)
+    is treated the same way here.
+    """
+    try:
+        return llm_service.moderate(text)
+    except Exception as exc:
+        logger.warning("moderation check failed, flagging for review: %s", exc)
+        return True
+
+
 def _upsert_anonymous_user(
     session: AsyncSession,
     user: AnonymousUser | None,
@@ -219,11 +261,23 @@ async def create_confession(
         logger.error("confession de-identification failed: %s", exc)
         raise DeidentificationError("could not de-identify confession") from exc
 
+    category = _safe_categorize(llm_service, deidentified_transcript)
+    ai_summary = _safe_summarize(llm_service, deidentified_transcript)
+    # Moderation runs on the ORIGINAL transcript, not the de-identified one:
+    # discovered via live testing (2026-07-18) that a de-identify call can
+    # itself fail (refusal, meta-commentary) and corrupt its output, which
+    # would silently blind the safety check reading it. Moderating raw text
+    # instead makes this check's reliability independent of deidentify's.
+    is_flagged = _safe_moderate(llm_service, body.transcript)
+
     confession = Confession(
         device_token_hash=body.device_token_hash,
         voice_mask=body.voice_mask,
         transcript=deidentified_transcript,
+        category=category,
+        ai_summary=ai_summary,
         pii_stripped=True,
+        status=ConfessionStatus.flagged if is_flagged else ConfessionStatus.pending,
     )
     session.add(confession)
     _upsert_anonymous_user(session, user, body.device_token_hash, now)
