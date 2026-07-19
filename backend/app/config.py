@@ -34,9 +34,13 @@ class Settings(BaseSettings):
     # ── Rate limiting ─────────────────────────────────────────────────────
     CONFESSION_RATE_LIMIT_SECONDS: int = 300  # 1 confession per 5 min (AGENTS.md §8.5)
     TTS_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/tts
+    STT_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/stt
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3
+    STT_MAX_UPLOAD_BYTES: int = (
+        25 * 1024 * 1024
+    )  # 25MB, matches OpenAI Whisper API's cap
 
     # ── LLM ──────────────────────────────────────────────────────────────
     LLM_API_KEY: str = ""

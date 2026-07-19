@@ -8,6 +8,7 @@ from app.api.v1.confessions import router as confessions_router
 from app.api.v1.departments import router as departments_router
 from app.api.v1.health import router as health_router
 from app.api.v1.moderation import router as moderation_router
+from app.api.v1.stt import router as stt_router
 from app.api.v1.tts import router as tts_router
 
 router = APIRouter(prefix="/api/v1")
@@ -16,4 +17,5 @@ router.include_router(health_router)
 router.include_router(confessions_router)
 router.include_router(departments_router)
 router.include_router(moderation_router)
+router.include_router(stt_router)
 router.include_router(tts_router)
