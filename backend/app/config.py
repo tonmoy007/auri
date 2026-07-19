@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     # ── Environment / Logging ─────────────────────────────────────────────
     ENVIRONMENT: str = "development"  # development | staging | production
     LOG_LEVEL: str = "INFO"
+    SENTRY_DSN: str = ""  # empty disables Sentry entirely
 
 
 def parse_comma_separated_list(raw: str) -> list[str]:

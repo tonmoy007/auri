@@ -8,7 +8,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from bot.config import BotSettings
-from bot.main import confess, forward, handle_confession_message, help_command, start
+from bot.main import (
+    confess,
+    error_handler,
+    forward,
+    handle_confession_message,
+    help_command,
+    start,
+)
 
 
 @pytest.mark.asyncio
@@ -115,3 +122,27 @@ async def test_handle_confession_message_ignores_missing_message(
     # Assert
     original_message.reply_text.assert_not_called()
     assert "no effective_message" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_error_handler_never_logs_raw_update_content(
+    mock_context: MagicMock, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange — regression (2026-07-20 privacy review): Update.__str__
+    # includes full message text; logging the raw object would leak
+    # confession content to application logs on any processing failure.
+    update = MagicMock()
+    update.update_id = 42
+    update.__str__ = MagicMock(  # type: ignore[method-assign]
+        return_value="Update(message=Message(text='sensitive confession text'))"
+    )
+    mock_context.error = RuntimeError("boom")
+    caplog.set_level(logging.ERROR, logger="bot.main")
+
+    # Act
+    await error_handler(update, mock_context)
+
+    # Assert
+    assert "sensitive confession text" not in caplog.text
+    assert "update_id=42" in caplog.text
+    assert "boom" in caplog.text

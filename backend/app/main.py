@@ -15,6 +15,7 @@ from app.api.v1 import router as api_v1_router
 from app.config import parse_comma_separated_list, settings
 from app.database import engine
 from app.exceptions import RateLimitError
+from app.observability import init_sentry, mount_metrics
 
 # ── Logging initialisation ───────────────────────────────────────────────
 
@@ -85,6 +86,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     """Build and return a fully-configured FastAPI application instance."""
+    init_sentry(settings.SENTRY_DSN, settings.ENVIRONMENT)
+
     app = FastAPI(
         title="Auri — Anonymous Confession Booth API",
         description=(
@@ -120,6 +123,9 @@ def create_app() -> FastAPI:
 
     # ── Routers ───────────────────────────────────────────────────────────
     app.include_router(api_v1_router)
+
+    # ── Observability ────────────────────────────────────────────────────
+    mount_metrics(app)
 
     # Health endpoint at root level.
     @app.get("/health", response_model=RootHealthResponse)
