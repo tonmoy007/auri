@@ -14,6 +14,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { colors } from '../../theme/colors';
 import { typography, spacing } from '../../theme';
 import { ConfessionBooth } from '../../components/ConfessionBooth';
+import { ShimmerText } from '../../components/LoadingStates';
 import { RecordButton } from '../../components/RecordButton';
 import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
@@ -132,12 +133,21 @@ export default function ConfessionScreen(): React.JSX.Element {
         accessibilityRole="button"
         accessibilityLabel="Change booth environment"
       >
-        <ConfessionBooth environment={environment} />
+        <ConfessionBooth
+          environment={environment}
+          isProcessing={status === 'processing'}
+        />
       </Pressable>
 
       {/* Status overlay */}
       <View style={styles.statusBar}>
-        <Text style={styles.statusText}>{statusMessages[status]}</Text>
+        {status === 'processing' ? (
+          <ShimmerText style={styles.statusText}>
+            {statusMessages[status]}
+          </ShimmerText>
+        ) : (
+          <Text style={styles.statusText}>{statusMessages[status]}</Text>
+        )}
         <Text style={styles.voiceMaskLabel}>
           Mask: {voiceMask.charAt(0).toUpperCase() + voiceMask.slice(1)}
         </Text>

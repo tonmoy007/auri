@@ -12,6 +12,8 @@ import type { Environment } from '../types';
 interface ConfessionBoothProps {
   /** Current environment preset */
   environment: Environment;
+  /** Pulses the candle faster and brighter while the confession is being processed */
+  isProcessing?: boolean;
 }
 
 /**
@@ -21,6 +23,7 @@ interface ConfessionBoothProps {
  */
 export function ConfessionBooth({
   environment,
+  isProcessing = false,
 }: ConfessionBoothProps): React.JSX.Element {
   const sceneRef = useRef<Group>(null);
 
@@ -43,7 +46,11 @@ export function ConfessionBooth({
       <ambientLight color={ambientColor} intensity={0.4} />
 
       {/* Central candle — the main light source */}
-      <Candle position={[0, -1.5, 0]} environment={environment} />
+      <Candle
+        position={[0, -1.5, 0]}
+        environment={environment}
+        isProcessing={isProcessing}
+      />
 
       {/* Entrance door — stylized arch */}
       <Door position={[0, -1.2, -2]} />

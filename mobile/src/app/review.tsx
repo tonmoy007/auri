@@ -16,6 +16,7 @@ import { Audio } from 'expo-av';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import { ShimmerText } from '../components/LoadingStates';
 import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
 import type { VoiceMask } from '../types';
@@ -231,9 +232,13 @@ export default function ReviewScreen(): React.JSX.Element {
           accessibilityRole="button"
           accessibilityLabel="Submit confession"
         >
-          <Text style={styles.forwardButtonText}>
-            {isSubmitting ? 'Submitting…' : 'Forward Anonymously'}
-          </Text>
+          {isSubmitting ? (
+            <ShimmerText style={styles.forwardButtonText}>
+              Submitting…
+            </ShimmerText>
+          ) : (
+            <Text style={styles.forwardButtonText}>Forward Anonymously</Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
