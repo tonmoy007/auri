@@ -17,6 +17,7 @@ import { ConfessionBooth } from '../../components/ConfessionBooth';
 import { RecordButton } from '../../components/RecordButton';
 import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
+import { useHaptics } from '../../hooks/useHaptics';
 import { useSettings } from '../../hooks/useSettings';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
@@ -48,6 +49,7 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [environment, setEnvironment] = useState<Environment>(defaultEnvironment);
   const [status, setStatus] = useState<ConfessionStatus>('idle');
   const recorder = useAudioRecorder();
+  const haptics = useHaptics();
 
   // Seed live selection from the persisted Settings defaults once they load.
   // Deliberately keyed on `isLoaded` alone (not the values) so this fires
@@ -61,15 +63,17 @@ export default function ConfessionScreen(): React.JSX.Element {
 
   const handleStartRecording = useCallback(async () => {
     setStatus('recording');
+    haptics.recordStart();
     try {
       await recorder.startRecording();
     } catch (_error: unknown) {
       setStatus('idle');
     }
-  }, [recorder]);
+  }, [recorder, haptics]);
 
   const handleStopRecording = useCallback(async () => {
     setStatus('processing');
+    haptics.recordStop();
     try {
       const audioUri = await recorder.stopRecording();
       if (!audioUri) {
@@ -84,9 +88,10 @@ export default function ConfessionScreen(): React.JSX.Element {
     } catch (_error: unknown) {
       setStatus('idle');
     }
-  }, [recorder, id, voiceMask]);
+  }, [recorder, id, voiceMask, haptics]);
 
   const handleToggleEnvironment = useCallback(() => {
+    haptics.selectionChanged();
     setEnvironment((prev: Environment) => {
       const environments: Environment[] = ['classic', 'forest', 'rooftop'];
       const nextIndex = (environments.indexOf(prev) + 1) % environments.length;
@@ -94,7 +99,15 @@ export default function ConfessionScreen(): React.JSX.Element {
       if (!next) return prev;
       return next;
     });
-  }, []);
+  }, [haptics]);
+
+  const handleSelectVoiceMask = useCallback(
+    (mask: VoiceMask) => {
+      haptics.selectionChanged();
+      setVoiceMask(mask);
+    },
+    [haptics],
+  );
 
   const statusMessages: Record<ConfessionStatus, string> = {
     idle: 'Speak freely',
@@ -134,7 +147,7 @@ export default function ConfessionScreen(): React.JSX.Element {
       <View style={styles.voiceMaskContainer}>
         <VoiceMaskSelector
           selected={voiceMask}
-          onSelect={setVoiceMask}
+          onSelect={handleSelectVoiceMask}
           disabled={status === 'recording' || status === 'processing'}
         />
       </View>
