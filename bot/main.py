@@ -153,8 +153,16 @@ async def handle_confession_message(
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Log all errors."""
-    logger.error("Update %s caused error %s", update, context.error)
+    """Log errors without leaking message content.
+
+    Never log the raw ``update`` object — ``Update.__str__`` includes the
+    full message text (found in the 2026-07-20 privacy review: this would
+    have dumped confession content, potentially still carrying PII, to
+    application logs at ERROR level on any processing failure). Log only
+    the non-sensitive ``update_id``.
+    """
+    update_id = getattr(update, "update_id", None)
+    logger.error("Error handling update_id=%s: %s", update_id, context.error)
 
 
 # ---------------------------------------------------------------------------
