@@ -17,12 +17,13 @@ import Constants from 'expo-constants';
 import { colors } from '../theme/colors';
 import { typography, spacing, borderRadius } from '../theme';
 import { VoiceMaskSelector } from '../components/VoiceMaskSelector';
+import { useHaptics } from '../hooks/useHaptics';
 import { useSettings } from '../hooks/useSettings';
 import {
   getDeviceIdentityReference,
   resetDeviceToken,
 } from '../lib/deviceToken';
-import type { Environment } from '../types';
+import type { Environment, VoiceMask } from '../types';
 
 const ENVIRONMENT_OPTIONS: { id: Environment; label: string }[] = [
   { id: 'classic', label: 'Classic Booth' },
@@ -42,6 +43,7 @@ export default function SettingsScreen(): React.JSX.Element {
   } = useSettings();
   const [identityRef, setIdentityRef] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const haptics = useHaptics();
 
   useEffect(() => {
     let cancelled = false;
@@ -69,6 +71,7 @@ export default function SettingsScreen(): React.JSX.Element {
             try {
               const newRef = await resetDeviceToken();
               setIdentityRef(newRef);
+              haptics.success();
             } finally {
               setIsResetting(false);
             }
@@ -76,7 +79,23 @@ export default function SettingsScreen(): React.JSX.Element {
         },
       ],
     );
-  }, []);
+  }, [haptics]);
+
+  const handleSelectVoiceMask = useCallback(
+    (mask: VoiceMask) => {
+      haptics.selectionChanged();
+      setDefaultVoiceMask(mask);
+    },
+    [haptics, setDefaultVoiceMask],
+  );
+
+  const handleSelectEnvironment = useCallback(
+    (environment: Environment) => {
+      haptics.selectionChanged();
+      setDefaultEnvironment(environment);
+    },
+    [haptics, setDefaultEnvironment],
+  );
 
   const appVersion = Constants.expoConfig?.version ?? '0.0.0';
 
@@ -105,7 +124,7 @@ export default function SettingsScreen(): React.JSX.Element {
         <Text style={styles.fieldLabel}>Default Voice Mask</Text>
         <VoiceMaskSelector
           selected={defaultVoiceMask}
-          onSelect={setDefaultVoiceMask}
+          onSelect={handleSelectVoiceMask}
         />
 
         <Text style={[styles.fieldLabel, styles.fieldLabelSpaced]}>
@@ -121,7 +140,7 @@ export default function SettingsScreen(): React.JSX.Element {
                   styles.environmentOption,
                   isSelected && styles.environmentOptionSelected,
                 ]}
-                onPress={() => setDefaultEnvironment(option.id)}
+                onPress={() => handleSelectEnvironment(option.id)}
                 accessibilityRole="radio"
                 accessibilityState={{ selected: isSelected }}
                 accessibilityLabel={`${option.label} environment`}

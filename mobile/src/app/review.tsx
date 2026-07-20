@@ -16,6 +16,7 @@ import { Audio } from 'expo-av';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
 import type { VoiceMask } from '../types';
 
@@ -47,6 +48,7 @@ export default function ReviewScreen(): React.JSX.Element {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
+  const haptics = useHaptics();
 
   // Placeholder text is shown until real transcript/summary data flows in via params.
   const transcript =
@@ -83,6 +85,7 @@ export default function ReviewScreen(): React.JSX.Element {
         throw new Error(problem?.detail ?? `Submission failed (${response.status})`);
       }
 
+      haptics.success();
       router.back();
     } catch (error: unknown) {
       setActionError(
@@ -91,9 +94,10 @@ export default function ReviewScreen(): React.JSX.Element {
     } finally {
       setIsSubmitting(false);
     }
-  }, [transcript, voiceMask]);
+  }, [transcript, voiceMask, haptics]);
 
   const handleDelete = useCallback(async () => {
+    haptics.warning();
     try {
       const deviceTokenHash = await hashDeviceToken();
       await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
@@ -107,7 +111,7 @@ export default function ReviewScreen(): React.JSX.Element {
     } finally {
       router.replace('/');
     }
-  }, [id]);
+  }, [id, haptics]);
 
   const handlePlayback = useCallback(async () => {
     if (!audioUri) {
@@ -126,6 +130,14 @@ export default function ReviewScreen(): React.JSX.Element {
       setActionError('Failed to play masked audio');
     }
   }, [audioUri]);
+
+  const handleToggleAnonymity = useCallback(
+    (value: boolean) => {
+      haptics.selectionChanged();
+      setAnonymityEnabled(value);
+    },
+    [haptics],
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -181,7 +193,7 @@ export default function ReviewScreen(): React.JSX.Element {
           </View>
           <Switch
             value={anonymityEnabled}
-            onValueChange={setAnonymityEnabled}
+            onValueChange={handleToggleAnonymity}
             trackColor={{
               false: colors.slate700,
               true: colors.emerald600,
