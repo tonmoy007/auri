@@ -12,6 +12,8 @@ interface CandleProps {
   position: [number, number, number];
   /** Current environment for color adaptation */
   environment: Environment;
+  /** Pulses faster and brighter while the confession is being processed */
+  isProcessing?: boolean;
 }
 
 /**
@@ -25,6 +27,7 @@ interface CandleProps {
 export function Candle({
   position,
   environment,
+  isProcessing = false,
 }: CandleProps): React.JSX.Element {
   const groupRef = useRef<Group>(null);
   const flameRef = useRef<Mesh>(null);
@@ -69,9 +72,15 @@ export function Candle({
       flameRef.current.scale.y = scaleY;
     }
 
-    // Point light intensity pulsation
+    // Point light intensity pulsation — faster and brighter while processing
     if (lightRef.current) {
-      const intensity = 0.6 + Math.sin(t * 4) * 0.15 + Math.cos(t * 3.7) * 0.1;
+      const pulseSpeed = isProcessing ? 4 : 1;
+      const baseIntensity = isProcessing ? 0.9 : 0.6;
+      const amplitude = isProcessing ? 0.35 : 0.15;
+      const intensity =
+        baseIntensity +
+        Math.sin(t * 4 * pulseSpeed) * amplitude +
+        Math.cos(t * 3.7 * pulseSpeed) * 0.1;
       lightRef.current.intensity = Math.max(0.3, intensity);
     }
 

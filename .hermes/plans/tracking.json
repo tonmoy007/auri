@@ -5,11 +5,11 @@
     "2": { "status": "in_progress", "tasks": { "2.1": "completed", "2.2": "completed", "2.3": "completed", "2.4": "pending", "2.5": "completed", "2.6": "in_progress" } },
     "3": { "status": "completed", "tasks": { "3.1": "completed", "3.2": "completed", "3.3": "completed", "3.4": "completed" } },
     "4": { "status": "in_progress", "tasks": { "4.1": "completed", "4.2": "pending", "4.3": "pending", "4.4": "completed", "4.5": "in_progress", "4.6": "completed", "4.7": "pending", "4.8": "pending" } },
-    "5": { "status": "in_progress", "tasks": { "5.1": "pending", "5.2": "completed", "5.3": "pending", "5.4": "pending" } },
+    "5": { "status": "in_progress", "tasks": { "5.1": "pending", "5.2": "completed", "5.3": "pending", "5.4": "completed" } },
     "6": { "status": "in_progress", "tasks": { "6.1": "completed", "6.2": "completed", "6.3": "in_progress", "6.4": "in_progress", "6.5": "completed", "6.6": "completed" } },
     "7": { "status": "pending", "tasks": { "7.1": "pending", "7.2": "pending", "7.3": "pending", "7.4": "pending", "7.5": "pending", "7.6": "pending", "7.7": "pending", "7.8": "pending" } },
     "8": { "status": "completed", "tasks": { "8.1": "completed", "8.2": "completed", "8.3": "completed", "8.4": "completed", "8.5": "completed" } }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-07-21T01:00:00+06:00"
+  "updated_at": "2026-07-22T00:30:00+06:00"
 }
