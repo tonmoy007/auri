@@ -16,6 +16,7 @@ import { typography, spacing } from '../../theme';
 import { ConfessionBooth } from '../../components/ConfessionBooth';
 import { ShimmerText } from '../../components/LoadingStates';
 import { RecordButton } from '../../components/RecordButton';
+import { ThreeCanvas } from '../../components/ThreeCanvas';
 import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useHaptics } from '../../hooks/useHaptics';
@@ -133,10 +134,12 @@ export default function ConfessionScreen(): React.JSX.Element {
         accessibilityRole="button"
         accessibilityLabel="Change booth environment"
       >
-        <ConfessionBooth
-          environment={environment}
-          isProcessing={status === 'processing'}
-        />
+        <ThreeCanvas environment={environment}>
+          <ConfessionBooth
+            environment={environment}
+            isProcessing={status === 'processing'}
+          />
+        </ThreeCanvas>
       </Pressable>
 
       {/* Status overlay */}
