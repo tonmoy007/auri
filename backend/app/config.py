@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     TELEGRAM_BOT_TOKEN: str = ""
     MODERATOR_TELEGRAM_CHAT_ID: str = ""  # flagged confessions relay here for review
     MODERATION_API_KEY: str = ""  # shared secret the bot uses to call /moderation/*
+    DELIVERY_API_KEY: str = ""  # shared secret the bot uses to call /delivery/*
 
     # ── Recipient directory ──────────────────────────────────────────────
     DEPARTMENTS: str = "HR,Engineering,Management"  # comma-separated, admin-managed

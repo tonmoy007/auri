@@ -50,6 +50,24 @@ class BotSettings(BaseSettings):
         30, description="How often to poll the backend moderation queue"
     )
 
+    # Delivery queue
+    delivery_api_key: str | None = Field(
+        None,
+        description="Shared secret for calling the backend's /api/v1/delivery/* "
+        "endpoints (must match the backend's DELIVERY_API_KEY). Delivery "
+        "polling is disabled entirely when unset.",
+    )
+    delivery_poll_seconds: int = Field(
+        30, description="How often to poll the backend delivery queue"
+    )
+    department_chat_ids: str = Field(
+        "",
+        description="Comma-separated department:chat_id pairs routing forwarded "
+        "confessions to each department's Telegram chat, e.g. "
+        "'HR:111,Engineering:222'. A department missing from this map is "
+        "logged and left undelivered (retried every poll) rather than dropped.",
+    )
+
     # Web
     web_url: str = Field(
         "https://auri.app", description="Public URL of the Auri confession booth"
@@ -72,6 +90,29 @@ class BotSettings(BaseSettings):
     @property
     def moderation_enabled(self) -> bool:
         return bool(self.moderator_chat_id and self.moderation_api_key)
+
+    @property
+    def delivery_enabled(self) -> bool:
+        return bool(self.delivery_api_key)
+
+    def department_chat_id_map(self) -> dict[str, str]:
+        """Parse ``department_chat_ids`` into a ``{department: chat_id}`` dict.
+
+        Malformed entries (missing ``:``, empty department/chat_id) are
+        skipped rather than raising — a typo in one pair must not take down
+        delivery for every other correctly-configured department.
+        """
+        result: dict[str, str] = {}
+        for pair in self.department_chat_ids.split(","):
+            pair = pair.strip()
+            if not pair or ":" not in pair:
+                continue
+            department, _, chat_id = pair.partition(":")
+            department = department.strip()
+            chat_id = chat_id.strip()
+            if department and chat_id:
+                result[department] = chat_id
+        return result
 
     @model_validator(mode="after")
     def _require_webhook_secret_in_production(self) -> "BotSettings":

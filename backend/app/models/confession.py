@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import enum
+from datetime import datetime
 
-from sqlalchemy import Boolean, Enum, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Index, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -76,4 +77,9 @@ class Confession(Base):
         String(128),
         nullable=True,
         comment="Target department for forwarded confessions (e.g. 'pastoral', 'counseling')",
+    )
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the bot confirmed Telegram delivery to the recipient department",
     )

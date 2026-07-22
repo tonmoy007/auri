@@ -68,6 +68,7 @@ def upgrade() -> None:
             "status", confession_status, nullable=False, server_default="pending"
         ),
         sa.Column("recipient_dept", sa.String(length=128), nullable=True),
+        sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("ix_confessions_id", "confessions", ["id"])
     op.create_index(
