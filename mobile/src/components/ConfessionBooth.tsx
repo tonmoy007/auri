@@ -3,7 +3,7 @@
 
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { Ring, Text } from '@react-three/drei';
+import { Ring } from '@react-three/drei';
 import { Group } from 'three';
 import { Candle } from './Candle';
 import { colors } from '../theme/colors';
@@ -14,6 +14,8 @@ interface ConfessionBoothProps {
   environment: Environment;
   /** Pulses the candle faster and brighter while the confession is being processed */
   isProcessing?: boolean;
+  /** 0 = full flame, 1 = fully extinguished — passed through to the candle */
+  extinguishProgress?: number;
 }
 
 /**
@@ -24,6 +26,7 @@ interface ConfessionBoothProps {
 export function ConfessionBooth({
   environment,
   isProcessing = false,
+  extinguishProgress = 0,
 }: ConfessionBoothProps): React.JSX.Element {
   const sceneRef = useRef<Group>(null);
 
@@ -50,6 +53,7 @@ export function ConfessionBooth({
         position={[0, -1.5, 0]}
         environment={environment}
         isProcessing={isProcessing}
+        extinguishProgress={extinguishProgress}
       />
 
       {/* Entrance door — stylized arch */}
@@ -60,18 +64,6 @@ export function ConfessionBooth({
 
       {/* Particle system for ambient dust/sparks */}
       <Particles count={60} environment={environment} />
-
-      {/* Booth label */}
-      <Text
-        position={[0, 2.5, -1.5]}
-        fontSize={0.15}
-        color={colors.slate500}
-        anchorX="center"
-        anchorY="middle"
-        letterSpacing={0.2}
-      >
-        AURI
-      </Text>
     </group>
   );
 }
