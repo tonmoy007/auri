@@ -4,7 +4,7 @@
 import React, { useRef, Suspense, useMemo } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { Environment, AdaptiveDpr, AdaptiveEvents } from '@react-three/drei';
+import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei';
 import { Color, Group } from 'three';
 import { colors } from '../theme/colors';
 import type { Environment as EnvironmentType } from '../types';
@@ -39,18 +39,6 @@ export function ThreeCanvas({
     }
   }, [environment]);
 
-  const environmentPreset = useMemo(() => {
-    switch (environment) {
-      case 'forest':
-        return 'forest' as const;
-      case 'rooftop':
-        return 'studio' as const;
-      case 'classic':
-      default:
-        return 'night' as const;
-    }
-  }, [environment]);
-
   return (
     <View style={styles.container}>
       <Suspense
@@ -71,13 +59,17 @@ export function ThreeCanvas({
             antialias: !mobileOptimized,
             alpha: true,
             powerPreference: 'high-performance',
+            // expo-gl's WebGL shim doesn't implement getShaderPrecisionFormat,
+            // which three.js's WebGLCapabilities calls to auto-detect precision
+            // for 'highp'/'mediump' — crashes with "Cannot read property
+            // 'precision' of undefined" on native. 'lowp' is the only value
+            // that skips that call entirely; visually indistinguishable for
+            // this scene's simple materials.
+            precision: 'lowp',
           }}
           dpr={mobileOptimized ? [1, 1.5] : [1, 2]}
           style={styles.canvas}
         >
-          {/* Environment lighting */}
-          <Environment preset={environmentPreset} background={false} />
-
           {/* Scene background */}
           <color attach="background" args={[sceneBackground]} />
 

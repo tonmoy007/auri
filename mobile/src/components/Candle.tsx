@@ -14,6 +14,8 @@ interface CandleProps {
   environment: Environment;
   /** Pulses faster and brighter while the confession is being processed */
   isProcessing?: boolean;
+  /** 0 = full flame, 1 = fully extinguished (flame, glow, and light fade out) */
+  extinguishProgress?: number;
 }
 
 /**
@@ -28,9 +30,12 @@ export function Candle({
   position,
   environment,
   isProcessing = false,
+  extinguishProgress = 0,
 }: CandleProps): React.JSX.Element {
+  const flameVisibility = 1 - extinguishProgress;
   const groupRef = useRef<Group>(null);
   const flameRef = useRef<Mesh>(null);
+  const flameGroupRef = useRef<Group>(null);
   const lightRef = useRef<PointLight>(null);
   const glowRef = useRef<Group>(null);
 
@@ -66,13 +71,16 @@ export function Candle({
     // Flame flicker: squash and stretch
     if (flameRef.current) {
       const flicker = Math.sin(t * 10) * 0.05 + Math.cos(t * 7.3) * 0.03;
-      const scaleY = 1 + flicker * 2;
-      const scaleX = 1 + Math.sin(t * 12) * 0.04;
-      flameRef.current.scale.x = scaleX;
-      flameRef.current.scale.y = scaleY;
+      flameRef.current.scale.y = 1 + flicker * 2;
+      flameRef.current.scale.x = 1 + Math.sin(t * 12) * 0.04;
     }
 
-    // Point light intensity pulsation — faster and brighter while processing
+    // Flame + inner core shrink to zero together as the candle extinguishes
+    if (flameGroupRef.current) {
+      flameGroupRef.current.scale.setScalar(flameVisibility);
+    }
+
+    // Point light intensity pulsation — faster/brighter while processing, fades to 0 on extinguish
     if (lightRef.current) {
       const pulseSpeed = isProcessing ? 4 : 1;
       const baseIntensity = isProcessing ? 0.9 : 0.6;
@@ -81,12 +89,13 @@ export function Candle({
         baseIntensity +
         Math.sin(t * 4 * pulseSpeed) * amplitude +
         Math.cos(t * 3.7 * pulseSpeed) * 0.1;
-      lightRef.current.intensity = Math.max(0.3, intensity);
+      lightRef.current.intensity = Math.max(0, intensity) * flameVisibility;
     }
 
-    // Glow particles rotation
+    // Glow particles rotation, fading out alongside the flame
     if (glowRef.current) {
       glowRef.current.rotation.y += 0.01;
+      glowRef.current.visible = flameVisibility > 0.02;
     }
   });
 
@@ -129,29 +138,31 @@ export function Candle({
         ))}
       </Float>
 
-      {/* Flame */}
-      <mesh ref={flameRef} position={[0, 0.25, 0]}>
-        <coneGeometry args={[0.06, 0.15, 8]} />
-        <meshStandardMaterial
-          color={flameColor}
-          emissive={flameColor}
-          emissiveIntensity={0.8}
-          transparent
-          opacity={0.9}
-        />
-      </mesh>
+      <group ref={flameGroupRef}>
+        {/* Flame */}
+        <mesh ref={flameRef} position={[0, 0.25, 0]}>
+          <coneGeometry args={[0.06, 0.15, 8]} />
+          <meshStandardMaterial
+            color={flameColor}
+            emissive={flameColor}
+            emissiveIntensity={0.8}
+            transparent
+            opacity={0.9}
+          />
+        </mesh>
 
-      {/* Inner flame (hotter core) */}
-      <mesh position={[0, 0.27, 0]} scale={[0.3, 0.4, 0.3]}>
-        <coneGeometry args={[0.06, 0.15, 8]} />
-        <meshStandardMaterial
-          color="#fef08a"
-          emissive="#fef08a"
-          emissiveIntensity={1.0}
-          transparent
-          opacity={0.6}
-        />
-      </mesh>
+        {/* Inner flame (hotter core) */}
+        <mesh position={[0, 0.27, 0]} scale={[0.3, 0.4, 0.3]}>
+          <coneGeometry args={[0.06, 0.15, 8]} />
+          <meshStandardMaterial
+            color="#fef08a"
+            emissive="#fef08a"
+            emissiveIntensity={1.0}
+            transparent
+            opacity={0.6}
+          />
+        </mesh>
+      </group>
 
       {/* Glow particles */}
       <group ref={glowRef}>

@@ -1,7 +1,9 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "lib": ["ESNext"],
+    "lib": [
+      "ESNext"
+    ],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "jsx": "react-jsx",
@@ -19,18 +21,27 @@
     "noEmit": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": [
+        "src/*"
+      ]
     },
-    "types": ["react-native", "expo-router", "node"]
+    "types": [
+      "react-native",
+      "expo-router",
+      "node"
+    ]
   },
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "App.tsx"
+    "App.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
     ".expo"
-  ]
+  ],
+  "extends": "expo/tsconfig.base"
 }

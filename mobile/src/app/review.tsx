@@ -86,8 +86,21 @@ export default function ReviewScreen(): React.JSX.Element {
         throw new Error(problem?.detail ?? `Submission failed (${response.status})`);
       }
 
-      haptics.success();
-      router.back();
+      const created = (await response.json()) as { id: string };
+
+      if (anonymityEnabled) {
+        // Fully blind — nothing more to choose, the confession stays anonymous.
+        haptics.success();
+        router.back();
+        return;
+      }
+
+      // "Someone in your team" — the confession exists (status 'pending') but
+      // still needs a department target before it can be delivered.
+      router.push({
+        pathname: '/forward/[id]',
+        params: { id: created.id },
+      });
     } catch (error: unknown) {
       setActionError(
         error instanceof Error ? error.message : 'Failed to submit confession',
@@ -95,24 +108,14 @@ export default function ReviewScreen(): React.JSX.Element {
     } finally {
       setIsSubmitting(false);
     }
-  }, [transcript, voiceMask, haptics]);
+  }, [transcript, voiceMask, anonymityEnabled, haptics]);
 
-  const handleDelete = useCallback(async () => {
-    haptics.warning();
-    try {
-      const deviceTokenHash = await hashDeviceToken();
-      await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
-        method: 'DELETE',
-        headers: { 'X-Device-Token-Hash': deviceTokenHash },
-      });
-    } catch (error: unknown) {
-      setActionError(
-        error instanceof Error ? error.message : 'Failed to delete confession',
-      );
-    } finally {
-      router.replace('/');
-    }
-  }, [id, haptics]);
+  const handleDelete = useCallback(() => {
+    router.push({
+      pathname: '/delete-confirmation',
+      params: { id },
+    });
+  }, [id]);
 
   const handlePlayback = useCallback(async () => {
     if (!audioUri) {
@@ -184,12 +187,17 @@ export default function ReviewScreen(): React.JSX.Element {
           </TouchableOpacity>
         </View>
 
-        {/* Anonymity toggle */}
+        {/* Anonymity toggle — identity is hidden either way; this picks whether
+            a department target is attached before delivery. */}
         <View style={styles.toggleRow}>
           <View style={styles.toggleInfo}>
-            <Text style={styles.toggleLabel}>Anonymous posting</Text>
+            <Text style={styles.toggleLabel}>
+              {anonymityEnabled ? 'Fully blind' : 'Someone in your team'}
+            </Text>
             <Text style={styles.toggleDescription}>
-              Your identity remains completely hidden
+              {anonymityEnabled
+                ? 'Sent with no recipient context at all'
+                : 'Choose a department to route this to next'}
             </Text>
           </View>
           <Switch
@@ -201,7 +209,7 @@ export default function ReviewScreen(): React.JSX.Element {
             }}
             thumbColor={anonymityEnabled ? colors.emerald400 : colors.slate300}
             accessibilityRole="switch"
-            accessibilityLabel="Toggle anonymity"
+            accessibilityLabel="Toggle between fully blind and team-context delivery"
           />
         </View>
       </ScrollView>
@@ -237,7 +245,9 @@ export default function ReviewScreen(): React.JSX.Element {
               Submitting…
             </ShimmerText>
           ) : (
-            <Text style={styles.forwardButtonText}>Forward Anonymously</Text>
+            <Text style={styles.forwardButtonText}>
+              {anonymityEnabled ? 'Send Anonymously' : 'Choose Department'}
+            </Text>
           )}
         </TouchableOpacity>
       </View>
