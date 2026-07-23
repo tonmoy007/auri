@@ -20,6 +20,7 @@ from telegram.ext import (
 )
 
 from bot.config import BotSettings
+from bot.delivery_handlers import poll_delivery_queue
 from bot.moderation_handlers import handle_moderation_callback, poll_moderation_queue
 
 # ---------------------------------------------------------------------------
@@ -243,6 +244,20 @@ async def post_init(application: Application) -> None:
         )
     else:
         logger.info("Moderation queue polling disabled (not configured)")
+
+    if bot_settings.delivery_enabled and application.job_queue is not None:
+        application.job_queue.run_repeating(
+            poll_delivery_queue,
+            interval=bot_settings.delivery_poll_seconds,
+            first=15,
+            name="poll_delivery_queue",
+        )
+        logger.info(
+            "Delivery queue polling enabled (every %ss)",
+            bot_settings.delivery_poll_seconds,
+        )
+    else:
+        logger.info("Delivery queue polling disabled (not configured)")
 
 
 def main() -> None:

@@ -129,3 +129,49 @@ def test_moderator_chat_id_reads_shared_backend_env_var_name(
 
     # Assert
     assert settings.moderator_chat_id == "555"
+
+
+def test_delivery_enabled_false_by_default(bot_settings: BotSettings) -> None:
+    # Assert
+    assert bot_settings.delivery_enabled is False
+
+
+def test_delivery_enabled_true_when_api_key_configured(
+    bot_settings: BotSettings,
+) -> None:
+    # Act
+    settings = bot_settings.model_copy(update={"delivery_api_key": "key"})
+
+    # Assert
+    assert settings.delivery_enabled is True
+
+
+def test_department_chat_id_map_parses_valid_pairs(bot_settings: BotSettings) -> None:
+    # Act
+    settings = bot_settings.model_copy(
+        update={"department_chat_ids": "HR:111, Engineering:222"}
+    )
+
+    # Assert
+    assert settings.department_chat_id_map() == {"HR": "111", "Engineering": "222"}
+
+
+def test_department_chat_id_map_skips_malformed_entries(
+    bot_settings: BotSettings,
+) -> None:
+    # Arrange — regression: one bad entry must not take down every other
+    # correctly-configured department.
+    settings = bot_settings.model_copy(
+        update={"department_chat_ids": "HR:111,NoColonHere,:222,Empty:"}
+    )
+
+    # Act
+    result = settings.department_chat_id_map()
+
+    # Assert
+    assert result == {"HR": "111"}
+
+
+def test_department_chat_id_map_empty_by_default(bot_settings: BotSettings) -> None:
+    # Assert
+    assert bot_settings.department_chat_id_map() == {}
