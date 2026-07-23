@@ -32,6 +32,12 @@ def upgrade() -> None:
     """Create the ``confessions`` and ``anonymous_users`` tables."""
     bind = op.get_bind()
     confession_status.create(bind, checkfirst=True)
+    # Without this, op.create_table below re-emits its own CREATE TYPE for
+    # the "status" column's enum (SQLAlchemy's default create_table DDL
+    # doesn't know the type above already created it) and fails with
+    # "type confession_status already exists" on every fresh database —
+    # confirmed by actually running this migration against real Postgres.
+    confession_status.create_type = False
 
     op.create_table(
         "confessions",
