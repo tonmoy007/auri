@@ -69,6 +69,22 @@ export function ThreeCanvas({
           }}
           dpr={mobileOptimized ? [1, 1.5] : [1, 2]}
           style={styles.canvas}
+          onCreated={(state) => {
+            // expo-gl's WebGL shim returns `undefined` (not an empty string)
+            // from getShaderInfoLog/getProgramInfoLog when there's no compile
+            // error. three.js calls `.trim()` on the result unconditionally,
+            // so every shader/program compile crashes with "Cannot read
+            // property 'trim' of undefined" on native. Patch both to fall
+            // back to '', matching what the WebGL spec actually guarantees.
+            const ctx = state.gl.getContext() as unknown as {
+              getShaderInfoLog: (shader: unknown) => string | null;
+              getProgramInfoLog: (program: unknown) => string | null;
+            };
+            const originalGetShaderInfoLog = ctx.getShaderInfoLog.bind(ctx);
+            const originalGetProgramInfoLog = ctx.getProgramInfoLog.bind(ctx);
+            ctx.getShaderInfoLog = (shader) => originalGetShaderInfoLog(shader) ?? '';
+            ctx.getProgramInfoLog = (program) => originalGetProgramInfoLog(program) ?? '';
+          }}
         >
           {/* Scene background */}
           <color attach="background" args={[sceneBackground]} />
