@@ -35,7 +35,8 @@ export default function RootLayout(): React.JSX.Element {
           name="review"
           options={{
             title: 'Review',
-            animation: 'slide_from_bottom',
+            animation: 'fade',
+            animationDuration: 350,
           }}
         />
         <Stack.Screen

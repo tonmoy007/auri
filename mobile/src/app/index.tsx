@@ -1,30 +1,48 @@
 // Auri — Home screen
 // Entry point with 'Enter Auri' button, 3D background preview, and tagline
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useRef } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { router } from 'expo-router';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ThreeCanvas } from '../components/ThreeCanvas';
+import { useHaptics } from '../hooks/useHaptics';
 
 const { width, height } = Dimensions.get('window');
+
+/** Booth entry fade-to-black duration, ms — long enough to mask the 3D scene mount cost. */
+const ENTRY_FADE_MS = 350;
 
 /**
  * Home screen — landing page for the confession booth experience.
  * Displays a 3D atmospheric background with a prominent call-to-action.
  */
 export default function HomeScreen(): React.JSX.Element {
+  const haptics = useHaptics();
+  const fadeToBlack = useRef(new Animated.Value(0)).current;
+
   const handleEnterAuri = useCallback(() => {
-    const sessionId = generateSessionId();
-    router.push(`/confession/${sessionId}`);
-  }, []);
+    haptics.selectionChanged();
+    Animated.timing(fadeToBlack, {
+      toValue: 1,
+      duration: ENTRY_FADE_MS,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (!finished) return;
+      const sessionId = generateSessionId();
+      router.push(`/confession/${sessionId}`);
+      // Reset for the next visit to this screen (e.g. after going back).
+      fadeToBlack.setValue(0);
+    });
+  }, [fadeToBlack, haptics]);
 
   const handleOpenSettings = useCallback(() => {
     router.push('/settings');
@@ -71,6 +89,12 @@ export default function HomeScreen(): React.JSX.Element {
           Your voice is anonymized. No identity is stored.
         </Text>
       </View>
+
+      {/* Booth entry transition — fades to black before the booth screen mounts */}
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.entryOverlay, { opacity: fadeToBlack }]}
+      />
     </View>
   );
 }
@@ -165,5 +189,10 @@ const styles = StyleSheet.create({
     color: colors.slate500,
     textAlign: 'center',
     maxWidth: width * 0.7,
+  },
+  entryOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.boothDark,
+    zIndex: 3,
   },
 });
