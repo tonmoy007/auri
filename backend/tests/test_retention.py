@@ -7,18 +7,17 @@ database (AGENTS.md §16.3).
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from typing import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from app.models.base import Base
 from app.models.confession import Confession, ConfessionStatus
 from app.services.retention import purge_stale_confessions
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 NOW = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
 RETENTION_HOURS = 24

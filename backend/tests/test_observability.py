@@ -6,15 +6,14 @@ endpoint and middleware run for real against the actual app.
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
 from app.main import app
 from app.observability import init_sentry
+from httpx import ASGITransport, AsyncClient
 
 
 def test_init_sentry_is_a_noop_when_dsn_is_empty() -> None:

@@ -67,7 +67,7 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             response.raise_for_status()
             queue = response.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.error("failed to poll delivery queue: %s", exc)
         return
 
@@ -93,7 +93,7 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
                 text=_format_delivery_message(item),
                 parse_mode="Markdown",
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error(
                 "failed to deliver confession %s to department %r: %s",
                 confession_id,
@@ -111,7 +111,7 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
                     headers=_delivery_headers(settings),
                 )
                 mark_response.raise_for_status()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error(
                 "delivered confession %s to Telegram but failed to mark it "
                 "delivered on the backend — it will be re-sent next poll: %s",

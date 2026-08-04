@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Callable
 
 from fastapi import APIRouter, Depends, Header, status
 from fastapi.responses import FileResponse

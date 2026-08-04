@@ -5,8 +5,8 @@ from app.models.confession import Confession, ConfessionStatus
 from app.models.user import AnonymousUser
 
 __all__ = [
+    "AnonymousUser",
     "Base",
     "Confession",
     "ConfessionStatus",
-    "AnonymousUser",
 ]

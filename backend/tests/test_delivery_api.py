@@ -7,19 +7,18 @@ delivered_at transition run for real.
 
 from __future__ import annotations
 
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 from unittest.mock import patch
 
+import app.api.v1.delivery as delivery_module
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
-import app.api.v1.delivery as delivery_module
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 DEVICE_HASH = "a" * 32
 DELIVERY_KEY = "test-delivery-secret"

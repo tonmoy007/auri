@@ -1,0 +1,14 @@
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection pattern requires calling `Depends`/`Query`/etc.
+# in argument defaults — that's how the framework resolves them per-request,
+# not a mutable-default bug. Without this, ruff's B008 flags every route
+# handler in backend/app/api/.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Body",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Security",
+]

@@ -85,6 +85,7 @@ class VoiceModulator:
                 capture_output=True,
                 text=True,
                 timeout=120,
+                check=False,
             )
         except FileNotFoundError as exc:
             raise RuntimeError(

@@ -9,16 +9,15 @@ store (AGENTS.md §16.3).
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import AsyncIterator
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
 from app.api.v1.stt import _last_transcription_at, get_clock
 from app.main import app
+from httpx import ASGITransport, AsyncClient
 
 FROZEN_NOW = datetime(2026, 7, 20, 12, 0, 0, tzinfo=timezone.utc)
 DEVICE_HASH = "a" * 32

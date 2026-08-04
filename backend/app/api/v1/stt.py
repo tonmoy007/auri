@@ -11,9 +11,9 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, status
 from pydantic import BaseModel

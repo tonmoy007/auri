@@ -9,7 +9,6 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-
 from app.exceptions import CategorizationError, SummarizationError
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
@@ -63,9 +62,11 @@ def test_categorize_raises_categorization_error_on_empty_llm_response() -> None:
     service = LLMService(provider="openai")
 
     # Act / Assert
-    with patch.object(LLMService, "_call_openai", return_value=""):
-        with pytest.raises(CategorizationError):
-            service.categorize("some confession text")
+    with (
+        patch.object(LLMService, "_call_openai", return_value=""),
+        pytest.raises(CategorizationError),
+    ):
+        service.categorize("some confession text")
 
 
 def test_summarize_returns_llm_response_when_non_empty() -> None:
@@ -86,9 +87,11 @@ def test_summarize_raises_summarization_error_on_empty_llm_response() -> None:
     service = LLMService(provider="openai")
 
     # Act / Assert
-    with patch.object(LLMService, "_call_openai", return_value="   "):
-        with pytest.raises(SummarizationError):
-            service.summarize("some confession text")
+    with (
+        patch.object(LLMService, "_call_openai", return_value="   "),
+        pytest.raises(SummarizationError),
+    ):
+        service.summarize("some confession text")
 
 
 def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
