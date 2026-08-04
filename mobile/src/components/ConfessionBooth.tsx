@@ -18,6 +18,8 @@ interface ConfessionBoothProps {
   extinguishProgress?: number;
   /** Whether the booth door is swung open. Defaults open for screens that don't drive entry/exit. */
   doorOpen?: boolean;
+  /** Live mic input level, normalized 0-1 — pulses the ambient rings while recording. */
+  amplitude?: number;
 }
 
 /**
@@ -30,6 +32,7 @@ export function ConfessionBooth({
   isProcessing = false,
   extinguishProgress = 0,
   doorOpen = true,
+  amplitude = 0,
 }: ConfessionBoothProps): React.JSX.Element {
   const sceneRef = useRef<Group>(null);
 
@@ -62,8 +65,8 @@ export function ConfessionBooth({
       {/* Entrance door — stylized arch */}
       <Door position={[0, -1.2, -2]} open={doorOpen} />
 
-      {/* Floating atmospheric rings */}
-      <FloatingRings />
+      {/* Floating atmospheric rings — pulse with mic amplitude while recording */}
+      <FloatingRings amplitude={amplitude} />
 
       {/* Particle system for ambient dust/sparks */}
       <Particles count={60} environment={environment} />
@@ -127,18 +130,45 @@ function Door({
   );
 }
 
+/** How quickly the rings' pulse chases the (choppy, ~100ms-sampled) amplitude signal — higher = snappier. */
+const RING_SMOOTHING_SPEED = 6;
+
 /**
- * Floating, rotating rings for visual atmosphere.
+ * Voice-responsive rings for visual atmosphere.
+ * Three concentric rings breathe gently at idle and pulse outward with mic
+ * amplitude while recording — the smoothing lerp keeps the pulse fluid
+ * instead of stepping with each ~100ms metering sample.
  */
-function FloatingRings(): React.JSX.Element {
+function FloatingRings({ amplitude }: { amplitude: number }): React.JSX.Element {
+  const ring1Ref = useRef<Mesh>(null);
+  const ring2Ref = useRef<Mesh>(null);
+  const ring3Ref = useRef<Mesh>(null);
+  const smoothedAmplitude = useRef(0);
+
+  useFrame((state, delta) => {
+    smoothedAmplitude.current = MathUtils.lerp(
+      smoothedAmplitude.current,
+      amplitude,
+      Math.min(delta * RING_SMOOTHING_SPEED, 1),
+    );
+    const pulse = smoothedAmplitude.current;
+    const elapsed = state.clock.elapsedTime;
+
+    ring1Ref.current?.scale.setScalar(1.5 + pulse * 0.6);
+    ring2Ref.current?.scale.setScalar(1.85 + pulse * 0.9 + Math.sin(elapsed * 1.3) * 0.04);
+    ring3Ref.current?.scale.setScalar(2.2 + pulse * 1.3 + Math.sin(elapsed * 1.7 + 1) * 0.05);
+  });
+
   return (
     <group position={[0, 0.5, -1]}>
-      <Ring
-        args={[0.8, 1, 32]}
-        position={[0, 0, 0]}
-        scale={[1.5, 1.5, 1.5]}
-      >
+      <Ring ref={ring1Ref} args={[0.8, 1, 32]} scale={[1.5, 1.5, 1.5]}>
         <meshBasicMaterial color={colors.candleGlow} transparent opacity={0.4} />
+      </Ring>
+      <Ring ref={ring2Ref} args={[0.8, 0.93, 32]} scale={[1.85, 1.85, 1.85]}>
+        <meshBasicMaterial color={colors.candleGlow} transparent opacity={0.25} />
+      </Ring>
+      <Ring ref={ring3Ref} args={[0.8, 0.88, 32]} scale={[2.2, 2.2, 2.2]}>
+        <meshBasicMaterial color={colors.candleGlow} transparent opacity={0.15} />
       </Ring>
     </group>
   );

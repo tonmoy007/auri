@@ -154,6 +154,7 @@ export default function ConfessionScreen(): React.JSX.Element {
             environment={environment}
             isProcessing={status === 'processing'}
             doorOpen={doorOpen}
+            amplitude={status === 'recording' ? recorder.amplitude : 0}
           />
         </ThreeCanvas>
       </Pressable>
