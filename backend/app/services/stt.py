@@ -78,7 +78,7 @@ class WhisperTranscriber:
                 )
                 return self._api_fallback(audio_path)
             return text
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.warning("Local Whisper failed (%s); trying API fallback.", exc)
             return self._api_fallback(audio_path)
 
@@ -102,6 +102,6 @@ class WhisperTranscriber:
                     file=audio_file,
                 )
             return response.text.strip()
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error("OpenAI Whisper API fallback also failed: %s", exc)
             return ""

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timezone
-from typing import Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from sqlalchemy import select

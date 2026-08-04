@@ -68,7 +68,7 @@ async def poll_moderation_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             response.raise_for_status()
             queue = response.json()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.error("failed to poll moderation queue: %s", exc)
         return
 
@@ -96,7 +96,7 @@ async def poll_moderation_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
                 parse_mode="Markdown",
                 reply_markup=keyboard,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error(
                 "failed to notify moderator of confession %s: %s", confession_id, exc
             )
@@ -134,7 +134,7 @@ async def handle_moderation_callback(
                 f"/api/v1/moderation/{confession_id}/{action}",
                 headers=_moderation_headers(settings),
             )
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.error("moderation %s call failed for %s: %s", action, confession_id, exc)
         await query.edit_message_text(
             f"⚠️ Could not reach the backend to {action} this confession. Try again."

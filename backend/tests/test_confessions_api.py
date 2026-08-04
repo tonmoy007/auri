@@ -15,22 +15,21 @@ without touching the production clock (which correctly uses
 from __future__ import annotations
 
 import uuid
+from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
-from typing import AsyncIterator
 from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
-
 from app.api.v1.confessions import get_clock
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
-FROZEN_NOW = datetime(2026, 7, 17, 12, 0, 0)
+FROZEN_NOW = datetime(2026, 7, 17, 12, 0, 0)  # noqa: DTZ001 — deliberately naive, see module docstring
 DEVICE_HASH = "a" * 32
 OTHER_DEVICE_HASH = "b" * 32
 DEIDENTIFIED_TEXT = "raw with [EMAIL]"

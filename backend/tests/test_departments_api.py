@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import importlib
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
 from app.main import app
+from httpx import ASGITransport, AsyncClient
 
 
 @pytest_asyncio.fixture
@@ -35,8 +34,8 @@ async def test_list_departments_reflects_configured_setting(
 ) -> None:
     # Arrange
     monkeypatch.setenv("DEPARTMENTS", "Legal, Finance ,, Security")
-    import app.config as config_module
     import app.api.v1.departments as departments_module
+    import app.config as config_module
 
     importlib.reload(config_module)
     monkeypatch.setattr(departments_module, "settings", config_module.settings)

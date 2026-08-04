@@ -213,7 +213,7 @@ class LLMService:
                 temperature=0.2,
             )
             return response.choices[0].message.content or ""
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error("OpenAI API call failed: %s", exc)
             return ""
 
@@ -256,6 +256,6 @@ class LLMService:
             resp.raise_for_status()
             data = resp.json()
             return data["content"][0]["text"]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
             logger.error("Claude API call failed: %s", exc)
             return ""

@@ -115,7 +115,7 @@ class BotSettings(BaseSettings):
         return result
 
     @model_validator(mode="after")
-    def _require_webhook_secret_in_production(self) -> "BotSettings":
+    def _require_webhook_secret_in_production(self) -> BotSettings:
         if self.is_production and not self.webhook_secret:
             raise ValueError(
                 "webhook_secret (env WEBHOOK_SECRET) is required when environment=production"
@@ -123,7 +123,7 @@ class BotSettings(BaseSettings):
         return self
 
     @model_validator(mode="after")
-    def _require_both_moderation_settings_together(self) -> "BotSettings":
+    def _require_both_moderation_settings_together(self) -> BotSettings:
         if bool(self.moderator_chat_id) != bool(self.moderation_api_key):
             raise ValueError(
                 "moderator_chat_id and moderation_api_key must be set together "

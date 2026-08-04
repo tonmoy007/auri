@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Callable
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -164,7 +164,7 @@ def _safe_categorize(llm_service: LLMService, text: str) -> str | None:
     """
     try:
         return llm_service.categorize(text)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.warning(
             "confession categorization failed, continuing without it: %s", exc
         )
@@ -175,7 +175,7 @@ def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
     """Summarize *text*, returning ``None`` on failure instead of blocking creation."""
     try:
         return llm_service.summarize(text)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.warning(
             "confession summarization failed, continuing without it: %s", exc
         )
@@ -192,7 +192,7 @@ def _safe_moderate(llm_service: LLMService, text: str) -> bool:
     """
     try:
         return llm_service.moderate(text)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.warning("moderation check failed, flagging for review: %s", exc)
         return True
 

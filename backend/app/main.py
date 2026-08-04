@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
@@ -66,7 +66,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
             logger.info("Database tables ensured (development auto-create)")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — dev-only auto-create table boundary; DB not being ready yet shouldn't crash app startup
             logger.warning(
                 "Could not create database tables (DB may not be ready)", error=str(exc)
             )

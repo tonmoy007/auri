@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -53,6 +53,6 @@ async def check_db_connected() -> bool:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
         return True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around the DB connectivity check; any failure here (driver, network, auth) should degrade to "unhealthy", not crash the caller
         logger.error("Database connectivity check failed: %s", exc)
         return False
