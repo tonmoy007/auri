@@ -25,6 +25,11 @@ import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
 const { height } = Dimensions.get('window');
 
+/** Delay before the door starts swinging open on entry, ms — lets the fade-in overlay clear first. */
+const DOOR_OPEN_DELAY_MS = 150;
+/** How long the door close animation needs before it's safe to navigate away, ms. */
+const DOOR_CLOSE_MS = 550;
+
 /**
  * Extract a single string param from expo-router's raw params object.
  *
@@ -50,8 +55,15 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [voiceMask, setVoiceMask] = useState<VoiceMask>(defaultVoiceMask);
   const [environment, setEnvironment] = useState<Environment>(defaultEnvironment);
   const [status, setStatus] = useState<ConfessionStatus>('idle');
+  const [doorOpen, setDoorOpen] = useState(false);
   const recorder = useAudioRecorder();
   const haptics = useHaptics();
+
+  // Swing the door open shortly after mounting — the entry animation.
+  useEffect(() => {
+    const timer = setTimeout(() => setDoorOpen(true), DOOR_OPEN_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   // Seed live selection from the persisted Settings defaults once they load.
   // Deliberately keyed on `isLoaded` alone (not the values) so this fires
@@ -83,6 +95,9 @@ export default function ConfessionScreen(): React.JSX.Element {
         return;
       }
       setStatus('done');
+      // Swing the door shut before leaving the booth — the exit animation.
+      setDoorOpen(false);
+      await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
       router.push({
         pathname: '/review',
         params: { id, audioUri, voiceMask },
@@ -138,6 +153,7 @@ export default function ConfessionScreen(): React.JSX.Element {
           <ConfessionBooth
             environment={environment}
             isProcessing={status === 'processing'}
+            doorOpen={doorOpen}
           />
         </ThreeCanvas>
       </Pressable>
