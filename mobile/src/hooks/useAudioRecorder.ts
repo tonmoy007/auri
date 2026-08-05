@@ -7,6 +7,21 @@ import * as FileSystem from 'expo-file-system';
 import type { AudioRecordingState } from '../types';
 import { AUDIO_CONFIG, MAX_RECORDING_DURATION_MS } from '../config/api';
 
+/** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
+const METERING_FLOOR_DB = -60;
+/** How often expo-av should push metering updates while recording, ms — fast enough for a smooth ring pulse. */
+const METERING_UPDATE_INTERVAL_MS = 100;
+
+/**
+ * Normalize a metering reading (dBFS, roughly -160 quiet to 0 loud) to 0-1.
+ * Clamped to `METERING_FLOOR_DB` so normal speech uses the full range instead
+ * of being crushed into the top sliver of -160..0.
+ */
+function normalizeMetering(db: number): number {
+  const clamped = Math.max(db, METERING_FLOOR_DB);
+  return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
+}
+
 /**
  * Custom hook for audio recording functionality.
  * Manages the full recording lifecycle:
@@ -23,6 +38,7 @@ export function useAudioRecorder() {
     durationMs: 0,
     hasPermission: null,
     error: null,
+    amplitude: 0,
   });
 
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -97,6 +113,7 @@ export function useAudioRecorder() {
 
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
+        isMeteringEnabled: true,
         android: {
           extension: '.aac',
           outputFormat: Audio.AndroidOutputFormat.AAC_ADTS,
@@ -124,6 +141,16 @@ export function useAudioRecorder() {
 
       recordingRef.current = recording;
 
+      // Live mic amplitude, for the voice-responsive ring visualization.
+      recording.setProgressUpdateInterval(METERING_UPDATE_INTERVAL_MS);
+      recording.setOnRecordingStatusUpdate((recordingStatus) => {
+        if (typeof recordingStatus.metering !== 'number') return;
+        setState((prev) => ({
+          ...prev,
+          amplitude: normalizeMetering(recordingStatus.metering as number),
+        }));
+      });
+
       // Track duration
       const startTime = Date.now();
       durationIntervalRef.current = setInterval(() => {
@@ -143,6 +170,7 @@ export function useAudioRecorder() {
         audioUri: null,
         error: null,
         durationMs: 0,
+        amplitude: 0,
       }));
     } catch (_error: unknown) {
       setState((prev) => ({
@@ -189,6 +217,7 @@ export function useAudioRecorder() {
         isRecording: false,
         audioUri: uri,
         error: null,
+        amplitude: 0,
       }));
 
       return uri;
@@ -212,6 +241,7 @@ export function useAudioRecorder() {
       durationMs: 0,
       hasPermission: state.hasPermission,
       error: null,
+      amplitude: 0,
     });
   }, [state.hasPermission]);
 

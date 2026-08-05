@@ -130,6 +130,8 @@ export interface AudioRecordingState {
   hasPermission: boolean | null;
   /** Error message if recording failed */
   error: string | null;
+  /** Current mic input level, normalized 0 (silent) to 1 (loud). 0 when not recording or metering is unavailable (web). */
+  amplitude: number;
 }
 
 /**
