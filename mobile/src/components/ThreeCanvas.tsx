@@ -1,12 +1,13 @@
 // Auri — Reusable React Three Fiber Canvas wrapper
 // Provides environment controls and consistent configuration for all 3D scenes
 
-import React, { useRef, Suspense, useMemo } from 'react';
+import React, { Suspense, useMemo } from 'react';
 import { View, StyleSheet, Text } from 'react-native';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas } from '@react-three/fiber';
 import { AdaptiveDpr, AdaptiveEvents } from '@react-three/drei';
-import { Color, Group } from 'three';
+import { Color } from 'three';
 import { colors } from '../theme/colors';
+import { BoothCamera } from './ThreeBooth/BoothCamera';
 import type { Environment as EnvironmentType } from '../types';
 
 interface ThreeCanvasProps {
@@ -14,6 +15,8 @@ interface ThreeCanvasProps {
   environment?: EnvironmentType;
   /** Whether to enable performance optimizations for mobile */
   mobileOptimized?: boolean;
+  /** Dollies the camera in toward the booth while true. */
+  isRecording?: boolean;
   /** Children to render inside the canvas */
   children?: React.ReactNode;
 }
@@ -25,6 +28,7 @@ interface ThreeCanvasProps {
 export function ThreeCanvas({
   environment = 'classic',
   mobileOptimized = true,
+  isRecording = false,
   children,
 }: ThreeCanvasProps): React.JSX.Element {
   const sceneBackground = useMemo(() => {
@@ -101,35 +105,12 @@ export function ThreeCanvas({
           {/* Scene content */}
           {children}
 
-          {/* Auto-rotate camera for atmospheric effect */}
-          <CameraRotator />
+          {/* Booth camera rig — idle drift, dollies in while recording */}
+          <BoothCamera isRecording={isRecording} />
         </Canvas>
       </Suspense>
     </View>
   );
-}
-
-/**
- * Subtle camera rotation for ambient atmosphere.
- * Only rotates slightly to give a sense of depth.
- */
-function CameraRotator(): null {
-  const groupRef = useRef<Group>(null);
-
-  useFrame((_state, delta) => {
-    if (groupRef.current) {
-      groupRef.current.rotation.y += delta * 0.05;
-    }
-  });
-
-  useFrame((state) => {
-    const t = state.clock.elapsedTime;
-    state.camera.position.x = Math.sin(t * 0.05) * 0.3;
-    state.camera.position.y = Math.sin(t * 0.03) * 0.1 + 0.5;
-    state.camera.lookAt(0, 0, 0);
-  });
-
-  return null;
 }
 
 const styles = StyleSheet.create({
