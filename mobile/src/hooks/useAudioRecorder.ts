@@ -5,12 +5,94 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import type { AudioRecordingState } from '../types';
-import { AUDIO_CONFIG, MAX_RECORDING_DURATION_MS } from '../config/api';
+import {
+  API_BASE_URL,
+  AUDIO_CONFIG,
+  ENDPOINTS,
+  MAX_RECORDING_DURATION_MS,
+  REQUEST_TIMEOUT_MS,
+} from '../config/api';
+import { hashDeviceToken } from '../lib/deviceToken';
 
 /** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
 const METERING_FLOOR_DB = -60;
 /** How often expo-av should push metering updates while recording, ms — fast enough for a smooth ring pulse. */
 const METERING_UPDATE_INTERVAL_MS = 100;
+/** Max upload attempts for transcribing a recording — 1 initial try + this many retries. */
+const MAX_UPLOAD_RETRIES = 2;
+/** Base delay before an upload retry, ms — doubles each attempt (500ms, 1000ms, ...). */
+const UPLOAD_RETRY_BASE_DELAY_MS = 500;
+
+/** HTTP error from the STT upload, carrying the status code so retry logic can tell client vs server errors apart. */
+class UploadHttpError extends Error {
+  constructor(
+    readonly httpStatus: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'UploadHttpError';
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Upload a recorded audio file to the STT endpoint and resolve with its transcript.
+ * Uses XMLHttpRequest instead of fetch — fetch's RN implementation has no
+ * upload-progress event, and this is the only way to drive a progress indicator.
+ */
+function uploadForTranscription(
+  uri: string,
+  deviceTokenHash: string,
+  onProgress: (fraction: number) => void,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.timeout = REQUEST_TIMEOUT_MS;
+    xhr.open('POST', `${API_BASE_URL}${ENDPOINTS.stt}`);
+    xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
+
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const body = JSON.parse(xhr.responseText) as { transcript: string };
+          resolve(body.transcript);
+        } catch {
+          reject(new UploadHttpError(xhr.status, 'Malformed transcription response'));
+        }
+        return;
+      }
+
+      let detail: string | undefined;
+      try {
+        detail = (JSON.parse(xhr.responseText) as { detail?: string }).detail;
+      } catch {
+        detail = undefined;
+      }
+      reject(new UploadHttpError(xhr.status, detail ?? `Upload failed (${xhr.status})`));
+    };
+
+    xhr.onerror = () => reject(new UploadHttpError(0, 'Network error during upload'));
+    xhr.ontimeout = () => reject(new UploadHttpError(0, 'Upload timed out'));
+
+    const formData = new FormData();
+    formData.append('audio', {
+      uri,
+      name: 'confession.aac',
+      type: 'audio/aac',
+    } as unknown as Blob);
+
+    xhr.send(formData);
+  });
+}
 
 /**
  * Normalize a metering reading (dBFS, roughly -160 quiet to 0 loud) to 0-1.
@@ -39,6 +121,9 @@ export function useAudioRecorder() {
     hasPermission: null,
     error: null,
     amplitude: 0,
+    isUploading: false,
+    uploadProgress: 0,
+    uploadError: null,
   });
 
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -232,6 +317,50 @@ export function useAudioRecorder() {
   }, []);
 
   /**
+   * Upload a recorded audio file for transcription, retrying transient
+   * failures with exponential backoff.
+   *
+   * Retries on network errors, timeouts, and 5xx responses (up to
+   * `MAX_UPLOAD_RETRIES` extra attempts); a 4xx response means the request
+   * itself is bad (empty/oversized audio, rate limit) and won't succeed on
+   * retry, so it fails immediately. Returns `null` — never throws — so
+   * callers can fall back to a placeholder transcript instead of losing the
+   * recording the user just made.
+   */
+  const transcribeRecording = useCallback(async (uri: string): Promise<string | null> => {
+    setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
+
+    const deviceTokenHash = await hashDeviceToken();
+    let lastError: unknown = null;
+
+    for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
+      try {
+        const transcript = await uploadForTranscription(uri, deviceTokenHash, (fraction) => {
+          setState((prev) => ({ ...prev, uploadProgress: fraction }));
+        });
+        setState((prev) => ({
+          ...prev,
+          isUploading: false,
+          uploadProgress: 1,
+          uploadError: null,
+        }));
+        return transcript;
+      } catch (error: unknown) {
+        lastError = error;
+        const isClientError = error instanceof UploadHttpError && error.httpStatus >= 400;
+        if (isClientError || attempt === MAX_UPLOAD_RETRIES) {
+          break;
+        }
+        await sleep(UPLOAD_RETRY_BASE_DELAY_MS * 2 ** attempt);
+      }
+    }
+
+    const message = lastError instanceof Error ? lastError.message : 'Failed to upload recording';
+    setState((prev) => ({ ...prev, isUploading: false, uploadError: message }));
+    return null;
+  }, []);
+
+  /**
    * Reset the recorder state to idle.
    */
   const reset = useCallback(() => {
@@ -242,6 +371,9 @@ export function useAudioRecorder() {
       hasPermission: state.hasPermission,
       error: null,
       amplitude: 0,
+      isUploading: false,
+      uploadProgress: 0,
+      uploadError: null,
     });
   }, [state.hasPermission]);
 
@@ -249,6 +381,7 @@ export function useAudioRecorder() {
     ...state,
     startRecording,
     stopRecording,
+    transcribeRecording,
     reset,
   };
 }

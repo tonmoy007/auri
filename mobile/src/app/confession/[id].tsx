@@ -94,13 +94,18 @@ export default function ConfessionScreen(): React.JSX.Element {
         setStatus('idle');
         return;
       }
+      // Transcribe while still "processing" — review.tsx falls back to a
+      // placeholder transcript if this comes back null after retries.
+      const transcript = await recorder.transcribeRecording(audioUri);
       setStatus('done');
       // Swing the door shut before leaving the booth — the exit animation.
       setDoorOpen(false);
       await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
       router.push({
         pathname: '/review',
-        params: { id, audioUri, voiceMask },
+        params: transcript
+          ? { id, audioUri, voiceMask, transcript }
+          : { id, audioUri, voiceMask },
       });
     } catch (_error: unknown) {
       setStatus('idle');
@@ -163,7 +168,9 @@ export default function ConfessionScreen(): React.JSX.Element {
       <View style={styles.statusBar}>
         {status === 'processing' ? (
           <ShimmerText style={styles.statusText}>
-            {statusMessages[status]}
+            {recorder.isUploading
+              ? `Anonymizing… ${Math.round(recorder.uploadProgress * 100)}%`
+              : statusMessages[status]}
           </ShimmerText>
         ) : (
           <Text style={styles.statusText}>{statusMessages[status]}</Text>

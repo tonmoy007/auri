@@ -132,6 +132,12 @@ export interface AudioRecordingState {
   error: string | null;
   /** Current mic input level, normalized 0 (silent) to 1 (loud). 0 when not recording or metering is unavailable (web). */
   amplitude: number;
+  /** Whether the recorded audio is currently being uploaded for transcription. */
+  isUploading: boolean;
+  /** Upload progress, normalized 0-1. Resets to 0 at the start of each upload attempt. */
+  uploadProgress: number;
+  /** Error message if the upload/transcription failed after all retries. */
+  uploadError: string | null;
 }
 
 /**
