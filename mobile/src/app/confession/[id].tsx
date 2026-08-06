@@ -149,7 +149,7 @@ export default function ConfessionScreen(): React.JSX.Element {
         accessibilityRole="button"
         accessibilityLabel="Change booth environment"
       >
-        <ThreeCanvas environment={environment}>
+        <ThreeCanvas environment={environment} isRecording={status === 'recording'}>
           <ConfessionBooth
             environment={environment}
             isProcessing={status === 'processing'}
