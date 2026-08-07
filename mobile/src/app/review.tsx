@@ -8,7 +8,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Switch,
   SafeAreaView,
 } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
@@ -45,7 +44,8 @@ export default function ReviewScreen(): React.JSX.Element {
   const audioUri = readStringParam(rawParams, 'audioUri');
   const transcriptParam = readStringParam(rawParams, 'transcript');
   const voiceMaskParam = readStringParam(rawParams, 'voiceMask') as VoiceMask | undefined;
-  const [anonymityEnabled, setAnonymityEnabled] = useState(true);
+  const anonymityParam = readStringParam(rawParams, 'anonymityEnabled');
+  const [anonymityEnabled, setAnonymityEnabled] = useState(anonymityParam !== '0');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
@@ -63,6 +63,15 @@ export default function ReviewScreen(): React.JSX.Element {
       void soundRef.current?.unloadAsync();
     };
   }, []);
+
+  // The Anonymity screen returns here via router.replace with an updated
+  // param rather than a fresh mount, so the choice made there needs to be
+  // synced into local state explicitly.
+  useEffect(() => {
+    if (anonymityParam !== undefined) {
+      setAnonymityEnabled(anonymityParam !== '0');
+    }
+  }, [anonymityParam]);
 
   const handleForward = useCallback(async () => {
     setIsSubmitting(true);
@@ -135,13 +144,19 @@ export default function ReviewScreen(): React.JSX.Element {
     }
   }, [audioUri]);
 
-  const handleToggleAnonymity = useCallback(
-    (value: boolean) => {
-      haptics.selectionChanged();
-      setAnonymityEnabled(value);
-    },
-    [haptics],
-  );
+  const handleOpenAnonymityChoice = useCallback(() => {
+    haptics.selectionChanged();
+    router.push({
+      pathname: '/anonymity',
+      params: {
+        id,
+        ...(audioUri ? { audioUri } : {}),
+        ...(transcriptParam ? { transcript: transcriptParam } : {}),
+        voiceMask,
+        anonymityEnabled: anonymityEnabled ? '1' : '0',
+      },
+    });
+  }, [id, audioUri, transcriptParam, voiceMask, anonymityEnabled, haptics]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -187,9 +202,22 @@ export default function ReviewScreen(): React.JSX.Element {
           </TouchableOpacity>
         </View>
 
-        {/* Anonymity toggle — identity is hidden either way; this picks whether
-            a department target is attached before delivery. */}
-        <View style={styles.toggleRow}>
+        {/* Anonymity choice — identity is hidden either way; this picks whether
+            a department target is attached before delivery. Opens a dedicated
+            screen with a visual preview of both modes. */}
+        <TouchableOpacity
+          style={styles.toggleRow}
+          onPress={handleOpenAnonymityChoice}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Change anonymity choice"
+        >
+          <View
+            style={[
+              styles.toggleDot,
+              { backgroundColor: anonymityEnabled ? colors.emerald400 : colors.candleGlow },
+            ]}
+          />
           <View style={styles.toggleInfo}>
             <Text style={styles.toggleLabel}>
               {anonymityEnabled ? 'Fully blind' : 'Someone in your team'}
@@ -200,18 +228,8 @@ export default function ReviewScreen(): React.JSX.Element {
                 : 'Choose a department to route this to next'}
             </Text>
           </View>
-          <Switch
-            value={anonymityEnabled}
-            onValueChange={handleToggleAnonymity}
-            trackColor={{
-              false: colors.slate700,
-              true: colors.emerald600,
-            }}
-            thumbColor={anonymityEnabled ? colors.emerald400 : colors.slate300}
-            accessibilityRole="switch"
-            accessibilityLabel="Toggle between fully blind and team-context delivery"
-          />
-        </View>
+          <Text style={styles.toggleChevron}>Change ›</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       {actionError !== null && (
@@ -323,9 +341,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.slate700,
   },
+  toggleDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: spacing.md,
+  },
   toggleInfo: {
     flex: 1,
     marginRight: spacing.md,
+  },
+  toggleChevron: {
+    fontSize: typography.fontSize.sm,
+    color: colors.slate500,
   },
   toggleLabel: {
     fontSize: typography.fontSize.sm,
