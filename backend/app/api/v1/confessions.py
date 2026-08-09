@@ -56,6 +56,7 @@ class ConfessionResponse(BaseModel):
     pii_stripped: bool
     status: ConfessionStatus
     recipient_dept: str | None
+    delivered_at: datetime | None
     created_at: datetime
     updated_at: datetime
 
@@ -285,6 +286,33 @@ async def create_confession(
     await session.flush()
     await session.refresh(confession)
     return confession
+
+
+@router.get(
+    "",
+    response_model=list[ConfessionResponse],
+    summary="List past confessions for the requesting device",
+)
+async def list_confessions(
+    x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
+    session: AsyncSession = Depends(get_async_session),
+) -> list[Confession]:
+    """Return the requesting device's confession history, newest first.
+
+    Soft-deleted confessions are excluded — once a user deletes one, it
+    should not reappear in their history. Requires the
+    ``X-Device-Token-Hash`` header identifying the owning device.
+    """
+    stmt = (
+        select(Confession)
+        .where(
+            Confession.device_token_hash == x_device_token_hash,
+            Confession.status != ConfessionStatus.deleted,
+        )
+        .order_by(Confession.created_at.desc())
+    )
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
 
 
 @router.get(

@@ -6,6 +6,7 @@ import { useFrame } from '@react-three/fiber';
 import { Ring } from '@react-three/drei';
 import { Group, Mesh, MathUtils } from 'three';
 import { Candle } from './Candle';
+import { EnvironmentBackdrop } from './environments';
 import { colors } from '../theme/colors';
 import type { Environment } from '../types';
 
@@ -70,6 +71,9 @@ export function ConfessionBooth({
 
       {/* Particle system for ambient dust/sparks */}
       <Particles count={60} environment={environment} />
+
+      {/* Environment-specific scenery — trees/fireflies, night sky/skyline, etc. */}
+      <EnvironmentBackdrop environment={environment} />
     </group>
   );
 }

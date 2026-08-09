@@ -48,12 +48,27 @@ export default function HomeScreen(): React.JSX.Element {
     router.push('/settings');
   }, []);
 
+  const handleOpenHistory = useCallback(() => {
+    router.push('/home');
+  }, []);
+
   return (
     <View style={styles.container}>
       {/* 3D atmospheric background */}
       <View style={styles.threeContainer}>
         <ThreeCanvas />
       </View>
+
+      {/* History entry point */}
+      <TouchableOpacity
+        style={styles.historyButton}
+        onPress={handleOpenHistory}
+        accessibilityRole="button"
+        accessibilityLabel="View confession history"
+        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+      >
+        <Text style={styles.settingsIcon}>☰</Text>
+      </TouchableOpacity>
 
       {/* Settings entry point */}
       <TouchableOpacity
@@ -122,6 +137,18 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 56,
     right: spacing.lg,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 2,
+  },
+  historyButton: {
+    position: 'absolute',
+    top: 56,
+    left: spacing.lg,
     width: 44,
     height: 44,
     borderRadius: 22,
