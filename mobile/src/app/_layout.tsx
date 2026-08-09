@@ -54,6 +54,13 @@ export default function RootLayout(): React.JSX.Element {
           }}
         />
         <Stack.Screen
+          name="anonymity"
+          options={{
+            title: 'Anonymity',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
           name="delete-confirmation"
           options={{
             title: 'Delete',
