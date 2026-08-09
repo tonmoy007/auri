@@ -25,6 +25,13 @@ export default function RootLayout(): React.JSX.Element {
       >
         <Stack.Screen name="index" options={{ title: 'Auri' }} />
         <Stack.Screen
+          name="home"
+          options={{
+            title: 'History',
+            animation: 'slide_from_left',
+          }}
+        />
+        <Stack.Screen
           name="confession/[id]"
           options={{
             title: 'Confession',

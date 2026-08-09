@@ -14,6 +14,7 @@ without touching the production clock (which correctly uses
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta
@@ -331,6 +332,83 @@ async def test_forward_confession_rejects_unknown_department(
 
     # Assert
     assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_list_confessions_returns_only_requesting_devices_history(
+    client: AsyncClient,
+) -> None:
+    # Arrange
+    await _create_confession(client, device_hash=DEVICE_HASH)
+    await _create_confession(client, device_hash=OTHER_DEVICE_HASH)
+
+    # Act
+    response = await client.get(
+        "/api/v1/confessions",
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Assert
+    body = response.json()
+    assert response.status_code == 200
+    assert len(body) == 1
+    assert body[0]["status"] == "pending"
+
+
+@pytest.mark.asyncio
+async def test_list_confessions_orders_newest_first(client: AsyncClient) -> None:
+    # Arrange — created_at is a DB-side server_default (real wall clock, not
+    # the injected app clock used for rate limiting), and SQLite's
+    # CURRENT_TIMESTAMP only has 1-second resolution, so a real sleep is
+    # needed to force two distinguishable timestamps.
+    first = await _create_confession(client)
+    _set_clock(FROZEN_NOW + timedelta(seconds=301))
+    await asyncio.sleep(1.1)
+    second = await _create_confession(client)
+
+    # Act
+    response = await client.get(
+        "/api/v1/confessions",
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Assert
+    body = response.json()
+    assert [item["id"] for item in body] == [second["id"], first["id"]]
+
+
+@pytest.mark.asyncio
+async def test_list_confessions_excludes_soft_deleted(client: AsyncClient) -> None:
+    # Arrange
+    created = await _create_confession(client)
+    await client.delete(
+        f"/api/v1/confessions/{created['id']}",
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Act
+    response = await client.get(
+        "/api/v1/confessions",
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Assert
+    assert response.json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_confessions_returns_empty_for_unknown_device(
+    client: AsyncClient,
+) -> None:
+    # Act
+    response = await client.get(
+        "/api/v1/confessions",
+        headers={"X-Device-Token-Hash": "c" * 32},
+    )
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 @pytest.mark.asyncio
