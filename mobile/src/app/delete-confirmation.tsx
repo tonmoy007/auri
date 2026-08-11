@@ -31,6 +31,14 @@ function readStringParam(
 
 type Stage = 'confirming' | 'extinguishing';
 
+/** Matches a real backend confession id — the local session id used before
+ * a confession is ever submitted (see index.tsx's `generateSessionId`) never
+ * matches this, which is how the delete flow tells "nothing to delete on
+ * the backend yet" apart from "delete actually failed."
+ */
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Delete confirmation screen — requires an explicit second tap before a
  * confession is deleted, then plays a candle-extinguish animation while
@@ -74,26 +82,44 @@ export default function DeleteConfirmationScreen(): React.JSX.Element {
     setStage('extinguishing');
     setError(null);
 
-    const deletePromise = (async () => {
+    const deletePromise = (async (): Promise<boolean> => {
+      // Not yet submitted — this id is a local session id, not a backend
+      // UUID, so there's nothing to delete server-side. Treat as success.
+      if (!UUID_PATTERN.test(id)) {
+        return true;
+      }
       try {
         const deviceTokenHash = await hashDeviceToken();
-        await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
+        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
           method: 'DELETE',
           headers: { 'X-Device-Token-Hash': deviceTokenHash },
         });
+        if (!response.ok) {
+          throw new Error(`Delete failed (${response.status})`);
+        }
+        return true;
       } catch (deleteError: unknown) {
         setError(
           deleteError instanceof Error
             ? deleteError.message
             : 'Failed to delete confession',
         );
+        return false;
       }
     })();
 
     runExtinguishAnimation(() => {
-      void deletePromise.finally(() => {
-        router.dismissAll();
-        router.replace('/');
+      void deletePromise.then((succeeded) => {
+        if (succeeded) {
+          router.dismissAll();
+          router.replace('/');
+          return;
+        }
+        // Delete genuinely failed — relight the candle and let the user
+        // see the error instead of a false "it's gone" animation.
+        haptics.warning();
+        setExtinguishProgress(0);
+        setStage('confirming');
       });
     });
   }, [id, haptics, runExtinguishAnimation]);
