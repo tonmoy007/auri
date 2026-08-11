@@ -6,6 +6,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
+from typing import Final
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
@@ -24,6 +25,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/confessions", tags=["confessions"])
 
 ClockDependency = Callable[[], datetime]
+
+# Shown instead of leaving the confessor with silence if the LLM call for a
+# counseling response fails — the confession itself still saves fine either
+# way (AGENTS.md §15.1 "safe fallback" pattern), only this reply degrades.
+_FALLBACK_COUNSELOR_RESPONSE: Final[str] = (
+    "Thank you for trusting this space with what you carried in. Whatever "
+    "it is, you don't have to hold it alone — it has been heard."
+)
 
 
 # ── Pydantic request/response schemas ────────────────────────────────────
@@ -57,10 +66,25 @@ class ConfessionResponse(BaseModel):
     status: ConfessionStatus
     recipient_dept: str | None
     delivered_at: datetime | None
+    counselor_response: str | None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ConfessionPreviewRequest(BaseModel):
+    """Request body for previewing an AI summary before submission."""
+
+    transcript: str = Field(
+        ..., min_length=1, description="Whisper-generated transcript text"
+    )
+
+
+class ConfessionPreviewResponse(BaseModel):
+    """Response body for a confession summary preview."""
+
+    ai_summary: str | None
 
 
 class ConfessionForward(BaseModel):
@@ -183,6 +207,20 @@ def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
         return None
 
 
+def _safe_counsel(llm_service: LLMService, text: str) -> str:
+    """Generate a compassionate response to *text*, degrading to a fixed
+    fallback message (rather than ``None``) on failure — a confessor should
+    never see an empty response after submitting.
+    """
+    try:
+        return llm_service.counsel(text)
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
+        logger.warning(
+            "counseling response generation failed, using fallback: %s", exc
+        )
+        return _FALLBACK_COUNSELOR_RESPONSE
+
+
 def _safe_moderate(llm_service: LLMService, text: str) -> bool:
     """Run the moderation check, failing **closed** (flagged) on error.
 
@@ -270,6 +308,7 @@ async def create_confession(
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
     is_flagged = _safe_moderate(llm_service, body.transcript)
+    counselor_response = _safe_counsel(llm_service, deidentified_transcript)
 
     confession = Confession(
         device_token_hash=body.device_token_hash,
@@ -279,6 +318,7 @@ async def create_confession(
         ai_summary=ai_summary,
         pii_stripped=True,
         status=ConfessionStatus.flagged if is_flagged else ConfessionStatus.pending,
+        counselor_response=counselor_response,
     )
     session.add(confession)
     _upsert_anonymous_user(session, user, body.device_token_hash, now)
@@ -286,6 +326,28 @@ async def create_confession(
     await session.flush()
     await session.refresh(confession)
     return confession
+
+
+@router.post(
+    "/preview",
+    response_model=ConfessionPreviewResponse,
+    summary="Preview an AI summary for a transcript before submitting",
+)
+async def preview_confession(body: ConfessionPreviewRequest) -> ConfessionPreviewResponse:
+    """Generate a de-identified summary for a transcript without persisting it.
+
+    Lets the Review screen show the confessor a real AI summary before they
+    decide whether to submit — nothing here is written to the database.
+    """
+    llm_service = LLMService(provider="openai")
+    try:
+        deidentified_transcript = llm_service.deidentify(body.transcript)
+    except Exception as exc:
+        logger.error("preview de-identification failed: %s", exc)
+        raise DeidentificationError("could not de-identify transcript") from exc
+
+    ai_summary = _safe_summarize(llm_service, deidentified_transcript)
+    return ConfessionPreviewResponse(ai_summary=ai_summary)
 
 
 @router.get(

@@ -6,7 +6,7 @@ import logging
 from typing import Final, Literal
 
 from app.config import settings
-from app.exceptions import CategorizationError, SummarizationError
+from app.exceptions import CategorizationError, CounselingError, SummarizationError
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +119,49 @@ class LLMService:
         if not result.strip():
             logger.error("summarization returned an empty result")
             raise SummarizationError("LLM summarization failed to produce a summary")
+        return result
+
+    def counsel(self, text: str) -> str:
+        """Produce a compassionate, priest-like response to a confession.
+
+        Modeled on how a confessor listens: acknowledge what was shared,
+        validate that it took courage to say it aloud, offer one gentle
+        reflection (never clinical advice or doctrine), and close with a
+        brief affirmation that the person has been heard.
+
+        Args:
+            text: Already de-identified transcript.
+
+        Returns:
+            A short (3-4 sentence) response addressed directly to the
+            confessor.
+
+        Raises:
+            CounselingError: If the LLM fails to produce a response.
+        """
+        prompt = self._build_delimited_prompt(
+            instruction=(
+                "You are a compassionate, non-judgmental listener, in the "
+                "tradition of a priest hearing confession: someone has just "
+                "shared something they needed to say aloud. Write a short "
+                "response (3-4 sentences), speaking directly to them as "
+                "'you', that: acknowledges what they shared without "
+                "repeating private details back, validates that it took "
+                "courage to speak it, offers one gentle and concrete "
+                "reflection (never clinical advice, never religious "
+                "doctrine), and closes with a brief affirmation that they "
+                "have been heard. If the content suggests they may be in "
+                "crisis or in danger, gently and briefly encourage them to "
+                "reach out to someone they trust. Output only the "
+                "response, nothing else."
+            ),
+            content=text,
+        )
+        result = self._call_llm(prompt)
+
+        if not result.strip():
+            logger.error("counseling response generation returned an empty result")
+            raise CounselingError("LLM failed to produce a counseling response")
         return result
 
     def moderate(self, text: str) -> bool:

@@ -22,7 +22,7 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from app.api.v1.confessions import get_clock
+from app.api.v1.confessions import _FALLBACK_COUNSELOR_RESPONSE, get_clock
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
@@ -447,3 +447,109 @@ async def test_create_confession_moderates_raw_transcript_not_deidentified(
     # Assert
     assert response.status_code == 201
     mock_moderate.assert_called_once_with(raw_transcript)
+
+
+@pytest.mark.asyncio
+async def test_create_confession_includes_counselor_response(
+    client: AsyncClient,
+) -> None:
+    # Arrange
+    payload = {
+        "device_token_hash": DEVICE_HASH,
+        "voice_mask": "warm",
+        "transcript": "raw with john@example.com",
+    }
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.counsel",
+            return_value="You have been heard.",
+        ) as mock_counsel,
+    ):
+        response = await client.post("/api/v1/confessions", json=payload)
+
+    # Assert
+    body = response.json()
+    assert response.status_code == 201
+    assert body["counselor_response"] == "You have been heard."
+    mock_counsel.assert_called_once_with(DEIDENTIFIED_TEXT)
+
+
+@pytest.mark.asyncio
+async def test_create_confession_falls_back_when_counsel_fails(
+    client: AsyncClient,
+) -> None:
+    # Arrange — a confessor must never see an empty response, even if the
+    # LLM call for it fails; the confession itself still saves fine.
+    payload = {
+        "device_token_hash": DEVICE_HASH,
+        "voice_mask": "warm",
+        "transcript": "raw with john@example.com",
+    }
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief summary.",
+        ),
+        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.counsel",
+            side_effect=RuntimeError("LLM unavailable"),
+        ),
+    ):
+        response = await client.post("/api/v1/confessions", json=payload)
+
+    # Assert
+    assert response.status_code == 201
+    assert response.json()["counselor_response"] == _FALLBACK_COUNSELOR_RESPONSE
+
+
+@pytest.mark.asyncio
+async def test_preview_confession_returns_summary_without_persisting(
+    client: AsyncClient,
+) -> None:
+    # Arrange
+    payload = {"transcript": "raw with john@example.com"}
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch(
+            "app.api.v1.confessions.LLMService.summarize",
+            return_value="A brief preview summary.",
+        ) as mock_summarize,
+        patch("app.api.v1.confessions.LLMService.counsel") as mock_counsel,
+    ):
+        response = await client.post("/api/v1/confessions/preview", json=payload)
+        history = await client.get(
+            "/api/v1/confessions",
+            headers={"X-Device-Token-Hash": DEVICE_HASH},
+        )
+
+    # Assert
+    assert response.status_code == 200
+    assert response.json() == {"ai_summary": "A brief preview summary."}
+    mock_summarize.assert_called_once_with(DEIDENTIFIED_TEXT)
+    mock_counsel.assert_not_called()
+    assert history.json() == []

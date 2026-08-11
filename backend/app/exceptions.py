@@ -27,6 +27,10 @@ class SummarizationError(ProcessingError):
     """Raised when LLM summarisation fails to produce a usable summary."""
 
 
+class CounselingError(ProcessingError):
+    """Raised when LLM counseling-response generation fails to produce a usable reply."""
+
+
 class DatabaseError(AuriError):
     """Raised for database-layer failures."""
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from app.exceptions import CategorizationError, SummarizationError
+from app.exceptions import CategorizationError, CounselingError, SummarizationError
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
 
@@ -92,6 +92,31 @@ def test_summarize_raises_summarization_error_on_empty_llm_response() -> None:
         pytest.raises(SummarizationError),
     ):
         service.summarize("some confession text")
+
+
+def test_counsel_returns_llm_response_when_non_empty() -> None:
+    # Arrange
+    service = LLMService(provider="openai")
+    llm_reply = "You have been heard. That took courage to say."
+
+    # Act
+    with patch.object(LLMService, "_call_openai", return_value=llm_reply):
+        response = service.counsel("some confession text")
+
+    # Assert
+    assert response == llm_reply
+
+
+def test_counsel_raises_counseling_error_on_empty_llm_response() -> None:
+    # Arrange
+    service = LLMService(provider="openai")
+
+    # Act / Assert
+    with (
+        patch.object(LLMService, "_call_openai", return_value="   "),
+        pytest.raises(CounselingError),
+    ):
+        service.counsel("some confession text")
 
 
 def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
