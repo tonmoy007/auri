@@ -10,7 +10,7 @@ import {
   Dimensions,
   Animated,
 } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ThreeCanvas } from '../components/ThreeCanvas';
@@ -28,6 +28,18 @@ const ENTRY_FADE_MS = 350;
 export default function HomeScreen(): React.JSX.Element {
   const haptics = useHaptics();
   const fadeToBlack = useRef(new Animated.Value(0)).current;
+
+  // Belt-and-suspenders reset: the in-callback reset below can be skipped by
+  // the native driver when this screen is backgrounded (pushed under the
+  // confession screen) — its animated node gets detached while off-focus, so
+  // a `setValue` fired while unfocused doesn't always reach the native view.
+  // That left this screen permanently blacked out (but still tappable) after
+  // navigating back. Resetting again on every focus guarantees it clears.
+  useFocusEffect(
+    useCallback(() => {
+      fadeToBlack.setValue(0);
+    }, [fadeToBlack]),
+  );
 
   const handleEnterAuri = useCallback(() => {
     haptics.selectionChanged();
