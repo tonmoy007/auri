@@ -61,6 +61,13 @@ export default function RootLayout(): React.JSX.Element {
           }}
         />
         <Stack.Screen
+          name="response"
+          options={{
+            title: 'You Are Heard',
+            animation: 'fade',
+          }}
+        />
+        <Stack.Screen
           name="anonymity"
           options={{
             title: 'Anonymity',
