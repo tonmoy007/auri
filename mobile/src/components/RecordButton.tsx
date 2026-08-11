@@ -109,7 +109,13 @@ export function RecordButton({
   const renderContent = (): React.ReactNode => {
     switch (status) {
       case 'idle':
-        return <View style={styles.micIcon} />;
+        return (
+          <View style={styles.micIcon}>
+            <View style={styles.micCapsule} />
+            <View style={styles.micStand} />
+            <View style={styles.micBase} />
+          </View>
+        );
       case 'recording':
         return (
           <View style={styles.stopIconContainer}>
@@ -252,15 +258,26 @@ const styles = StyleSheet.create({
     opacity: 0.6,
   },
   micIcon: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: colors.white,
-    borderBottomWidth: 0,
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 12,
+    alignItems: 'center',
+  },
+  micCapsule: {
+    width: 15,
+    height: 22,
+    borderRadius: 8,
+    backgroundColor: colors.white,
+  },
+  micStand: {
+    width: 3,
+    height: 6,
+    marginTop: 2,
+    backgroundColor: colors.white,
+  },
+  micBase: {
+    width: 16,
+    height: 3,
+    borderRadius: 1.5,
+    marginTop: 1,
+    backgroundColor: colors.white,
   },
   stopIconContainer: {
     justifyContent: 'center',

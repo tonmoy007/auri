@@ -6,7 +6,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Dimensions,
   Pressable,
   SafeAreaView,
 } from 'react-native';
@@ -22,8 +21,6 @@ import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useSettings } from '../../hooks/useSettings';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
-
-const { height } = Dimensions.get('window');
 
 /** Delay before the door starts swinging open on entry, ms — lets the fade-in overlay clear first. */
 const DOOR_OPEN_DELAY_MS = 150;
@@ -180,7 +177,14 @@ export default function ConfessionScreen(): React.JSX.Element {
         </Text>
       </View>
 
-      {/* Voice mask selector */}
+      {/* Environment toggle hint — grouped with the top status cluster so it
+          never competes with the record button's own "Tap to stop" label. */}
+      <Text style={styles.environmentHint}>
+        Tap the booth to change environment
+      </Text>
+
+      {/* Voice mask selector — anchored under the hint instead of floating
+          mid-screen, so all controls live in one predictable top cluster. */}
       <View style={styles.voiceMaskContainer}>
         <VoiceMaskSelector
           selected={voiceMask}
@@ -197,11 +201,6 @@ export default function ConfessionScreen(): React.JSX.Element {
           onStop={handleStopRecording}
         />
       </View>
-
-      {/* Environment toggle hint */}
-      <Text style={styles.environmentHint}>
-        Tap the booth to change environment
-      </Text>
     </SafeAreaView>
   );
 }
@@ -236,7 +235,7 @@ const styles = StyleSheet.create({
   },
   voiceMaskContainer: {
     position: 'absolute',
-    top: height * 0.3,
+    top: 148,
     left: 0,
     right: 0,
     zIndex: 10,
@@ -252,7 +251,7 @@ const styles = StyleSheet.create({
   },
   environmentHint: {
     position: 'absolute',
-    bottom: 100,
+    top: 104,
     left: 0,
     right: 0,
     textAlign: 'center',
