@@ -215,9 +215,7 @@ def _safe_counsel(llm_service: LLMService, text: str) -> str:
     try:
         return llm_service.counsel(text)
     except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
-        logger.warning(
-            "counseling response generation failed, using fallback: %s", exc
-        )
+        logger.warning("counseling response generation failed, using fallback: %s", exc)
         return _FALLBACK_COUNSELOR_RESPONSE
 
 
@@ -333,7 +331,9 @@ async def create_confession(
     response_model=ConfessionPreviewResponse,
     summary="Preview an AI summary for a transcript before submitting",
 )
-async def preview_confession(body: ConfessionPreviewRequest) -> ConfessionPreviewResponse:
+async def preview_confession(
+    body: ConfessionPreviewRequest,
+) -> ConfessionPreviewResponse:
     """Generate a de-identified summary for a transcript without persisting it.
 
     Lets the Review screen show the confessor a real AI summary before they
