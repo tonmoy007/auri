@@ -33,6 +33,8 @@ export const ENDPOINTS = {
   deleteConfession: (id: string): string => `/api/v1/confessions/${id}`,
   /** Transcribe a recorded confession to text */
   stt: '/api/v1/stt',
+  /** Apply a voice mask to a recorded confession */
+  voiceMask: '/api/v1/voice/mask',
   /** Synthesize an AI agent voice response */
   tts: '/api/v1/tts',
   /** List configured recipient departments for the Forward flow */

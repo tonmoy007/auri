@@ -4,7 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
-import type { AudioRecordingState } from '../types';
+import type { AudioRecordingState, VoiceMask } from '../types';
 import {
   API_BASE_URL,
   AUDIO_CONFIG,
@@ -361,6 +361,51 @@ export function useAudioRecorder() {
   }, []);
 
   /**
+   * Upload a recorded audio file to have a voice mask applied, returning a
+   * local file URI to the masked WAV — or `null` if masking failed, letting
+   * the caller fall back to playing the original (unmasked) recording
+   * instead of losing playback entirely.
+   *
+   * Uses `fetch` + base64 rather than the STT upload's XHR/blob approach:
+   * RN's `fetch().blob()` handling is unreliable on this stack (new
+   * architecture/Fabric), and the backend returns base64 JSON specifically
+   * to sidestep that — see `backend/app/api/v1/voice.py`.
+   */
+  const maskRecording = useCallback(
+    async (uri: string, mask: VoiceMask): Promise<string | null> => {
+      try {
+        const deviceTokenHash = await hashDeviceToken();
+        const formData = new FormData();
+        formData.append('audio', {
+          uri,
+          name: 'confession.aac',
+          type: 'audio/aac',
+        } as unknown as Blob);
+        formData.append('mask', mask);
+
+        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.voiceMask}`, {
+          method: 'POST',
+          headers: { 'X-Device-Token-Hash': deviceTokenHash },
+          body: formData,
+        });
+        if (!response.ok) {
+          throw new Error(`Voice masking failed (${response.status})`);
+        }
+        const body = (await response.json()) as { audio_base64: string };
+
+        const maskedUri = `${FileSystem.cacheDirectory}masked_${Date.now()}.wav`;
+        await FileSystem.writeAsStringAsync(maskedUri, body.audio_base64, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        return maskedUri;
+      } catch (_error: unknown) {
+        return null;
+      }
+    },
+    [],
+  );
+
+  /**
    * Reset the recorder state to idle.
    */
   const reset = useCallback(() => {
@@ -382,6 +427,7 @@ export function useAudioRecorder() {
     startRecording,
     stopRecording,
     transcribeRecording,
+    maskRecording,
     reset,
   };
 }
