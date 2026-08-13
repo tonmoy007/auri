@@ -83,3 +83,8 @@ class Confession(Base):
         nullable=True,
         comment="When the bot confirmed Telegram delivery to the recipient department",
     )
+    counselor_response: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="LLM-generated compassionate reflection returned to the confessor after submission",
+    )

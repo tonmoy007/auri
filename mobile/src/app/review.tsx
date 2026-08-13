@@ -48,14 +48,21 @@ export default function ReviewScreen(): React.JSX.Element {
   const [anonymityEnabled, setAnonymityEnabled] = useState(anonymityParam !== '0');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [hasFinishedPlaying, setHasFinishedPlaying] = useState(false);
+  const [summary, setSummary] = useState<string | null>(null);
+  const [isSummaryLoading, setIsSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const soundRef = useRef<Audio.Sound | null>(null);
   const haptics = useHaptics();
 
-  // Placeholder text is shown until real transcript/summary data flows in via params.
-  const transcript =
-    transcriptParam ?? '… your anonymous confession transcript will appear here …';
-  const summary =
-    'An AI-generated summary of your confession will be displayed here after processing.';
+  // STT can fail or transcribe silence to an empty string — either way there's
+  // no real transcript to show or submit. Falling back to a placeholder
+  // *string* here (as this used to) meant that placeholder text got sent to
+  // the backend as the actual confession on submit; now the caller is told
+  // explicitly there's nothing to send.
+  const hasTranscript = (transcriptParam ?? '').trim().length > 0;
+  const transcript = hasTranscript ? (transcriptParam as string) : '';
   const voiceMask: VoiceMask = voiceMaskParam ?? 'warm';
 
   useEffect(() => {
@@ -63,6 +70,44 @@ export default function ReviewScreen(): React.JSX.Element {
       void soundRef.current?.unloadAsync();
     };
   }, []);
+
+  // Fetch a real AI-generated summary once a real transcript exists — this
+  // used to be a static placeholder string shown unconditionally.
+  useEffect(() => {
+    if (!hasTranscript) return;
+    let cancelled = false;
+    setIsSummaryLoading(true);
+    setSummaryError(null);
+    (async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.confessionPreview}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript }),
+        });
+        if (!response.ok) {
+          throw new Error(`Summary generation failed (${response.status})`);
+        }
+        const body = (await response.json()) as { ai_summary: string | null };
+        if (!cancelled) {
+          setSummary(body.ai_summary);
+        }
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setSummaryError(
+            error instanceof Error ? error.message : 'Failed to generate summary',
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSummaryLoading(false);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasTranscript, transcript]);
 
   // The Anonymity screen returns here via router.replace with an updated
   // param rather than a fresh mount, so the choice made there needs to be
@@ -74,6 +119,10 @@ export default function ReviewScreen(): React.JSX.Element {
   }, [anonymityParam]);
 
   const handleForward = useCallback(async () => {
+    if (!hasTranscript) {
+      setActionError('No transcript to submit — go back and record again.');
+      return;
+    }
     setIsSubmitting(true);
     setActionError(null);
     try {
@@ -95,20 +144,22 @@ export default function ReviewScreen(): React.JSX.Element {
         throw new Error(problem?.detail ?? `Submission failed (${response.status})`);
       }
 
-      const created = (await response.json()) as { id: string };
+      const created = (await response.json()) as {
+        id: string;
+        counselor_response: string | null;
+      };
 
-      if (anonymityEnabled) {
-        // Fully blind — nothing more to choose, the confession stays anonymous.
-        haptics.success();
-        router.back();
-        return;
-      }
-
-      // "Someone in your team" — the confession exists (status 'pending') but
-      // still needs a department target before it can be delivered.
+      haptics.success();
+      // A brief, deliberate AI response stands between "submitted" and
+      // "gone" — the confessor sees they were heard before the flow
+      // continues into anonymity routing.
       router.push({
-        pathname: '/forward/[id]',
-        params: { id: created.id },
+        pathname: '/response',
+        params: {
+          id: created.id,
+          counselorResponse: created.counselor_response ?? '',
+          anonymityEnabled: anonymityEnabled ? '1' : '0',
+        },
       });
     } catch (error: unknown) {
       setActionError(
@@ -117,7 +168,7 @@ export default function ReviewScreen(): React.JSX.Element {
     } finally {
       setIsSubmitting(false);
     }
-  }, [transcript, voiceMask, anonymityEnabled, haptics]);
+  }, [hasTranscript, transcript, voiceMask, anonymityEnabled, haptics]);
 
   const handleDelete = useCallback(() => {
     router.push({
@@ -131,18 +182,36 @@ export default function ReviewScreen(): React.JSX.Element {
       setActionError('No recording available to play');
       return;
     }
+    if (isPlaying) return;
     try {
       if (soundRef.current) {
-        await soundRef.current.replayAsync();
+        // Explicitly rewind before replaying — without this a second tap
+        // after playback finished silently no-op'd on some Android builds
+        // instead of restarting from the beginning.
+        await soundRef.current.setPositionAsync(0);
+        await soundRef.current.playAsync();
+        setIsPlaying(true);
+        setHasFinishedPlaying(false);
         return;
       }
       const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
       soundRef.current = sound;
+      sound.setOnPlaybackStatusUpdate((playbackStatus) => {
+        if (!playbackStatus.isLoaded) return;
+        setIsPlaying(playbackStatus.isPlaying);
+        if (playbackStatus.didJustFinish) {
+          setIsPlaying(false);
+          setHasFinishedPlaying(true);
+        }
+      });
+      setIsPlaying(true);
+      setHasFinishedPlaying(false);
       await sound.playAsync();
     } catch (_error: unknown) {
+      setIsPlaying(false);
       setActionError('Failed to play masked audio');
     }
-  }, [audioUri]);
+  }, [audioUri, isPlaying]);
 
   const handleOpenAnonymityChoice = useCallback(() => {
     haptics.selectionChanged();
@@ -175,7 +244,13 @@ export default function ReviewScreen(): React.JSX.Element {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Transcript</Text>
           <View style={styles.card}>
-            <Text style={styles.transcriptText}>{transcript}</Text>
+            {hasTranscript ? (
+              <Text style={styles.transcriptText}>{transcript}</Text>
+            ) : (
+              <Text style={styles.transcriptMissingText}>
+                We couldn't transcribe this recording. Go back and record again.
+              </Text>
+            )}
           </View>
         </View>
 
@@ -183,7 +258,21 @@ export default function ReviewScreen(): React.JSX.Element {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>AI Summary</Text>
           <View style={styles.card}>
-            <Text style={styles.summaryText}>{summary}</Text>
+            {!hasTranscript ? (
+              <Text style={styles.summaryText}>Waiting on a transcript first.</Text>
+            ) : isSummaryLoading ? (
+              <ShimmerText style={styles.summaryText}>
+                Reading between the lines…
+              </ShimmerText>
+            ) : summaryError !== null ? (
+              <Text style={styles.summaryText}>
+                Summary unavailable — you can still submit.
+              </Text>
+            ) : (
+              <Text style={styles.summaryText}>
+                {summary ?? 'No summary available.'}
+              </Text>
+            )}
           </View>
         </View>
 
@@ -195,10 +284,16 @@ export default function ReviewScreen(): React.JSX.Element {
             onPress={handlePlayback}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel="Play masked audio"
+            accessibilityLabel={isPlaying ? 'Playing masked audio' : 'Play masked audio'}
           >
-            <Text style={styles.playbackIcon}>▶</Text>
-            <Text style={styles.playbackText}>Play anonymized recording</Text>
+            <Text style={styles.playbackIcon}>{isPlaying ? '⏸' : '▶'}</Text>
+            <Text style={styles.playbackText}>
+              {isPlaying
+                ? 'Playing anonymized recording…'
+                : hasFinishedPlaying
+                  ? 'Replay anonymized recording'
+                  : 'Play anonymized recording'}
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -251,10 +346,13 @@ export default function ReviewScreen(): React.JSX.Element {
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[styles.forwardButton, isSubmitting && styles.buttonDisabled]}
+          style={[
+            styles.forwardButton,
+            (isSubmitting || !hasTranscript) && styles.buttonDisabled,
+          ]}
           onPress={handleForward}
           activeOpacity={0.7}
-          disabled={isSubmitting}
+          disabled={isSubmitting || !hasTranscript}
           accessibilityRole="button"
           accessibilityLabel="Submit confession"
         >
@@ -305,6 +403,12 @@ const styles = StyleSheet.create({
   transcriptText: {
     fontSize: typography.fontSize.sm,
     color: colors.slate300,
+    lineHeight: 22,
+  },
+  transcriptMissingText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.rose400,
+    fontStyle: 'italic',
     lineHeight: 22,
   },
   summaryText: {

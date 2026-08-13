@@ -38,7 +38,6 @@ backend/alembic/versions/*.pyc
 # Agent / tool artifacts
 .agents/
 .kiro/
-.hermes/
 
 # Logs
 *.log

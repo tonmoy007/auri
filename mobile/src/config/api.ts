@@ -23,6 +23,8 @@ export const ENDPOINTS = {
   health: '/api/v1/health',
   /** Submit a completed confession */
   confessions: '/api/v1/confessions',
+  /** Preview an AI summary for a transcript before submitting */
+  confessionPreview: '/api/v1/confessions/preview',
   /** Get a specific confession by ID */
   confession: (id: string): string => `/api/v1/confessions/${id}`,
   /** Forward a confession to a recipient department */
