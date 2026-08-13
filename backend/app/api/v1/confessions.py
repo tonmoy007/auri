@@ -173,8 +173,24 @@ def _check_rate_limit(user: AnonymousUser | None, now: datetime) -> None:
     if user is None:
         return
 
+    # SQLite (dev/QA) has no native timestamptz support, so a `DateTime
+    # (timezone=True)` value round-tripped through it comes back naive —
+    # unlike Postgres (prod), which preserves it. `now` (from `get_clock`)
+    # is tz-aware in production but naive in this module's own test suite
+    # (naive-clock convention, to match SQLite). Both sides are always
+    # UTC-valued regardless, so tzinfo is stripped from both here rather
+    # than assumed present/absent on either — otherwise whichever
+    # combination isn't hit crashes with `TypeError: can't subtract
+    # offset-naive and offset-aware datetimes` (found live 2026-08-13 on
+    # a device's second real confession, which pairs an aware production
+    # clock with a naive SQLite-stored timestamp).
+    now_naive = now.replace(tzinfo=None) if now.tzinfo is not None else now
+    last_confession_at = user.last_confession_at
+    if last_confession_at.tzinfo is not None:
+        last_confession_at = last_confession_at.replace(tzinfo=None)
+
     window = timedelta(seconds=settings.CONFESSION_RATE_LIMIT_SECONDS)
-    elapsed = now - user.last_confession_at
+    elapsed = now_naive - last_confession_at
     if elapsed < window:
         retry_after = (window - elapsed).seconds
         raise RateLimitError(f"rate limit exceeded; retry in {retry_after}s")

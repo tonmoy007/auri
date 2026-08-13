@@ -11,6 +11,7 @@ from app.api.v1.health import router as health_router
 from app.api.v1.moderation import router as moderation_router
 from app.api.v1.stt import router as stt_router
 from app.api.v1.tts import router as tts_router
+from app.api.v1.voice import router as voice_router
 
 router = APIRouter(prefix="/api/v1")
 
@@ -21,3 +22,4 @@ router.include_router(moderation_router)
 router.include_router(delivery_router)
 router.include_router(stt_router)
 router.include_router(tts_router)
+router.include_router(voice_router)

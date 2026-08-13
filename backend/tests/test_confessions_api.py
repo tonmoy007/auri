@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -213,6 +213,37 @@ async def test_create_confession_allowed_after_rate_limit_window_elapses(
 
     # Assert
     assert response.status_code == 201
+
+
+@pytest.mark.asyncio
+async def test_create_confession_rate_limit_survives_naive_stored_timestamp(
+    client: AsyncClient,
+) -> None:
+    # Arrange — regression, found live 2026-08-13: SQLite (dev/QA) has no
+    # native timestamptz support, so `last_confession_at` round-trips as
+    # naive even though the column is `DateTime(timezone=True)` and `now`
+    # is always tz-aware UTC (see `get_clock`). A device's *second* real
+    # confession crashed 500 instead of being rate-limited (429) because
+    # the existing tests' frozen clock is naive on both sides, which never
+    # exercises the aware-vs-naive subtraction that production's real
+    # clock actually produces against SQLite.
+    await _create_confession(client)
+    _set_clock(FROZEN_NOW.replace(tzinfo=timezone.utc) + timedelta(seconds=5))
+    payload = {
+        "device_token_hash": DEVICE_HASH,
+        "voice_mask": "warm",
+        "transcript": "another confession right away, with an aware clock this time",
+    }
+
+    # Act
+    with patch(
+        "app.api.v1.confessions.LLMService.deidentify",
+        return_value=DEIDENTIFIED_TEXT,
+    ):
+        response = await client.post("/api/v1/confessions", json=payload)
+
+    # Assert
+    assert response.status_code == 429
 
 
 @pytest.mark.asyncio

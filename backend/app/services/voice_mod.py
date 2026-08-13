@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import random
 import subprocess
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Literal
@@ -22,6 +24,13 @@ MASKS: dict[str, list[str]] = {
 }
 
 OUTPUT_DIR = Path.cwd() / "data" / "modulated"
+
+# SoX's stock build (no libfdk-aac) can't decode AAC/M4A — the format the
+# mobile app actually records in (`useAudioRecorder.ts`'s `.aac` / MPEG4AAC
+# output). Anything outside this set is transcoded to WAV via ffmpeg first.
+_SOX_NATIVE_SUFFIXES = frozenset(
+    {".wav", ".aiff", ".aif", ".flac", ".ogg", ".mp3", ".au", ".raw"}
+)
 
 
 class VoiceModulator:
@@ -54,6 +63,43 @@ class VoiceModulator:
             return MASKS["warm"]
         return MASKS[mask]
 
+    @staticmethod
+    def _transcode_to_wav(src: Path) -> Path:
+        """Convert *src* to a temp WAV file via ffmpeg for SoX to consume.
+
+        Only called for formats outside ``_SOX_NATIVE_SUFFIXES`` — in
+        practice this is the recorded confession's AAC/M4A container, which
+        this build of SoX (no libfdk-aac) cannot decode directly. Caller
+        owns cleanup of the returned path.
+
+        Raises:
+            RuntimeError: If ffmpeg is not installed or transcoding fails.
+        """
+        fd, tmp_path_str = tempfile.mkstemp(suffix=".wav", prefix="auri_mask_src_")
+        os.close(fd)
+        tmp_path = Path(tmp_path_str)
+
+        cmd = ["ffmpeg", "-y", "-i", str(src), str(tmp_path)]
+        logger.info("Transcoding to WAV via ffmpeg: %s", " ".join(cmd))
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60, check=False
+            )
+        except FileNotFoundError as exc:
+            tmp_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                "ffmpeg is not installed. Install it with: brew install ffmpeg "
+                "or: apt-get install ffmpeg"
+            ) from exc
+
+        if result.returncode != 0:
+            tmp_path.unlink(missing_ok=True)
+            raise RuntimeError(
+                f"ffmpeg transcoding failed (exit {result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        return tmp_path
+
     def modulate(self, audio_path: str | Path, mask: str = "warm") -> str:
         """Apply *mask* to the audio at *audio_path* and write the result.
 
@@ -67,11 +113,16 @@ class VoiceModulator:
 
         Raises:
             FileNotFoundError: If *audio_path* does not exist.
-            RuntimeError: If SoX is not installed or processing fails.
+            RuntimeError: If SoX/ffmpeg is not installed or processing fails.
         """
         src = Path(audio_path)
         if not src.exists():
             raise FileNotFoundError(f"Audio file not found: {src}")
+
+        transcoded: Path | None = None
+        if src.suffix.lower() not in _SOX_NATIVE_SUFFIXES:
+            transcoded = self._transcode_to_wav(src)
+            src = transcoded
 
         dst = self._output_dir / f"mod_{uuid.uuid4().hex}.wav"
         effects = self._resolve_mask(mask)
@@ -92,6 +143,9 @@ class VoiceModulator:
                 "SoX (sox) is not installed. Install it with: brew install sox "
                 "or: apt-get install sox"
             ) from exc
+        finally:
+            if transcoded is not None:
+                transcoded.unlink(missing_ok=True)
 
         if result.returncode != 0:
             raise RuntimeError(

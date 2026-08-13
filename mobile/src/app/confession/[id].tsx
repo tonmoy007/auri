@@ -91,9 +91,14 @@ export default function ConfessionScreen(): React.JSX.Element {
         setStatus('idle');
         return;
       }
-      // Transcribe while still "processing" — review.tsx falls back to a
-      // placeholder transcript if this comes back null after retries.
-      const transcript = await recorder.transcribeRecording(audioUri);
+      // Transcribe and mask in parallel while still "processing" — review.tsx
+      // shows an explicit error state if the transcript comes back null after
+      // retries, and falls back to playing the original (unmasked) recording
+      // if masking fails, rather than losing playback entirely.
+      const [transcript, maskedAudioUri] = await Promise.all([
+        recorder.transcribeRecording(audioUri),
+        recorder.maskRecording(audioUri, voiceMask),
+      ]);
       setStatus('done');
       // Swing the door shut before leaving the booth — the exit animation.
       setDoorOpen(false);
@@ -101,8 +106,8 @@ export default function ConfessionScreen(): React.JSX.Element {
       router.push({
         pathname: '/review',
         params: transcript
-          ? { id, audioUri, voiceMask, transcript }
-          : { id, audioUri, voiceMask },
+          ? { id, audioUri: maskedAudioUri ?? audioUri, voiceMask, transcript }
+          : { id, audioUri: maskedAudioUri ?? audioUri, voiceMask },
       });
     } catch (_error: unknown) {
       setStatus('idle');
