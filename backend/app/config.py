@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     CONFESSION_RATE_LIMIT_SECONDS: int = 300  # 1 confession per 5 min (AGENTS.md §8.5)
     TTS_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/tts
     STT_RATE_LIMIT_SECONDS: int = 10  # cost-abuse guard on POST /api/v1/stt
+    VOICE_MASK_RATE_LIMIT_SECONDS: int = (
+        10  # cost-abuse guard on POST /api/v1/voice/mask
+    )
 
     # ── Data retention ────────────────────────────────────────────────────
     RETENTION_HOURS: int = 24  # purge forwarded/deleted confessions after this long
