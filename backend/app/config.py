@@ -49,8 +49,18 @@ class Settings(BaseSettings):
     )  # 25MB, matches OpenAI Whisper API's cap
 
     # ── LLM ──────────────────────────────────────────────────────────────
-    LLM_API_KEY: str = ""
-    LLM_MODEL: str = "gpt-4o-mini"
+    # Provider priority for LLMService(provider="auto"): Ollama, then Gemini,
+    # then OpenAI — first provider to return a non-empty response wins.
+    OLLAMA_BASE_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.2:3b"
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-1.5-flash"
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    # Claude is explicit-provider-only (LLMService(provider="claude")) — not
+    # part of the "auto" chain above.
+    ANTHROPIC_API_KEY: str = ""
+    ANTHROPIC_MODEL: str = "claude-3-5-sonnet-latest"
 
     # ── Telegram ──────────────────────────────────────────────────────────
     TELEGRAM_BOT_TOKEN: str = ""

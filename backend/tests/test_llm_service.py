@@ -1,14 +1,16 @@
 """Unit tests for app.services.llm.LLMService.
 
-Only the provider boundary (_call_openai) is mocked, per AGENTS.md §16.4.
-Domain logic (fallback merging, prompt delimiting) runs for real.
+Only the provider boundary (_call_openai, _call_ollama, ...) is mocked, per
+AGENTS.md §16.4. Domain logic (fallback merging, prompt delimiting, the
+auto-provider chain order) runs for real.
 """
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
+from app.config import settings
 from app.exceptions import CategorizationError, CounselingError, SummarizationError
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
@@ -117,6 +119,138 @@ def test_counsel_raises_counseling_error_on_empty_llm_response() -> None:
         pytest.raises(CounselingError),
     ):
         service.counsel("some confession text")
+
+
+def test_auto_chain_uses_ollama_reply_without_calling_gemini_or_openai() -> None:
+    # Arrange
+    service = LLMService()
+
+    # Act
+    with (
+        patch.object(LLMService, "_call_ollama", return_value="ollama reply") as ollama,
+        patch.object(LLMService, "_call_gemini") as gemini,
+        patch.object(LLMService, "_call_openai") as openai,
+    ):
+        result = service.categorize("some confession text")
+
+    # Assert
+    assert result == "ollama reply"
+    ollama.assert_called_once()
+    gemini.assert_not_called()
+    openai.assert_not_called()
+
+
+def test_auto_chain_falls_through_to_gemini_when_ollama_is_empty() -> None:
+    # Arrange
+    service = LLMService()
+
+    # Act
+    with (
+        patch.object(LLMService, "_call_ollama", return_value=""),
+        patch.object(LLMService, "_call_gemini", return_value="gemini reply") as gemini,
+        patch.object(LLMService, "_call_openai") as openai,
+    ):
+        result = service.categorize("some confession text")
+
+    # Assert
+    assert result == "gemini reply"
+    gemini.assert_called_once()
+    openai.assert_not_called()
+
+
+def test_auto_chain_falls_through_to_openai_when_ollama_and_gemini_are_empty() -> None:
+    # Arrange
+    service = LLMService()
+
+    # Act
+    with (
+        patch.object(LLMService, "_call_ollama", return_value=""),
+        patch.object(LLMService, "_call_gemini", return_value=""),
+        patch.object(LLMService, "_call_openai", return_value="openai reply") as openai,
+    ):
+        result = service.categorize("some confession text")
+
+    # Assert
+    assert result == "openai reply"
+    openai.assert_called_once()
+
+
+def test_auto_chain_raises_when_every_provider_returns_empty() -> None:
+    # Arrange
+    service = LLMService()
+
+    # Act / Assert
+    with (
+        patch.object(LLMService, "_call_ollama", return_value=""),
+        patch.object(LLMService, "_call_gemini", return_value=""),
+        patch.object(LLMService, "_call_openai", return_value=""),
+        pytest.raises(CategorizationError),
+    ):
+        service.categorize("some confession text")
+
+
+def test_call_gemini_skips_network_call_when_api_key_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "")
+    service = LLMService(provider="gemini")
+
+    # Act
+    with patch("httpx.post") as mock_post:
+        result = service._call_gemini("a prompt")
+
+    # Assert
+    assert result == ""
+    mock_post.assert_not_called()
+
+
+def test_call_gemini_parses_reply_text_from_candidates_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    monkeypatch.setattr(settings, "GEMINI_API_KEY", "test-key")
+    service = LLMService(provider="gemini")
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "candidates": [{"content": {"parts": [{"text": "gemini says hi"}]}}]
+    }
+
+    # Act
+    with patch("httpx.post", return_value=mock_response) as mock_post:
+        result = service._call_gemini("a prompt")
+
+    # Assert
+    assert result == "gemini says hi"
+    mock_post.assert_called_once()
+
+
+def test_call_ollama_returns_empty_string_when_server_unreachable() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+
+    # Act
+    with patch("httpx.post", side_effect=ConnectionError("connection refused")):
+        result = service._call_ollama("a prompt")
+
+    # Assert
+    assert result == ""
+
+
+def test_call_ollama_parses_reply_text_from_chat_message_response() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    mock_response = Mock()
+    mock_response.json.return_value = {
+        "message": {"role": "assistant", "content": "local reply"}
+    }
+
+    # Act
+    with patch("httpx.post", return_value=mock_response):
+        result = service._call_ollama("a prompt")
+
+    # Assert
+    assert result == "local reply"
 
 
 def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:

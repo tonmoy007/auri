@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from typing import Final, Literal
 
 from app.config import settings
@@ -10,21 +11,27 @@ from app.exceptions import CategorizationError, CounselingError, SummarizationEr
 
 logger = logging.getLogger(__name__)
 
-Provider = Literal["openai", "claude"]
+Provider = Literal["auto", "ollama", "gemini", "openai", "claude"]
 
 _CONTENT_START: Final[str] = "<<<BEGIN_USER_CONTENT>>>"
 _CONTENT_END: Final[str] = "<<<END_USER_CONTENT>>>"
+
+# Chain tried by provider="auto": local Ollama first (free, private), then
+# Gemini, then OpenAI as the final paid fallback. Claude is opt-in only —
+# not part of the automatic chain.
+_AUTO_CHAIN: Final[tuple[Provider, ...]] = ("ollama", "gemini", "openai")
 
 
 class LLMService:
     """Thin wrapper around LLM providers for Auri-specific tasks.
 
     Each method sends a structured prompt to the configured provider and
-    returns the parsed result.  The class defaults to OpenAI but can be
-    switched to Claude via the ``provider`` argument.
+    returns the parsed result. The class defaults to ``"auto"``, which
+    tries each provider in :data:`_AUTO_CHAIN` in order and returns the
+    first non-empty response — pass an explicit provider to pin one.
     """
 
-    def __init__(self, provider: Provider = "openai") -> None:
+    def __init__(self, provider: Provider = "auto") -> None:
         self._provider: Provider = provider
 
     # ── Public API ────────────────────────────────────────────────────────
@@ -228,12 +235,100 @@ class LLMService:
 
     def _call_llm(self, prompt: str) -> str:
         """Route *prompt* to the active provider and return the response text."""
-        if self._provider == "openai":
+        if self._provider == "auto":
+            return self._call_auto_chain(prompt)
+        elif self._provider == "ollama":
+            return self._call_ollama(prompt)
+        elif self._provider == "gemini":
+            return self._call_gemini(prompt)
+        elif self._provider == "openai":
             return self._call_openai(prompt)
         elif self._provider == "claude":
             return self._call_claude(prompt)
         else:
             raise ValueError(f"Unsupported LLM provider: {self._provider!r}")
+
+    def _call_auto_chain(self, prompt: str) -> str:
+        """Try each provider in :data:`_AUTO_CHAIN`, returning the first non-empty reply.
+
+        Each provider already fails safe (returns ``""`` on error), so this
+        just walks the chain and logs which provider — if any — answered.
+        """
+        callers: dict[Provider, Callable[[str], str]] = {
+            "ollama": self._call_ollama,
+            "gemini": self._call_gemini,
+            "openai": self._call_openai,
+        }
+        for candidate in _AUTO_CHAIN:
+            reply = callers[candidate](prompt)
+            if reply.strip():
+                logger.debug("LLM auto chain: %s answered", candidate)
+                return reply
+        logger.error("LLM auto chain: all providers (%s) failed", _AUTO_CHAIN)
+        return ""
+
+    def _call_ollama(self, prompt: str) -> str:
+        """Send *prompt* to a local Ollama server and return the reply.
+
+        Silently returns ``""`` if Ollama isn't reachable (e.g. not running
+        locally) — this is the expected/common case, not an error, since
+        Ollama is the first, opportunistic link in the auto chain.
+        """
+        try:
+            import httpx
+        except ImportError as exc:
+            logger.error("httpx package is not installed: %s", exc)
+            return ""
+
+        try:
+            resp = httpx.post(
+                f"{settings.OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": settings.OLLAMA_MODEL,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "stream": False,
+                },
+                timeout=120,
+            )
+            resp.raise_for_status()
+            return resp.json()["message"]["content"] or ""
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
+            logger.warning("Ollama call failed (%s); falling through chain.", exc)
+            return ""
+
+    def _call_gemini(self, prompt: str) -> str:
+        """Send *prompt* to Google Gemini and return the assistant reply.
+
+        Returns ``""`` immediately (no call attempted) if
+        ``GEMINI_API_KEY`` isn't configured, or on any call failure.
+        """
+        if not settings.GEMINI_API_KEY:
+            logger.debug("GEMINI_API_KEY is not set — skipping Gemini.")
+            return ""
+
+        try:
+            import httpx
+        except ImportError as exc:
+            logger.error("httpx package is not installed: %s", exc)
+            return ""
+
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            f"{settings.GEMINI_MODEL}:generateContent"
+        )
+        try:
+            resp = httpx.post(
+                url,
+                params={"key": settings.GEMINI_API_KEY},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"] or ""
+        except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
+            logger.warning("Gemini call failed (%s); falling through chain.", exc)
+            return ""
 
     def _call_openai(self, prompt: str) -> str:
         """Send *prompt* to OpenAI ChatCompletion and return the assistant reply.
@@ -249,9 +344,9 @@ class LLMService:
             return ""
 
         try:
-            client = OpenAI(api_key=settings.LLM_API_KEY)
+            client = OpenAI(api_key=settings.OPENAI_API_KEY)
             response = client.chat.completions.create(
-                model=settings.LLM_MODEL,
+                model=settings.OPENAI_MODEL,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
             )
@@ -273,9 +368,9 @@ class LLMService:
             logger.error("httpx package is not installed: %s", exc)
             return ""
 
-        api_key = settings.LLM_API_KEY
+        api_key = settings.ANTHROPIC_API_KEY
         if not api_key:
-            logger.error("LLM_API_KEY is not set — cannot call Claude.")
+            logger.error("ANTHROPIC_API_KEY is not set — cannot call Claude.")
             return ""
 
         headers = {
@@ -284,7 +379,7 @@ class LLMService:
             "content-type": "application/json",
         }
         payload = {
-            "model": settings.LLM_MODEL,
+            "model": settings.ANTHROPIC_MODEL,
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": prompt}],
         }

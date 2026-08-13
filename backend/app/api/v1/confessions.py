@@ -294,8 +294,9 @@ async def create_confession(
 ) -> Confession:
     """Persist a new confession after de-identifying its transcript.
 
-    The transcript is de-identified (regex pass, then an LLM pass via
-    OpenAI) before being stored, and the submitting device is rate-limited
+    The transcript is de-identified (regex pass, then an LLM pass via the
+    provider auto chain — Ollama, Gemini, OpenAI) before being stored, and
+    the submitting device is rate-limited
     to one confession per configured window (AGENTS.md §8.5).
     """
     now = clock()
@@ -307,7 +308,7 @@ async def create_confession(
     user = result.scalar_one_or_none()
     _check_rate_limit(user, now)
 
-    llm_service = LLMService(provider="openai")
+    llm_service = LLMService()
     try:
         deidentified_transcript = llm_service.deidentify(body.transcript)
     except Exception as exc:
@@ -355,7 +356,7 @@ async def preview_confession(
     Lets the Review screen show the confessor a real AI summary before they
     decide whether to submit — nothing here is written to the database.
     """
-    llm_service = LLMService(provider="openai")
+    llm_service = LLMService()
     try:
         deidentified_transcript = llm_service.deidentify(body.transcript)
     except Exception as exc:
