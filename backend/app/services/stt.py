@@ -87,7 +87,7 @@ class WhisperTranscriber:
 
         Requires ``OPENAI_API_KEY`` to be set in the environment.
         """
-        api_key = settings.LLM_API_KEY
+        api_key = settings.OPENAI_API_KEY
         if not api_key:
             logger.error("OPENAI_API_KEY is not set — cannot use API fallback.")
             return ""
