@@ -106,6 +106,27 @@ services:
     networks:
       - auri-net
 
+  # ---------------------------------------------------------------------------
+  # LiveKit — self-hosted real-time voice SFU (Phase 7, local dev only)
+  # ---------------------------------------------------------------------------
+  # --dev mode hardcodes API key/secret to devkey/secret (no cloud account
+  # needed). --bind 0.0.0.0 makes the signal server reachable from a real
+  # device on the same LAN (dev machine's LAN IP, not localhost). Media
+  # (RTC/UDP) is only reachable on the LAN — do not tunnel this through ngrok.
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: auri-livekit
+    restart: unless-stopped
+    profiles:
+      - optional
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      - "7880:7880" # signal (HTTP/WS)
+      - "7881:7881" # RTC/TCP fallback
+      - "7882:7882/udp" # RTC/UDP mux
+    networks:
+      - auri-net
+
 # ---------------------------------------------------------------------------
 # Networks
 # ---------------------------------------------------------------------------
