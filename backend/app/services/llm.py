@@ -8,6 +8,7 @@ from typing import Final, Literal
 
 from app.config import settings
 from app.exceptions import CategorizationError, CounselingError, SummarizationError
+from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -282,9 +283,9 @@ class LLMService:
 
         try:
             resp = httpx.post(
-                f"{settings.OLLAMA_BASE_URL}/api/chat",
+                f"{get_config('OLLAMA_BASE_URL', settings.OLLAMA_BASE_URL)}/api/chat",
                 json={
-                    "model": settings.OLLAMA_MODEL,
+                    "model": get_config("OLLAMA_MODEL", settings.OLLAMA_MODEL),
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                 },
@@ -302,7 +303,8 @@ class LLMService:
         Returns ``""`` immediately (no call attempted) if
         ``GEMINI_API_KEY`` isn't configured, or on any call failure.
         """
-        if not settings.GEMINI_API_KEY:
+        gemini_api_key = get_config("GEMINI_API_KEY", settings.GEMINI_API_KEY)
+        if not gemini_api_key:
             logger.debug("GEMINI_API_KEY is not set — skipping Gemini.")
             return ""
 
@@ -314,12 +316,12 @@ class LLMService:
 
         url = (
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{settings.GEMINI_MODEL}:generateContent"
+            f"{get_config('GEMINI_MODEL', settings.GEMINI_MODEL)}:generateContent"
         )
         try:
             resp = httpx.post(
                 url,
-                params={"key": settings.GEMINI_API_KEY},
+                params={"key": gemini_api_key},
                 json={"contents": [{"parts": [{"text": prompt}]}]},
                 timeout=60,
             )
@@ -344,9 +346,9 @@ class LLMService:
             return ""
 
         try:
-            client = OpenAI(api_key=settings.OPENAI_API_KEY)
+            client = OpenAI(api_key=get_config("OPENAI_API_KEY", settings.OPENAI_API_KEY))
             response = client.chat.completions.create(
-                model=settings.OPENAI_MODEL,
+                model=get_config("OPENAI_MODEL", settings.OPENAI_MODEL),
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
             )
@@ -368,7 +370,7 @@ class LLMService:
             logger.error("httpx package is not installed: %s", exc)
             return ""
 
-        api_key = settings.ANTHROPIC_API_KEY
+        api_key = get_config("ANTHROPIC_API_KEY", settings.ANTHROPIC_API_KEY)
         if not api_key:
             logger.error("ANTHROPIC_API_KEY is not set — cannot call Claude.")
             return ""
@@ -379,7 +381,7 @@ class LLMService:
             "content-type": "application/json",
         }
         payload = {
-            "model": settings.ANTHROPIC_MODEL,
+            "model": get_config("ANTHROPIC_MODEL", settings.ANTHROPIC_MODEL),
             "max_tokens": 1024,
             "messages": [{"role": "user", "content": prompt}],
         }

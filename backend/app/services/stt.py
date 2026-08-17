@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from app.config import settings
 from app.exceptions import STTError
+from app.services.settings_service import get_config
 
 if TYPE_CHECKING:
     from faster_whisper import WhisperModel  # type: ignore[import-untyped]
@@ -29,7 +30,9 @@ class WhisperTranscriber:
             model_name: Path or size tag for the faster-whisper model
                 (defaults to ``settings.WHISPER_MODEL``).
         """
-        self._model_name: str = model_name or settings.WHISPER_MODEL
+        self._model_name: str = model_name or get_config(
+            "WHISPER_MODEL", settings.WHISPER_MODEL
+        )
         self._model: WhisperModel | None = None  # Lazy-loaded on first call.
 
     def _load_model(self) -> None:
@@ -87,7 +90,7 @@ class WhisperTranscriber:
 
         Requires ``OPENAI_API_KEY`` to be set in the environment.
         """
-        api_key = settings.OPENAI_API_KEY
+        api_key = get_config("OPENAI_API_KEY", settings.OPENAI_API_KEY)
         if not api_key:
             logger.error("OPENAI_API_KEY is not set — cannot use API fallback.")
             return ""
