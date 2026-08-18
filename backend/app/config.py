@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     MODERATION_API_KEY: str = ""  # shared secret the bot uses to call /moderation/*
     DELIVERY_API_KEY: str = ""  # shared secret the bot uses to call /delivery/*
 
+    # ── Admin dashboard (Phase 10, local dev) ───────────────────────────────
+    ADMIN_API_KEY: str = ""  # shared secret for the config/build dashboard's /admin/* routes
+
+    # ── LiveKit (Phase 7) ────────────────────────────────────────────────────
+    # Self-hosted only — see docker-compose.yml's `livekit` service (--dev
+    # mode). Defaults match that service's devkey/secret; LAN IP (not
+    # localhost) is required for a real device to connect.
+    LIVEKIT_URL: str = "ws://localhost:7880"
+    LIVEKIT_API_KEY: str = "devkey"
+    LIVEKIT_API_SECRET: str = "secret"
+
     # ── Recipient directory ──────────────────────────────────────────────
     DEPARTMENTS: str = "HR,Engineering,Management"  # comma-separated, admin-managed
 

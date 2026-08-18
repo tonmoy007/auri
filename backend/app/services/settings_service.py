@@ -36,6 +36,11 @@ def get_config(key: str, default: str) -> str:
     return _cache.get(key, default)
 
 
+def is_overridden(key: str) -> bool:
+    """Return ``True`` if *key* has a DB override (vs. falling back to default)."""
+    return key in _cache
+
+
 def get_config_json(key: str, default: object) -> object:
     """Like :func:`get_config`, but JSON-decodes the stored value.
 
