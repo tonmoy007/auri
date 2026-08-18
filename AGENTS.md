@@ -204,6 +204,13 @@ Test matrix: 5 devices per tier, covering **iOS Safari**, **Chrome Android**, **
 - Fall back gracefully to a 2D scene if WebGL fails.
 - Loading spinner while 3D assets load. Never show a blank screen.
 
+### 6.4 Web Dashboard UI Stack (Phase 10)
+The admin/config dashboard (`dashboard/`) is the one genuine web surface in this repo — everything in §6.1–6.3 above is Expo/React Native; this subsection is web-only, for `dashboard/` specifically.
+- **shadcn/ui** for every component — no hand-rolled button/input/dialog/table duplicating what shadcn already provides. Add components via the shadcn MCP tools or `npx shadcn add <component>`, never copy-pasted from memory.
+- **Maintainable design system**: theme tokens (colors, spacing, radii, typography) centralized as CSS variables / Tailwind config — never hardcoded hex or px scattered across components. Light/dark theme is a token swap, not per-component conditionals.
+- Modern component patterns: composition over prop-drilling giant components, `React.forwardRef` for primitives (mirrors §7.2), Tailwind utility classes over ad-hoc CSS files.
+- **Mobile (`mobile/`) work uses the Expo MCP server + Expo skills** (`expo-router`, `expo-native-ui`, `expo-data-fetching`, etc.) — consult the relevant skill before hand-rolling a pattern it already documents.
+
 ---
 
 ## 7. Code Quality & Maintainability
