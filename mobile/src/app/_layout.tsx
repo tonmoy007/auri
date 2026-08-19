@@ -1,15 +1,34 @@
 // Auri — Root layout with Stack navigator and dark theme configuration
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '../theme/colors';
+import { loadBackendUrlOverride } from '../config/api';
 
 /**
  * Root layout for the Expo Router app.
  * Configures navigation theme, stack transitions, and status bar appearance.
  */
-export default function RootLayout(): React.JSX.Element {
+export default function RootLayout(): React.JSX.Element | null {
+  const [backendUrlLoaded, setBackendUrlLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadBackendUrlOverride().finally(() => {
+      if (!cancelled) setBackendUrlLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Every screen fetches via config/api.ts's getApiBaseUrl()/getWsUrl(),
+  // which read a runtime override hydrated here — wait for it so the first
+  // fetch doesn't race the secure-store read and use the stale build-time
+  // default for one frame.
+  if (!backendUrlLoaded) return null;
+
   return (
     <>
       <StatusBar style="light" />

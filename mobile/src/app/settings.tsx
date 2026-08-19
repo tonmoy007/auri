@@ -6,6 +6,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
+  TextInput,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
@@ -19,6 +20,7 @@ import { typography, spacing, borderRadius } from '../theme';
 import { VoiceMaskSelector } from '../components/VoiceMaskSelector';
 import { useHaptics } from '../hooks/useHaptics';
 import { useSettings } from '../hooks/useSettings';
+import { useBackendUrl } from '../hooks/useBackendUrl';
 import {
   getDeviceIdentityReference,
   resetDeviceToken,
@@ -44,6 +46,21 @@ export default function SettingsScreen(): React.JSX.Element {
   const [identityRef, setIdentityRef] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
   const haptics = useHaptics();
+  const {
+    override: backendUrlOverride,
+    defaultUrl: backendDefaultUrl,
+    isLoaded: isBackendUrlLoaded,
+    save: saveBackendUrl,
+    reset: resetBackendUrl,
+  } = useBackendUrl();
+  const [backendUrlDraft, setBackendUrlDraft] = useState('');
+  const [backendUrlError, setBackendUrlError] = useState(false);
+
+  useEffect(() => {
+    if (isBackendUrlLoaded) {
+      setBackendUrlDraft(backendUrlOverride ?? backendDefaultUrl);
+    }
+  }, [isBackendUrlLoaded, backendUrlOverride, backendDefaultUrl]);
 
   useEffect(() => {
     let cancelled = false;
@@ -96,6 +113,19 @@ export default function SettingsScreen(): React.JSX.Element {
     },
     [haptics, setDefaultEnvironment],
   );
+
+  const handleSaveBackendUrl = useCallback(async () => {
+    const ok = await saveBackendUrl(backendUrlDraft);
+    setBackendUrlError(!ok);
+    if (ok) haptics.success();
+  }, [saveBackendUrl, backendUrlDraft, haptics]);
+
+  const handleResetBackendUrl = useCallback(async () => {
+    await resetBackendUrl();
+    setBackendUrlDraft(backendDefaultUrl);
+    setBackendUrlError(false);
+    haptics.selectionChanged();
+  }, [resetBackendUrl, backendDefaultUrl, haptics]);
 
   const appVersion = Constants.expoConfig?.version ?? '0.0.0';
 
@@ -185,6 +215,71 @@ export default function SettingsScreen(): React.JSX.Element {
             {isResetting ? 'Resetting…' : 'Reset Anonymous Identity'}
           </Text>
         </TouchableOpacity>
+
+        {/* Developer */}
+        <Text style={[styles.sectionTitle, styles.sectionSpaced]}>
+          Developer
+        </Text>
+
+        <Text style={styles.fieldLabel}>Backend URL</Text>
+        <TextInput
+          style={[
+            styles.backendUrlInput,
+            backendUrlError && styles.backendUrlInputError,
+          ]}
+          value={backendUrlDraft}
+          onChangeText={(text) => {
+            setBackendUrlDraft(text);
+            setBackendUrlError(false);
+          }}
+          placeholder={backendDefaultUrl}
+          placeholderTextColor={colors.slate500}
+          autoCapitalize="none"
+          autoCorrect={false}
+          keyboardType="url"
+          accessibilityLabel="Backend URL"
+        />
+        {backendUrlError && (
+          <Text style={styles.backendUrlErrorText}>
+            Must be a valid http:// or https:// URL.
+          </Text>
+        )}
+        <Text style={styles.identityHint}>
+          {backendUrlOverride
+            ? 'Overriding the build-time default — e.g. an ngrok URL.'
+            : `Using the build-time default (${backendDefaultUrl}).`}
+        </Text>
+
+        <View style={styles.backendUrlActions}>
+          <TouchableOpacity
+            style={[styles.secondaryButton, styles.backendUrlActionButton]}
+            onPress={handleSaveBackendUrl}
+            accessibilityRole="button"
+            accessibilityLabel="Save backend URL"
+          >
+            <Text style={styles.secondaryButtonText}>Save</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.secondaryButton,
+              styles.backendUrlActionButton,
+              !backendUrlOverride && styles.secondaryButtonDisabled,
+            ]}
+            onPress={handleResetBackendUrl}
+            disabled={!backendUrlOverride}
+            accessibilityRole="button"
+            accessibilityLabel="Reset backend URL to default"
+          >
+            <Text
+              style={[
+                styles.secondaryButtonText,
+                !backendUrlOverride && styles.secondaryButtonTextDisabled,
+              ]}
+            >
+              Reset to Default
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* About */}
         <Text style={[styles.sectionTitle, styles.sectionSpaced]}>About</Text>
@@ -298,6 +393,51 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.xs,
     color: colors.slate500,
     lineHeight: 18,
+  },
+  backendUrlInput: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.slate700,
+    backgroundColor: colors.slate800,
+    color: colors.slate200,
+    fontSize: typography.fontSize.sm,
+    fontFamily: 'monospace',
+  },
+  backendUrlInputError: {
+    borderColor: colors.deepCrimson,
+  },
+  backendUrlErrorText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.deepCrimson,
+    marginTop: spacing.xs,
+  },
+  backendUrlActions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.md,
+  },
+  backendUrlActionButton: {
+    flex: 1,
+  },
+  secondaryButton: {
+    paddingVertical: spacing.md,
+    borderRadius: borderRadius.md,
+    borderWidth: 1.5,
+    borderColor: colors.candleGlow,
+    alignItems: 'center',
+  },
+  secondaryButtonText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.candleGlow,
+  },
+  secondaryButtonTextDisabled: {
+    color: colors.slate600,
+  },
+  secondaryButtonDisabled: {
+    borderColor: colors.slate600,
   },
   dangerButton: {
     paddingVertical: spacing.md,

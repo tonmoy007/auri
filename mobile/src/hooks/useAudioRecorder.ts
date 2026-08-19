@@ -6,11 +6,11 @@ import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import type { AudioRecordingState, VoiceMask } from '../types';
 import {
-  API_BASE_URL,
   AUDIO_CONFIG,
   ENDPOINTS,
   MAX_RECORDING_DURATION_MS,
   REQUEST_TIMEOUT_MS,
+  getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
 
@@ -51,7 +51,7 @@ function uploadForTranscription(
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.timeout = REQUEST_TIMEOUT_MS;
-    xhr.open('POST', `${API_BASE_URL}${ENDPOINTS.stt}`);
+    xhr.open('POST', `${getApiBaseUrl()}${ENDPOINTS.stt}`);
     xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
 
     xhr.upload.onprogress = (event) => {
@@ -383,7 +383,7 @@ export function useAudioRecorder() {
         } as unknown as Blob);
         formData.append('mask', mask);
 
-        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.voiceMask}`, {
+        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
           method: 'POST',
           headers: { 'X-Device-Token-Hash': deviceTokenHash },
           body: formData,

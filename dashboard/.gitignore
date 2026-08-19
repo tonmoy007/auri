@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# playwright-cli session artifacts (snapshots, console logs)
+.playwright-cli/
