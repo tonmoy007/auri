@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { toast, Toaster } from 'sonner'
+import { BuildPanel } from '@/components/BuildPanel'
 import { ConfigTable } from '@/components/ConfigTable'
 import { ConnectionBar } from '@/components/ConnectionBar'
 import { StatusPanel } from '@/components/StatusPanel'
@@ -105,6 +106,7 @@ function App() {
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="status">Status</TabsTrigger>
+          <TabsTrigger value="build">Build</TabsTrigger>
         </TabsList>
 
         <TabsContent value="config" className="space-y-6">
@@ -147,6 +149,23 @@ function App() {
             onRefresh={loadStatus}
             refreshing={refreshingStatus}
           />
+        </TabsContent>
+
+        <TabsContent value="build" className="space-y-6">
+          <BuildPanel
+            baseUrl={baseUrl}
+            adminKey={adminKey}
+            suggestedBackendUrl={ngrok?.public_url ?? null}
+          />
+          {config && (
+            <ConfigTable
+              title="Build Settings"
+              description="Local build-tool overrides."
+              entries={config.build}
+              onSave={handleSave}
+              onReset={handleReset}
+            />
+          )}
         </TabsContent>
       </Tabs>
     </div>

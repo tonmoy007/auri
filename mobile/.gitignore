@@ -4,3 +4,9 @@
 
 expo-env.d.ts
 # @end expo-cli
+
+# Local env overrides (e.g. EXPO_PUBLIC_API_URL written by the dashboard's
+# "Build APK" action, task 10.6) — machine/session-specific, never commit.
+.env
+.env.local
+.env.*.local

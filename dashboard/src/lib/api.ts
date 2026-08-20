@@ -8,6 +8,17 @@ export interface ConfigResponse {
   llm: ConfigEntry[]
   stt: ConfigEntry[]
   voice_masks: ConfigEntry[]
+  build: ConfigEntry[]
+}
+
+export type BuildStatusValue = 'idle' | 'running' | 'success' | 'failed'
+
+export interface BuildStatus {
+  status: BuildStatusValue
+  log: string
+  apk_path: string | null
+  started_at: number | null
+  finished_at: number | null
 }
 
 export interface NgrokStatus {
@@ -71,4 +82,13 @@ export const adminApi = {
 
   getLiveKitStatus: (baseUrl: string, adminKey: string) =>
     request<LiveKitStatus>(baseUrl, adminKey, '/livekit'),
+
+  startBuild: (baseUrl: string, adminKey: string, backendUrl: string) =>
+    request<BuildStatus>(baseUrl, adminKey, '/build-apk', {
+      method: 'POST',
+      body: JSON.stringify({ backend_url: backendUrl }),
+    }),
+
+  getBuildStatus: (baseUrl: string, adminKey: string) =>
+    request<BuildStatus>(baseUrl, adminKey, '/build-apk/status'),
 }

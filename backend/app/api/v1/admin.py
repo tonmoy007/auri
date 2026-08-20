@@ -7,8 +7,13 @@ in moderation.py).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import os
+import re
+import time
+from pathlib import Path
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, status
@@ -38,7 +43,17 @@ _LLM_KEYS: tuple[str, ...] = (
 )
 _STT_KEYS: tuple[str, ...] = ("WHISPER_MODEL",)
 _VOICE_MASK_KEYS: tuple[str, ...] = tuple(f"VOICE_MASK_{name.upper()}" for name in MASKS)
-ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS)
+# ANDROID_JAVA_HOME: optional JAVA_HOME override for the "Build APK" action
+# (task 10.6) — Android Gradle Plugin requires Java 17, which isn't every
+# machine's default `java`. Empty means "inherit the backend process's own
+# JAVA_HOME".
+_BUILD_KEYS: tuple[str, ...] = ("ANDROID_JAVA_HOME",)
+ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUILD_KEYS)
+
+# repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
+_MOBILE_DIR = Path(__file__).resolve().parents[4] / "mobile"
+_APK_PATH = _MOBILE_DIR / "android" / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
+_MAX_LOG_LINES = 2000
 
 _SECRET_SUFFIXES = ("_API_KEY", "_API_SECRET")
 
@@ -86,6 +101,7 @@ class ConfigResponse(BaseModel):
     llm: list[ConfigEntry]
     stt: list[ConfigEntry]
     voice_masks: list[ConfigEntry]
+    build: list[ConfigEntry]
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -132,6 +148,7 @@ async def get_config_all() -> ConfigResponse:
         llm=_entries(_LLM_KEYS),
         stt=_entries(_STT_KEYS),
         voice_masks=_entries(_VOICE_MASK_KEYS),
+        build=_entries(_BUILD_KEYS),
     )
 
 
@@ -211,6 +228,158 @@ async def get_ngrok_status() -> NgrokStatus:
     if not https_urls:
         return NgrokStatus(running=False)
     return NgrokStatus(running=True, public_url=https_urls[0])
+
+
+class BuildRequest(BaseModel):
+    """Body for ``POST /admin/build-apk`` — the URL to bake into the APK."""
+
+    backend_url: str
+
+
+class BuildStatus(BaseModel):
+    """Current state of the (at most one, at a time) local APK build."""
+
+    status: str  # "idle" | "running" | "success" | "failed"
+    log: str
+    apk_path: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
+
+
+class _BuildState:
+    """Module-level build state — single-operator local dev tool, so one
+    build at a time is a deliberate simplification, not a missing feature."""
+
+    def __init__(self) -> None:
+        self.status = "idle"
+        self.log: list[str] = []
+        self.apk_path: str | None = None
+        self.started_at: float | None = None
+        self.finished_at: float | None = None
+
+    def append(self, line: str) -> None:
+        self.log.append(line)
+        if len(self.log) > _MAX_LOG_LINES:
+            self.log = self.log[-_MAX_LOG_LINES:]
+
+    def snapshot(self) -> BuildStatus:
+        return BuildStatus(
+            status=self.status,
+            log="\n".join(self.log),
+            apk_path=self.apk_path,
+            started_at=self.started_at,
+            finished_at=self.finished_at,
+        )
+
+
+_build_state = _BuildState()
+
+
+def _derive_ws_url(base_url: str) -> str:
+    """Mirror mobile's ``config/api.ts`` ``deriveWsUrl`` (http→ws, https→wss)."""
+    return re.sub(r"^http", "ws", base_url) + "/ws/confession"
+
+
+async def _run_build(backend_url: str, java_home: str) -> None:
+    """Write mobile/.env.local, run gradlew assembleRelease, stream output into `_build_state`.
+
+    Release, not debug: the debug build type relies on a live Metro
+    connection and never embeds a JS bundle at all (confirmed empirically —
+    an assembleDebug APK's assets/ has no bundle file), which would silently
+    defeat the entire point of this action. Release embeds the bundle via
+    Expo's `export:embed`, where EXPO_PUBLIC_API_URL actually gets inlined.
+    The debug keystore signs it (see android/app/build.gradle — no real
+    release keystore is configured yet), so it installs without extra setup.
+
+    Caller (`start_build`) has already flipped `_build_state.status` to
+    "running" synchronously — this coroutine doesn't run until the event
+    loop next yields, so doing it here instead would race a concurrent
+    request's "is a build already running?" check.
+    """
+    env_local = _MOBILE_DIR / ".env.local"
+    env_local.write_text(
+        f"EXPO_PUBLIC_API_URL={backend_url}\n"
+        f"EXPO_PUBLIC_WS_URL={_derive_ws_url(backend_url)}\n"
+    )
+    _build_state.append(f"Wrote {env_local} for this build.")
+
+    env = {**os.environ}
+    if java_home:
+        env["JAVA_HOME"] = java_home
+
+    gradlew = _MOBILE_DIR / "android" / "gradlew"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            str(gradlew),
+            "assembleRelease",
+            "--console=plain",
+            cwd=str(_MOBILE_DIR / "android"),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+    except FileNotFoundError as exc:
+        _build_state.append(f"Failed to start gradlew: {exc}")
+        _build_state.status = "failed"
+        _build_state.finished_at = time.time()
+        return
+
+    assert proc.stdout is not None  # PIPE was requested above, stdout is always set
+    async for raw_line in proc.stdout:
+        _build_state.append(raw_line.decode(errors="replace").rstrip())
+
+    returncode = await proc.wait()
+    _build_state.finished_at = time.time()
+    if returncode == 0 and _APK_PATH.exists():
+        _build_state.status = "success"
+        _build_state.apk_path = str(_APK_PATH)
+        _build_state.append(f"Build succeeded: {_APK_PATH}")
+    else:
+        _build_state.status = "failed"
+        _build_state.append(f"gradlew exited {returncode}")
+
+
+@router.post(
+    "/build-apk",
+    response_model=BuildStatus,
+    dependencies=[Depends(require_admin)],
+    summary="Build a standalone APK locally with the given backend URL baked in",
+)
+async def start_build(body: BuildRequest) -> BuildStatus:
+    """Kick off ``gradlew assembleRelease`` in the background; poll `GET
+    /admin/build-apk/status` for progress. Rejects a second build while one
+    is already running (409) — this is a single-operator local dev tool."""
+    if not re.match(r"^https?://.+", body.backend_url):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="backend_url must be a valid http:// or https:// URL",
+        )
+    if _build_state.status == "running":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A build is already running",
+        )
+
+    _build_state.status = "running"
+    _build_state.log = []
+    _build_state.apk_path = None
+    _build_state.started_at = time.time()
+    _build_state.finished_at = None
+
+    java_home = settings_service.get_config("ANDROID_JAVA_HOME", "")
+    asyncio.create_task(_run_build(body.backend_url.rstrip("/"), java_home))
+    return _build_state.snapshot()
+
+
+@router.get(
+    "/build-apk/status",
+    response_model=BuildStatus,
+    dependencies=[Depends(require_admin)],
+    summary="Poll the current (or most recent) local APK build's status and log",
+)
+async def get_build_status() -> BuildStatus:
+    """Return the in-memory build state — resets when the backend restarts."""
+    return _build_state.snapshot()
 
 
 @router.get(
