@@ -1,0 +1,38 @@
+# ---- Build stage ----
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# ---- Runtime stage ----
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install runtime system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r auri && useradd -r -g auri -d /app -s /bin/false auri
+
+# Copy installed deps from builder
+COPY --from=builder /root/.local /root/.local
+
+# Copy backend code
+COPY backend/ /app/backend/
+
+# Ensure scripts are in PATH
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONPATH=/app
+
+USER auri
+
+CMD ["python", "-m", "backend.app.agent", "start"]

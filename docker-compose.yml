@@ -127,6 +127,36 @@ services:
     networks:
       - auri-net
 
+  # ---------------------------------------------------------------------------
+  # Agent — LiveKit Agents Python worker (Phase 7/10.7, local dev only)
+  # ---------------------------------------------------------------------------
+  # Connectivity wiring only (task 10.7) — joins a room and confirms it can
+  # authenticate against the self-hosted `livekit` service above. The full
+  # STT/LLM/TTS booth conversation is task 7.3.
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: auri-agent:latest
+    container_name: auri-agent
+    restart: unless-stopped
+    profiles:
+      - optional
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-auri}:${DB_PASSWORD:-auri}@db:5432/${DB_NAME:-auri}
+      # Container-network hostname, not the host-facing localhost default in .env.
+      - LIVEKIT_URL=ws://livekit:7880
+    depends_on:
+      db:
+        condition: service_healthy
+      livekit:
+        condition: service_started
+    networks:
+      - auri-net
+
 # ---------------------------------------------------------------------------
 # Networks
 # ---------------------------------------------------------------------------
