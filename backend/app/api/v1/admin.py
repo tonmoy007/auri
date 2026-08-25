@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import time
 from pathlib import Path
 
@@ -53,6 +54,17 @@ ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUIL
 # repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
 _MOBILE_DIR = Path(__file__).resolve().parents[4] / "mobile"
 _APK_PATH = _MOBILE_DIR / "android" / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
+# Gradle's createBundleReleaseJsAndAssets task doesn't declare .env.local as
+# an input, so it happily marks itself UP-TO-DATE and reuses a stale JS
+# bundle (with a stale baked-in EXPO_PUBLIC_API_URL) when nothing else
+# changed — confirmed empirically by extracting a "successful" build's APK
+# and finding a URL from days earlier. Deleting these output dirs before
+# each build forces the task to regenerate them regardless of Gradle's own
+# staleness check.
+_STALE_BUNDLE_DIRS: tuple[Path, ...] = (
+    _MOBILE_DIR / "android" / "app" / "build" / "generated" / "assets" / "createBundleReleaseJsAndAssets",
+    _MOBILE_DIR / "android" / "app" / "build" / "generated" / "res" / "createBundleReleaseJsAndAssets",
+)
 _MAX_LOG_LINES = 2000
 
 _SECRET_SUFFIXES = ("_API_KEY", "_API_SECRET")
@@ -281,6 +293,25 @@ def _derive_ws_url(base_url: str) -> str:
 
 
 async def _run_build(backend_url: str, java_home: str) -> None:
+    """Run the build, guaranteeing `_build_state` never gets stuck at "running".
+
+    This coroutine is launched via ``asyncio.create_task`` — fire-and-forget,
+    no caller ever awaits it — so an unhandled exception here doesn't
+    propagate anywhere; it just vanishes into asyncio's "Task exception was
+    never retrieved" log and leaves the dashboard polling a "running" status
+    forever. Real bug, caught live: running the backend from a container
+    without `mobile/` on disk hit exactly this (`_run_build_steps`'s first
+    line, `.write_text()` on a nonexistent directory) and hung silently.
+    """
+    try:
+        await _run_build_steps(backend_url, java_home)
+    except Exception as exc:  # noqa: BLE001 — fire-and-forget task boundary; must never leave _build_state stuck at "running" (see docstring)
+        _build_state.append(f"Build crashed: {exc}")
+        _build_state.status = "failed"
+        _build_state.finished_at = time.time()
+
+
+async def _run_build_steps(backend_url: str, java_home: str) -> None:
     """Write mobile/.env.local, run gradlew assembleRelease, stream output into `_build_state`.
 
     Release, not debug: the debug build type relies on a live Metro
@@ -302,6 +333,11 @@ async def _run_build(backend_url: str, java_home: str) -> None:
         f"EXPO_PUBLIC_WS_URL={_derive_ws_url(backend_url)}\n"
     )
     _build_state.append(f"Wrote {env_local} for this build.")
+
+    for stale_dir in _STALE_BUNDLE_DIRS:
+        shutil.rmtree(stale_dir, ignore_errors=True)
+    _APK_PATH.unlink(missing_ok=True)
+    _build_state.append("Cleared cached JS bundle output — forcing a fresh embed this build.")
 
     env = {**os.environ}
     if java_home:

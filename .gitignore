@@ -38,6 +38,7 @@ backend/alembic/versions/*.pyc
 # Agent / tool artifacts
 .agents/
 .kiro/
+.playwright-cli/
 
 # Logs
 *.log

@@ -16,6 +16,9 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-auri}:${DB_PASSWORD:-auri}@db:5432/${DB_NAME:-auri}
+      # Container-network hostname, not the host-facing localhost default in .env —
+      # otherwise the admin dashboard's LiveKit status probe always reports unreachable.
+      - LIVEKIT_URL=ws://livekit:7880
     depends_on:
       db:
         condition: service_healthy
