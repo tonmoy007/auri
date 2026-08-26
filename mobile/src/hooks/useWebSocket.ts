@@ -2,7 +2,7 @@
 // WebSocket connection management with auto-reconnect
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { WS_URL, WS_EVENTS } from '../config/api';
+import { WS_EVENTS, getWsUrl } from '../config/api';
 import type {
   WebSocketConnectionState,
   WebSocketMessage,
@@ -127,7 +127,7 @@ export function useWebSocket({
     setConnectionState('connecting');
     setError(null);
 
-    const wsUrl = `${WS_URL}?session_id=${sessionId}`;
+    const wsUrl = `${getWsUrl()}?session_id=${sessionId}`;
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {

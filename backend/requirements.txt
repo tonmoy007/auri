@@ -18,3 +18,4 @@ structlog>=24.1.0
 pgpy>=0.6.0
 sentry-sdk[fastapi]>=2.0.0
 prometheus-client>=0.20.0
+livekit-agents>=1.6.10

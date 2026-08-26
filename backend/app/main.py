@@ -13,9 +13,10 @@ from pydantic import BaseModel
 
 from app.api.v1 import router as api_v1_router
 from app.config import parse_comma_separated_list, settings
-from app.database import engine
+from app.database import async_session_factory, engine
 from app.exceptions import RateLimitError
 from app.observability import init_sentry, mount_metrics
+from app.services.settings_service import load_cache as load_config_cache
 
 # ── Logging initialisation ───────────────────────────────────────────────
 
@@ -73,6 +74,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     else:
         logger.info(
             "Skipping auto-create; run 'alembic upgrade head' to apply migrations"
+        )
+
+    try:
+        async with async_session_factory() as session:
+            await load_config_cache(session)
+    except Exception as exc:  # noqa: BLE001 — dashboard config cache is an optional live-override layer; failing to load it should fall back to Settings()/.env, not crash startup
+        logger.warning(
+            "Could not load live config overrides (DB may not be ready)", error=str(exc)
         )
 
     yield

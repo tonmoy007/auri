@@ -52,6 +52,7 @@ The plan markdown file (`.hermes/plans/<timestamp>-auri-plan.md`) must stay in s
 - Never mark a task `completed` without the corresponding commit existing (see `AGENTS.md` §1.2–1.3).
 - Never delete a phase or task from either file — mark it `blocked` or superseded instead, so history stays intact.
 - If `tracking.json` and the plan file ever disagree, `tracking.json` is authoritative for status; the plan file is authoritative for scope/description. Reconcile immediately, don't proceed until they match.
+- Any task touching `dashboard/` (web UI) or `mobile/` (Expo) must follow `AGENTS.md` §6.4 — shadcn/ui + design-system tokens for the dashboard, Expo MCP/skills for mobile. Do not scaffold ad-hoc UI code that skips it.
 
 ---
 

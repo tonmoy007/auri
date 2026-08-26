@@ -1,18 +1,66 @@
 // Auri — API configuration constants
 // Centralized endpoints and connection settings
 
-/**
- * Base URL for the Auri backend API.
- * In production, this would be set via environment variable.
- */
-export const API_BASE_URL: string =
-  process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:8000';
+import * as SecureStore from 'expo-secure-store';
 
 /**
- * WebSocket URL for real-time audio streaming.
+ * Backend URL storage key — exported so `useBackendUrl` reads/writes the
+ * same slot this module's in-memory override is hydrated from.
  */
-export const WS_URL: string =
+export const BACKEND_URL_STORAGE_KEY = 'auri_backend_url_override';
+
+/**
+ * Build-time default base URL — set via `EXPO_PUBLIC_API_URL` at `eas build`
+ * time. A dashboard-configured runtime override (see `setBackendUrlOverride`)
+ * takes precedence once loaded, so a single APK survives a changing ngrok
+ * URL without a rebuild.
+ */
+const DEFAULT_API_BASE_URL: string =
+  process.env['EXPO_PUBLIC_API_URL'] ?? 'http://localhost:8000';
+
+const DEFAULT_WS_URL: string =
   process.env['EXPO_PUBLIC_WS_URL'] ?? 'ws://localhost:8000/ws/confession';
+
+let backendUrlOverride: string | null = null;
+
+/** Derive the WebSocket URL from a base URL (http→ws, https→wss). */
+function deriveWsUrl(baseUrl: string): string {
+  return `${baseUrl.replace(/^http/, 'ws')}/ws/confession`;
+}
+
+/** Current effective API base URL — runtime override if set, else the build-time default. */
+export function getApiBaseUrl(): string {
+  return backendUrlOverride ?? DEFAULT_API_BASE_URL;
+}
+
+/** Current effective WebSocket URL — derived from the same override as {@link getApiBaseUrl}. */
+export function getWsUrl(): string {
+  return backendUrlOverride ? deriveWsUrl(backendUrlOverride) : DEFAULT_WS_URL;
+}
+
+/** The build-time default, ignoring any runtime override — for display in Settings. */
+export function getDefaultApiBaseUrl(): string {
+  return DEFAULT_API_BASE_URL;
+}
+
+/**
+ * Hydrate the in-memory override from secure storage. Call once, before the
+ * first screen that fetches (root layout) — fetch call sites read
+ * `getApiBaseUrl()`/`getWsUrl()` synchronously and don't await this.
+ */
+export async function loadBackendUrlOverride(): Promise<void> {
+  backendUrlOverride = await SecureStore.getItemAsync(BACKEND_URL_STORAGE_KEY);
+}
+
+/** Set (or, passing `null`, clear) the runtime backend URL override. */
+export async function setBackendUrlOverride(url: string | null): Promise<void> {
+  backendUrlOverride = url;
+  if (url) {
+    await SecureStore.setItemAsync(BACKEND_URL_STORAGE_KEY, url);
+  } else {
+    await SecureStore.deleteItemAsync(BACKEND_URL_STORAGE_KEY);
+  }
+}
 
 /**
  * API endpoint paths.

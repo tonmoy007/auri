@@ -1,0 +1,51 @@
+# ---- Build stage ----
+FROM python:3.11-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY backend/requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# ---- Runtime stage ----
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install runtime system deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r auri && useradd -r -g auri -d /app -s /bin/false auri
+
+# Copy installed deps from builder. /root defaults to 700 (root-only), which
+# blocks the non-root `auri` user below from even traversing into
+# /root/.local/bin — chmod it open so `auri` can execute the installed
+# console scripts (uvicorn, alembic, ...).
+COPY --from=builder /root/.local /root/.local
+RUN chmod 755 /root
+
+# Copy backend code. Some source files on the host checkout carry
+# non-standard restrictive modes (git only tracks the executable bit, not
+# full mode) — COPY preserves those verbatim, so re-assert world-readable
+# regardless of what the host filesystem had.
+COPY backend/ /app/backend/
+RUN chmod -R a+rX /app/backend
+
+# Ensure scripts are in PATH and their --user-installed packages are
+# importable (auri's home is /app, not /root, so PYTHONPATH needs this
+# spelled out). backend/app/*.py's own internal imports (`from app.config
+# import ...`) assume `backend/` itself is on sys.path — not `/app` — so
+# PYTHONPATH points at /app/backend, and the module path below is
+# `app.agent`, not `backend.app.agent`.
+ENV PATH=/root/.local/bin:$PATH \
+    PYTHONPATH=/app/backend:/root/.local/lib/python3.11/site-packages
+
+USER auri
+
+CMD ["python", "-m", "app.agent", "start"]

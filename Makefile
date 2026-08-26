@@ -1,4 +1,4 @@
-.PHONY: help install-backend install-mobile dev-backend dev-bot dev-mobile
+.PHONY: help install-backend install-mobile dev-backend dev-agent dev-bot dev-mobile
 .PHONY: docker-up docker-down docker-build db-migrate db-rollback
 .PHONY: lint test test-e2e clean
 
@@ -19,7 +19,10 @@ install-mobile: ## Install mobile app dependencies
 ## —— Development Servers ——————————————————————————————————————————————————————
 
 dev-backend: ## Run FastAPI backend in development mode
-	uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+
+dev-agent: ## Run the LiveKit Agents worker in dev mode (task 10.7)
+	cd backend && python -m app.agent dev
 
 dev-bot: ## Run Telegram bot in polling mode (development)
 	python -m bot.main

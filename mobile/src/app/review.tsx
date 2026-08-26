@@ -14,7 +14,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
-import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { ShimmerText } from '../components/LoadingStates';
 import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
@@ -80,7 +80,7 @@ export default function ReviewScreen(): React.JSX.Element {
     setSummaryError(null);
     (async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.confessionPreview}`, {
+        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.confessionPreview}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ transcript }),
@@ -127,7 +127,7 @@ export default function ReviewScreen(): React.JSX.Element {
     setActionError(null);
     try {
       const deviceTokenHash = await hashDeviceToken();
-      const response = await fetch(`${API_BASE_URL}${ENDPOINTS.confessions}`, {
+      const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.confessions}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

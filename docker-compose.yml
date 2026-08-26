@@ -16,6 +16,9 @@ services:
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-auri}:${DB_PASSWORD:-auri}@db:5432/${DB_NAME:-auri}
+      # Container-network hostname, not the host-facing localhost default in .env —
+      # otherwise the admin dashboard's LiveKit status probe always reports unreachable.
+      - LIVEKIT_URL=ws://livekit:7880
     depends_on:
       db:
         condition: service_healthy
@@ -103,6 +106,57 @@ services:
       - "11434:11434"
     volumes:
       - ollama-models:/root/.ollama
+    networks:
+      - auri-net
+
+  # ---------------------------------------------------------------------------
+  # LiveKit — self-hosted real-time voice SFU (Phase 7, local dev only)
+  # ---------------------------------------------------------------------------
+  # --dev mode hardcodes API key/secret to devkey/secret (no cloud account
+  # needed). --bind 0.0.0.0 makes the signal server reachable from a real
+  # device on the same LAN (dev machine's LAN IP, not localhost). Media
+  # (RTC/UDP) is only reachable on the LAN — do not tunnel this through ngrok.
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: auri-livekit
+    restart: unless-stopped
+    profiles:
+      - optional
+    command: ["--dev", "--bind", "0.0.0.0"]
+    ports:
+      - "7880:7880" # signal (HTTP/WS)
+      - "7881:7881" # RTC/TCP fallback
+      - "7882:7882/udp" # RTC/UDP mux
+    networks:
+      - auri-net
+
+  # ---------------------------------------------------------------------------
+  # Agent — LiveKit Agents Python worker (Phase 7/10.7, local dev only)
+  # ---------------------------------------------------------------------------
+  # Connectivity wiring only (task 10.7) — joins a room and confirms it can
+  # authenticate against the self-hosted `livekit` service above. The full
+  # STT/LLM/TTS booth conversation is task 7.3.
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: auri-agent:latest
+    container_name: auri-agent
+    restart: unless-stopped
+    profiles:
+      - optional
+    env_file:
+      - .env
+    environment:
+      - ENVIRONMENT=${ENVIRONMENT:-development}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-auri}:${DB_PASSWORD:-auri}@db:5432/${DB_NAME:-auri}
+      # Container-network hostname, not the host-facing localhost default in .env.
+      - LIVEKIT_URL=ws://livekit:7880
+    depends_on:
+      db:
+        condition: service_healthy
+      livekit:
+        condition: service_started
     networks:
       - auri-net
 

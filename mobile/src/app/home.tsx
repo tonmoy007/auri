@@ -15,7 +15,7 @@ import {
 import { router, Stack } from 'expo-router';
 import { colors } from '../theme/colors';
 import { typography, spacing, borderRadius } from '../theme';
-import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
 
 type ApiConfessionStatus = 'pending' | 'forwarded' | 'deleted' | 'flagged';
@@ -71,7 +71,7 @@ export default function HomeScreen(): React.JSX.Element {
     setLoadError(null);
     try {
       const deviceTokenHash = await hashDeviceToken();
-      const response = await fetch(`${API_BASE_URL}${ENDPOINTS.confessions}`, {
+      const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.confessions}`, {
         headers: { 'X-Device-Token-Hash': deviceTokenHash },
       });
       if (!response.ok) {

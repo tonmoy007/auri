@@ -9,7 +9,7 @@ import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ConfessionBooth } from '../components/ConfessionBooth';
 import { ThreeCanvas } from '../components/ThreeCanvas';
-import { API_BASE_URL, ENDPOINTS } from '../config/api';
+import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
 
@@ -90,7 +90,7 @@ export default function DeleteConfirmationScreen(): React.JSX.Element {
       }
       try {
         const deviceTokenHash = await hashDeviceToken();
-        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.deleteConfession(id)}`, {
+        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.deleteConfession(id)}`, {
           method: 'DELETE',
           headers: { 'X-Device-Token-Hash': deviceTokenHash },
         });

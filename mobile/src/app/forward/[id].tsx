@@ -16,7 +16,7 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { colors } from '../../theme/colors';
 import { typography, spacing } from '../../theme';
 import { ShimmerText } from '../../components/LoadingStates';
-import { API_BASE_URL, ENDPOINTS } from '../../config/api';
+import { ENDPOINTS, getApiBaseUrl } from '../../config/api';
 import { useHaptics } from '../../hooks/useHaptics';
 import { hashDeviceToken } from '../../lib/deviceToken';
 
@@ -57,7 +57,7 @@ export default function ForwardScreen(): React.JSX.Element {
 
     async function loadDepartments(): Promise<void> {
       try {
-        const response = await fetch(`${API_BASE_URL}${ENDPOINTS.departments}`);
+        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.departments}`);
         if (!response.ok) {
           throw new Error(`Failed to load departments (${response.status})`);
         }
@@ -100,7 +100,7 @@ export default function ForwardScreen(): React.JSX.Element {
     setSubmitError(null);
     try {
       const deviceTokenHash = await hashDeviceToken();
-      const response = await fetch(`${API_BASE_URL}${ENDPOINTS.forward(id)}`, {
+      const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.forward(id)}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

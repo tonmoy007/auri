@@ -2,6 +2,8 @@
 
 Read `AGENTS.md` at session start. Follow every rule there — it in turn points to `ORCHESTRATOR.md` for plan/task/phase discipline.
 
+UI work follows `AGENTS.md` §6.4: `dashboard/` (web) uses shadcn/ui + centralized design-system tokens, never hand-rolled components; `mobile/` (Expo) work uses the Expo MCP server + Expo skills.
+
 # Caveman Mode
 
 ACTIVE EVERY RESPONSE in this repo. All technical substance stay. Only fluff die.

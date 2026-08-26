@@ -11,6 +11,8 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+from app.services.settings_service import get_config_json
+
 logger = logging.getLogger(__name__)
 
 Mask = Literal["warm", "robotic", "ethereal", "deep", "random"]
@@ -54,14 +56,23 @@ class VoiceModulator:
         """Return the SoX effect chain for *mask*.
 
         If the mask is ``"random"``, pick one of the known masks at random.
+        A dashboard-configured ``VOICE_MASK_<NAME>`` override (JSON list of
+        SoX args) takes precedence over the built-in default for that mask.
         """
         if mask == "random":
-            chosen = random.choice(list(MASKS.keys()))
-            return MASKS[chosen]
+            mask = random.choice(list(MASKS.keys()))
         if mask not in MASKS:
             logger.warning("Unknown mask '%s'; falling back to 'warm'", mask)
-            return MASKS["warm"]
-        return MASKS[mask]
+            mask = "warm"
+
+        chain = get_config_json(f"VOICE_MASK_{mask.upper()}", MASKS[mask])
+        if not isinstance(chain, list) or not all(isinstance(a, str) for a in chain):
+            logger.warning(
+                "Ignoring non-list VOICE_MASK_%s override; using built-in default",
+                mask.upper(),
+            )
+            return MASKS[mask]
+        return chain
 
     @staticmethod
     def _transcode_to_wav(src: Path) -> Path:
