@@ -69,7 +69,9 @@ class Settings(BaseSettings):
     DELIVERY_API_KEY: str = ""  # shared secret the bot uses to call /delivery/*
 
     # ── Admin dashboard (Phase 10, local dev) ───────────────────────────────
-    ADMIN_API_KEY: str = ""  # shared secret for the config/build dashboard's /admin/* routes
+    ADMIN_API_KEY: str = (
+        ""  # shared secret for the config/build dashboard's /admin/* routes
+    )
 
     # ── LiveKit (Phase 7) ────────────────────────────────────────────────────
     # Self-hosted only — see docker-compose.yml's `livekit` service (--dev

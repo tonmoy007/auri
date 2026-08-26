@@ -346,7 +346,9 @@ class LLMService:
             return ""
 
         try:
-            client = OpenAI(api_key=get_config("OPENAI_API_KEY", settings.OPENAI_API_KEY))
+            client = OpenAI(
+                api_key=get_config("OPENAI_API_KEY", settings.OPENAI_API_KEY)
+            )
             response = client.chat.completions.create(
                 model=get_config("OPENAI_MODEL", settings.OPENAI_MODEL),
                 messages=[{"role": "user", "content": prompt}],

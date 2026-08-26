@@ -80,7 +80,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         async with async_session_factory() as session:
             await load_config_cache(session)
     except Exception as exc:  # noqa: BLE001 — dashboard config cache is an optional live-override layer; failing to load it should fall back to Settings()/.env, not crash startup
-        logger.warning("Could not load live config overrides (DB may not be ready)", error=str(exc))
+        logger.warning(
+            "Could not load live config overrides (DB may not be ready)", error=str(exc)
+        )
 
     yield
 

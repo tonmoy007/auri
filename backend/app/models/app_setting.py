@@ -19,5 +19,7 @@ class AppSetting(Base):
 
     __tablename__ = "app_settings"
 
-    key: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    key: Mapped[str] = mapped_column(
+        String(128), nullable=False, unique=True, index=True
+    )
     value: Mapped[str] = mapped_column(Text, nullable=False)

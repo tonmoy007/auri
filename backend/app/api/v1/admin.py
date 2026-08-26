@@ -43,7 +43,9 @@ _LLM_KEYS: tuple[str, ...] = (
     "ANTHROPIC_MODEL",
 )
 _STT_KEYS: tuple[str, ...] = ("WHISPER_MODEL",)
-_VOICE_MASK_KEYS: tuple[str, ...] = tuple(f"VOICE_MASK_{name.upper()}" for name in MASKS)
+_VOICE_MASK_KEYS: tuple[str, ...] = tuple(
+    f"VOICE_MASK_{name.upper()}" for name in MASKS
+)
 # ANDROID_JAVA_HOME: optional JAVA_HOME override for the "Build APK" action
 # (task 10.6) — Android Gradle Plugin requires Java 17, which isn't every
 # machine's default `java`. Empty means "inherit the backend process's own
@@ -53,7 +55,16 @@ ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUIL
 
 # repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
 _MOBILE_DIR = Path(__file__).resolve().parents[4] / "mobile"
-_APK_PATH = _MOBILE_DIR / "android" / "app" / "build" / "outputs" / "apk" / "release" / "app-release.apk"
+_APK_PATH = (
+    _MOBILE_DIR
+    / "android"
+    / "app"
+    / "build"
+    / "outputs"
+    / "apk"
+    / "release"
+    / "app-release.apk"
+)
 # Gradle's createBundleReleaseJsAndAssets task doesn't declare .env.local as
 # an input, so it happily marks itself UP-TO-DATE and reuses a stale JS
 # bundle (with a stale baked-in EXPO_PUBLIC_API_URL) when nothing else
@@ -62,8 +73,20 @@ _APK_PATH = _MOBILE_DIR / "android" / "app" / "build" / "outputs" / "apk" / "rel
 # each build forces the task to regenerate them regardless of Gradle's own
 # staleness check.
 _STALE_BUNDLE_DIRS: tuple[Path, ...] = (
-    _MOBILE_DIR / "android" / "app" / "build" / "generated" / "assets" / "createBundleReleaseJsAndAssets",
-    _MOBILE_DIR / "android" / "app" / "build" / "generated" / "res" / "createBundleReleaseJsAndAssets",
+    _MOBILE_DIR
+    / "android"
+    / "app"
+    / "build"
+    / "generated"
+    / "assets"
+    / "createBundleReleaseJsAndAssets",
+    _MOBILE_DIR
+    / "android"
+    / "app"
+    / "build"
+    / "generated"
+    / "res"
+    / "createBundleReleaseJsAndAssets",
 )
 _MAX_LOG_LINES = 2000
 
@@ -235,7 +258,9 @@ async def get_ngrok_status() -> NgrokStatus:
         return NgrokStatus(running=False)
 
     https_urls = [
-        t["public_url"] for t in tunnels if t.get("public_url", "").startswith("https://")
+        t["public_url"]
+        for t in tunnels
+        if t.get("public_url", "").startswith("https://")
     ]
     if not https_urls:
         return NgrokStatus(running=False)
@@ -337,7 +362,9 @@ async def _run_build_steps(backend_url: str, java_home: str) -> None:
     for stale_dir in _STALE_BUNDLE_DIRS:
         shutil.rmtree(stale_dir, ignore_errors=True)
     _APK_PATH.unlink(missing_ok=True)
-    _build_state.append("Cleared cached JS bundle output — forcing a fresh embed this build.")
+    _build_state.append(
+        "Cleared cached JS bundle output — forcing a fresh embed this build."
+    )
 
     env = {**os.environ}
     if java_home:

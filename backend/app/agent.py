@@ -51,7 +51,9 @@ async def _resolve_livekit_credentials() -> tuple[str, str, str]:
         async with async_session_factory() as session:
             await load_cache(session)
     except Exception as exc:  # noqa: BLE001 — DB unavailable is a fallback boundary, not a startup blocker (see main.py's lifespan for the same pattern)
-        logger.warning("Could not load live config overrides (DB may not be ready): %s", exc)
+        logger.warning(
+            "Could not load live config overrides (DB may not be ready): %s", exc
+        )
 
     return (
         get_config("LIVEKIT_URL", settings.LIVEKIT_URL),
