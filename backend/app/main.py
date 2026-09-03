@@ -17,6 +17,7 @@ from app.database import async_session_factory, engine
 from app.exceptions import RateLimitError
 from app.observability import init_sentry, mount_metrics
 from app.services.settings_service import load_cache as load_config_cache
+from app.services.user_service import bootstrap_admin
 
 # ── Logging initialisation ───────────────────────────────────────────────
 
@@ -83,6 +84,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(
             "Could not load live config overrides (DB may not be ready)", error=str(exc)
         )
+
+    try:
+        async with async_session_factory() as session:
+            await bootstrap_admin(
+                session,
+                settings.ADMIN_BOOTSTRAP_EMAIL,
+                settings.ADMIN_BOOTSTRAP_PASSWORD,
+            )
+    except Exception as exc:  # noqa: BLE001 — bootstrapping the first staff account is a convenience for a fresh deployment; a failure here (DB not ready, malformed env credentials) must not take the API down, and it retries on the next start
+        logger.warning("Could not bootstrap the first admin", error=str(exc))
 
     yield
 

@@ -43,6 +43,10 @@ class DuplicateConfessionError(DatabaseError):
     """Raised when a confession violates a uniqueness constraint."""
 
 
+class DuplicateUserError(DatabaseError):
+    """Raised when creating a staff account whose email is already registered."""
+
+
 class ServiceError(AuriError):
     """Raised for failures in external-facing services (STT/TTS/voice)."""
 
@@ -69,3 +73,11 @@ class EmptyConfessionError(ValidationError):
 
 class RateLimitError(ValidationError):
     """Raised when a device exceeds the confession submission rate limit."""
+
+
+class InvalidEmailError(ValidationError):
+    """Raised when a staff account email is empty or structurally invalid."""
+
+
+class WeakPasswordError(ValidationError):
+    """Raised when a proposed staff password is below the minimum length."""

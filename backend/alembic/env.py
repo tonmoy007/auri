@@ -23,7 +23,7 @@ if config.config_file_name is not None:
 # ── Import all models so autogenerate can see them ─────────────────────────
 from app.models.base import Base
 from app.models.confession import Confession  # noqa: F401
-from app.models.user import AnonymousUser  # noqa: F401
+from app.models.user import AnonymousUser, User  # noqa: F401
 
 # Convenience reference.
 target_metadata = Base.metadata

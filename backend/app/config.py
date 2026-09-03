@@ -73,6 +73,13 @@ class Settings(BaseSettings):
         ""  # shared secret for the config/build dashboard's /admin/* routes
     )
 
+    # ── Staff accounts (Phase 11) ───────────────────────────────────────────
+    # First-admin bootstrap, read once at startup and only applied when the
+    # users table is empty. Never hardcode values here (AGENTS.md §12);
+    # leaving either blank disables bootstrap entirely.
+    ADMIN_BOOTSTRAP_EMAIL: str = ""
+    ADMIN_BOOTSTRAP_PASSWORD: str = ""
+
     # ── LiveKit (Phase 7) ────────────────────────────────────────────────────
     # Self-hosted only — see docker-compose.yml's `livekit` service (--dev
     # mode). Defaults match that service's devkey/secret; LAN IP (not
