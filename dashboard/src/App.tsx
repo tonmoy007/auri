@@ -5,6 +5,7 @@ import { ConfigTable } from '@/components/ConfigTable'
 import { AuditPanel } from '@/components/AuditPanel'
 import { ConnectionBar } from '@/components/ConnectionBar'
 import { InsightsPanel } from '@/components/InsightsPanel'
+import { QueuePanel } from '@/components/QueuePanel'
 import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
 import { Button } from '@/components/ui/button'
@@ -29,6 +30,7 @@ import {
  */
 const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'insights', label: 'Insights', roles: ['hr'] },
+  { value: 'queue', label: 'Queue', roles: ['hr', 'moderator'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -225,6 +227,10 @@ function App() {
           </TabsContent>
           <TabsContent value="insights">
             <InsightsPanel />
+          </TabsContent>
+
+          <TabsContent value="queue">
+            <QueuePanel />
           </TabsContent>
 
           <TabsContent value="audit">

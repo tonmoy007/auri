@@ -1,45 +1,88 @@
 """Moderation queue — review, approve, or reject AI-flagged confessions.
 
-Every endpoint here is service-to-service (called by the Telegram bot on a
-moderator's behalf, not by the mobile app), so all of them require the
-``X-Moderation-Api-Key`` header to match ``settings.MODERATION_API_KEY``.
+Two callers, one queue. The Telegram bot calls these endpoints on a
+moderator's behalf with ``X-Moderation-Api-Key`` (Phase 4.6, unchanged), and
+the dashboard calls them with a staff session. The difference matters: a
+session has a named actor, so the decision records **who** made it and
+writes an audit event. The bot path stays anonymous, exactly as before.
 """
 
 from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Callable
+from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import get_current_user
 from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
+from app.models.audit_event import AuditAction, ContentTier
 from app.models.confession import Confession, ConfessionStatus
+from app.models.user import User, UserRole
+from app.services import audit_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/moderation", tags=["moderation"])
 
+ClockDependency = Callable[[], datetime]
 
-def require_moderator(
-    x_moderation_api_key: str = Header(..., alias="X-Moderation-Api-Key"),
-) -> None:
-    """Reject the request unless it carries the configured moderation secret.
+# Roles allowed to work the queue from the dashboard. Moderators exist for
+# exactly this; HR shares it because flagged items are their escalations.
+QUEUE_ROLES = frozenset({UserRole.moderator, UserRole.hr, UserRole.admin})
+
+
+def get_clock() -> ClockDependency:
+    """FastAPI dependency providing the current-time function (see confessions.py)."""
+    return lambda: datetime.now(timezone.utc)
+
+
+def _matches_moderation_key(candidate: str | None) -> bool:
+    """Return ``True`` if *candidate* is the configured moderation secret.
 
     Fails **closed**: an unset ``MODERATION_API_KEY`` (e.g. a missed deploy
-    config step) denies every request rather than leaving the queue open.
+    config step) matches nothing rather than leaving the queue open.
     """
-    if (
-        not settings.MODERATION_API_KEY
-        or x_moderation_api_key != settings.MODERATION_API_KEY
-    ):
+    return bool(
+        candidate
+        and settings.MODERATION_API_KEY
+        and candidate == settings.MODERATION_API_KEY
+    )
+
+
+async def moderation_actor(
+    authorization: str | None = Header(None),
+    x_moderation_api_key: str | None = Header(None, alias="X-Moderation-Api-Key"),
+    session: AsyncSession = Depends(get_async_session),
+) -> User | None:
+    """Authenticate the caller as the bot **or** a queue-capable staff member.
+
+    Returns:
+        The signed-in staff account, or ``None`` for the legacy bot path
+        (which has no named actor and therefore records none).
+    """
+    if _matches_moderation_key(x_moderation_api_key):
+        return None
+
+    if authorization is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid or missing moderation credentials",
         )
+
+    user = await get_current_user(authorization=authorization, session=session)
+    if user.role not in QUEUE_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your role does not have access to the moderation queue",
+        )
+    return user
 
 
 async def _fetch_flagged_or_404(
@@ -61,38 +104,88 @@ async def _fetch_flagged_or_404(
     return confession
 
 
+async def _record_decision(
+    session: AsyncSession,
+    request: Request,
+    actor: User | None,
+    confession: Confession,
+    action: AuditAction,
+    now: datetime,
+) -> None:
+    """Stamp the reviewer on *confession* and audit the decision.
+
+    The bot path passes ``actor=None``: there is no person to attribute the
+    decision to, so nothing is stamped and nothing is audited. That is the
+    gap staff sessions exist to close, not something to paper over with a
+    fake actor.
+    """
+    if actor is None:
+        return
+
+    confession.reviewed_by = actor.id
+    confession.reviewed_at = now
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=action,
+        target_confession_id=confession.id,
+        content_tier=ContentTier.raw,
+        source_ip=audit_service.client_ip(request),
+    )
+
+
 @router.get(
     "/queue",
     response_model=list[ConfessionResponse],
-    dependencies=[Depends(require_moderator)],
     summary="List confessions currently flagged for moderator review",
 )
 async def list_moderation_queue(
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
+    actor: User | None = Depends(moderation_actor),
 ) -> list[Confession]:
-    """Return every confession awaiting moderator review, oldest first."""
+    """Return every confession awaiting moderator review, oldest first.
+
+    The queue serves full transcripts — reviewing content is the job — so a
+    staff listing is audited at the ``raw`` tier.
+    """
     stmt = (
         select(Confession)
         .where(Confession.status == ConfessionStatus.flagged)
         .order_by(Confession.created_at)
     )
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    queue = list(result.scalars().all())
+
+    if actor is not None:
+        await audit_service.record(
+            session,
+            actor=actor,
+            action=AuditAction.confession_list,
+            content_tier=ContentTier.raw,
+            source_ip=audit_service.client_ip(request),
+        )
+    return queue
 
 
 @router.post(
     "/{confession_id}/approve",
     response_model=ConfessionResponse,
-    dependencies=[Depends(require_moderator)],
     summary="Approve a flagged confession, returning it to the normal pending flow",
 )
 async def approve_confession(
     confession_id: uuid.UUID,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
+    actor: User | None = Depends(moderation_actor),
+    clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Move *confession_id* from ``flagged`` back to ``pending``."""
     confession = await _fetch_flagged_or_404(session, confession_id)
     confession.status = ConfessionStatus.pending
+    await _record_decision(
+        session, request, actor, confession, AuditAction.moderation_approve, clock()
+    )
 
     await session.flush()
     await session.refresh(confession)
@@ -102,16 +195,21 @@ async def approve_confession(
 @router.post(
     "/{confession_id}/reject",
     response_model=ConfessionResponse,
-    dependencies=[Depends(require_moderator)],
     summary="Reject a flagged confession, soft-deleting it",
 )
 async def reject_confession(
     confession_id: uuid.UUID,
+    request: Request,
     session: AsyncSession = Depends(get_async_session),
+    actor: User | None = Depends(moderation_actor),
+    clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Move *confession_id* from ``flagged`` to ``deleted``."""
     confession = await _fetch_flagged_or_404(session, confession_id)
     confession.status = ConfessionStatus.deleted
+    await _record_decision(
+        session, request, actor, confession, AuditAction.moderation_reject, clock()
+    )
 
     await session.flush()
     await session.refresh(confession)

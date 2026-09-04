@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Index, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -87,6 +89,17 @@ class Confession(Base):
         DateTime(timezone=True),
         nullable=True,
         comment="When the bot confirmed Telegram delivery to the recipient department",
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Staff account that approved or rejected this item; null for the anonymous Telegram path",
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the moderation decision was made",
     )
     counselor_response: Mapped[str | None] = mapped_column(
         Text,

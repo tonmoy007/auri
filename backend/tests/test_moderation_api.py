@@ -91,12 +91,14 @@ async def test_flagged_confession_is_created_with_flagged_status(
 
 
 @pytest.mark.asyncio
-async def test_queue_rejects_missing_moderation_key(client: AsyncClient) -> None:
+async def test_queue_rejects_a_request_with_no_credentials(client: AsyncClient) -> None:
     # Act
     response = await client.get("/api/v1/moderation/queue")
 
-    # Assert
-    assert response.status_code == 422  # missing required header
+    # Assert — the queue now accepts either a service key or a staff
+    # session, so absent credentials are a refusal (403), not a malformed
+    # request (the old 422 from a required header).
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

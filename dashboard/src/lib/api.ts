@@ -171,6 +171,18 @@ export interface Insights {
   sentiment_trend: SentimentPoint[]
 }
 
+export interface QueueItem {
+  id: string
+  transcript: string
+  ai_summary: string | null
+  category: string | null
+  sentiment: string | null
+  status: string
+  created_at: string
+  reviewed_by: string | null
+  reviewed_at: string | null
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -228,4 +240,11 @@ export const hrApi = {
     const query = new URLSearchParams({ since: range.since, until: range.until })
     return request<Insights>(`/hr/insights?${query.toString()}`)
   },
+}
+
+export const moderationApi = {
+  getQueue: (request: Requester) => request<QueueItem[]>('/moderation/queue'),
+
+  decide: (request: Requester, confessionId: string, decision: 'approve' | 'reject') =>
+    request<QueueItem>(`/moderation/${confessionId}/${decision}`, { method: 'POST' }),
 }

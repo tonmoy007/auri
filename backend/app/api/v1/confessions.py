@@ -66,6 +66,8 @@ class ConfessionResponse(BaseModel):
     status: ConfessionStatus
     recipient_dept: str | None
     delivered_at: datetime | None
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
     counselor_response: str | None
     created_at: datetime
     updated_at: datetime
