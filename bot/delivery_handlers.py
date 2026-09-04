@@ -76,7 +76,12 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for item in queue:
         confession_id = item["id"]
-        if confession_id in delivered_ids:
+        # Key on the row's updated_at as well as its id: a deliberate resend
+        # (11.11) clears delivered_at, which bumps updated_at, so the item
+        # gets a new key and is sent again — while a fast repeat poll of the
+        # unchanged row still dedupes.
+        dedupe_key = f"{confession_id}:{item.get('updated_at', '')}"
+        if dedupe_key in delivered_ids:
             continue
 
         department = item.get("recipient_dept")
@@ -125,4 +130,4 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
 
-        delivered_ids.add(confession_id)
+        delivered_ids.add(dedupe_key)

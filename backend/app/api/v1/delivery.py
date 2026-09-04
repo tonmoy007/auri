@@ -12,15 +12,19 @@ import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_hr_role
 from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
+from app.models.audit_event import AuditAction
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
-from app.services import department_service
+from app.models.user import User
+from app.services import audit_service, department_service
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +43,23 @@ class DeliveryQueueItem(ConfessionResponse):
     """
 
     recipient_chat_id: str | None
+
+
+class DeliveryOverviewItem(BaseModel):
+    """One forwarded confession and what is (or is not) happening to it.
+
+    ``blocked_reason`` answers the question the system could not answer
+    before: *why* has this not arrived. An unmapped department used to be a
+    single bot log line, invisible to the person who could fix it.
+    """
+
+    id: uuid.UUID
+    recipient_dept: str | None
+    recipient_chat_id: str | None
+    severity: str
+    created_at: datetime
+    delivered_at: datetime | None
+    blocked_reason: str | None
 
 
 def get_clock() -> ClockDependency:
@@ -151,3 +172,128 @@ async def _with_chat_id(
     )
     base = ConfessionResponse.model_validate(confession, from_attributes=True)
     return DeliveryQueueItem(**base.model_dump(), recipient_chat_id=chat_id)
+
+
+def _blocked_reason(confession: Confession, chat_id: str | None) -> str | None:
+    """Explain why *confession* has not been delivered, or ``None`` if it has.
+
+    Ordered by what the reader can act on: a missing chat id is fixed in the
+    Directory, an unacknowledged crisis item is fixed in the Queue, and
+    anything else is simply waiting for the bot's next poll.
+    """
+    if confession.delivered_at is not None:
+        return None
+    if not confession.recipient_dept:
+        return "No department was chosen for this confession"
+    if chat_id is None:
+        return (
+            f"No Telegram chat is configured for {confession.recipient_dept} — "
+            "set one in the Directory tab"
+        )
+    if (
+        confession.severity == ModerationSeverity.crisis.value
+        and confession.acknowledged_at is None
+    ):
+        return "Crisis item held until someone acknowledges it in the Queue tab"
+    return "Waiting for the bot's next delivery poll"
+
+
+@router.get(
+    "/overview",
+    response_model=list[DeliveryOverviewItem],
+    summary="What was forwarded where, and what is still stuck (HR)",
+)
+async def read_delivery_overview(
+    session: AsyncSession = Depends(get_async_session),
+    _actor: User = Depends(require_hr_role),
+) -> list[DeliveryOverviewItem]:
+    """Return every forwarded confession with its delivery state.
+
+    Metadata only — no transcript and no summary. Answering "did anything I
+    said reach anyone" does not require reading what was said.
+    """
+    stmt = (
+        select(Confession)
+        .where(Confession.status == ConfessionStatus.forwarded)
+        .order_by(Confession.created_at.desc())
+    )
+    result = await session.execute(stmt)
+
+    overview = []
+    for confession in result.scalars().all():
+        chat_id = (
+            await department_service.resolve_chat_id(session, confession.recipient_dept)
+            if confession.recipient_dept
+            else None
+        )
+        overview.append(
+            DeliveryOverviewItem(
+                id=confession.id,
+                recipient_dept=confession.recipient_dept,
+                recipient_chat_id=chat_id,
+                severity=confession.severity,
+                created_at=confession.created_at,
+                delivered_at=confession.delivered_at,
+                blocked_reason=_blocked_reason(confession, chat_id),
+            )
+        )
+    return overview
+
+
+@router.post(
+    "/{confession_id}/resend",
+    response_model=DeliveryOverviewItem,
+    summary="Put a delivered confession back in the queue (HR)",
+)
+async def resend_confession(
+    confession_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    actor: User = Depends(require_hr_role),
+) -> DeliveryOverviewItem:
+    """Clear ``delivered_at`` so the bot sends the confession again.
+
+    For the case the old system could not recover from: the backend recorded
+    a delivery that nobody actually received. Undelivered items need no
+    action — the bot already retries those on every poll.
+    """
+    stmt = select(Confession).where(
+        Confession.id == confession_id,
+        Confession.status == ConfessionStatus.forwarded,
+    )
+    confession = (await session.execute(stmt)).scalar_one_or_none()
+    if confession is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No forwarded confession found with that ID",
+        )
+    if confession.delivered_at is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This confession has not been delivered yet; it is already queued",
+        )
+
+    confession.delivered_at = None
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=AuditAction.delivery_retry,
+        target_confession_id=confession.id,
+        source_ip=audit_service.client_ip(request),
+    )
+    await session.flush()
+
+    chat_id = (
+        await department_service.resolve_chat_id(session, confession.recipient_dept)
+        if confession.recipient_dept
+        else None
+    )
+    return DeliveryOverviewItem(
+        id=confession.id,
+        recipient_dept=confession.recipient_dept,
+        recipient_chat_id=chat_id,
+        severity=confession.severity,
+        created_at=confession.created_at,
+        delivered_at=None,
+        blocked_reason=_blocked_reason(confession, chat_id),
+    )

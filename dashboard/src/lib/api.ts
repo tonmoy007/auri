@@ -188,6 +188,17 @@ export interface QueueItem {
   reviewed_at: string | null
 }
 
+export interface DeliveryOverviewItem {
+  id: string
+  recipient_dept: string | null
+  recipient_chat_id: string | null
+  severity: ModerationSeverity
+  created_at: string
+  delivered_at: string | null
+  /** Why this has not arrived; `null` once it has. */
+  blocked_reason: string | null
+}
+
 export interface DepartmentEntry {
   name: string
   telegram_chat_id: string | null
@@ -294,5 +305,15 @@ export const departmentsApi = {
   remove: (request: Requester, name: string) =>
     request<void>(`/departments/directory/${encodeURIComponent(name)}`, {
       method: 'DELETE',
+    }),
+}
+
+export const deliveryApi = {
+  getOverview: (request: Requester) =>
+    request<DeliveryOverviewItem[]>('/delivery/overview'),
+
+  resend: (request: Requester, confessionId: string) =>
+    request<DeliveryOverviewItem>(`/delivery/${confessionId}/resend`, {
+      method: 'POST',
     }),
 }
