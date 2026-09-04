@@ -47,6 +47,10 @@ class DuplicateUserError(DatabaseError):
     """Raised when creating a staff account whose email is already registered."""
 
 
+class AuthConfigurationError(AuriError):
+    """Raised when session signing is attempted without a real secret configured."""
+
+
 class ServiceError(AuriError):
     """Raised for failures in external-facing services (STT/TTS/voice)."""
 
@@ -73,6 +77,10 @@ class EmptyConfessionError(ValidationError):
 
 class RateLimitError(ValidationError):
     """Raised when a device exceeds the confession submission rate limit."""
+
+
+class InvalidSessionTokenError(ValidationError):
+    """Raised when a session token is missing, malformed, expired, or revoked."""
 
 
 class InvalidEmailError(ValidationError):

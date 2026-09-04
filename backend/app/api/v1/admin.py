@@ -17,10 +17,11 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_admin_access
 from app.config import settings
 from app.database import get_async_session
 from app.services import settings_service
@@ -93,17 +94,11 @@ _MAX_LOG_LINES = 2000
 _SECRET_SUFFIXES = ("_API_KEY", "_API_SECRET")
 
 
-def require_admin(x_admin_api_key: str = Header(..., alias="X-Admin-Api-Key")) -> None:
-    """Reject the request unless it carries the configured admin secret.
-
-    Fails **closed**: an unset ``ADMIN_API_KEY`` denies every request rather
-    than leaving the dashboard open (mirrors ``require_moderator``).
-    """
-    if not settings.ADMIN_API_KEY or x_admin_api_key != settings.ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or missing admin credentials",
-        )
+# Admin routes accept an ``admin``-role session **or** the legacy
+# ``X-Admin-Api-Key`` shared secret, so the Phase 10 dashboard escape hatch
+# and local tooling keep working while named staff sessions become the
+# normal path. See app/api/deps.py.
+require_admin = require_admin_access
 
 
 def _mask(key: str, value: str) -> str:

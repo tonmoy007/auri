@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from app.api.v1.admin import router as admin_router
+from app.api.v1.auth import router as auth_router
 from app.api.v1.confessions import router as confessions_router
 from app.api.v1.delivery import router as delivery_router
 from app.api.v1.departments import router as departments_router
@@ -17,6 +18,7 @@ from app.api.v1.voice import router as voice_router
 router = APIRouter(prefix="/api/v1")
 
 router.include_router(health_router)
+router.include_router(auth_router)
 router.include_router(admin_router)
 router.include_router(confessions_router)
 router.include_router(departments_router)

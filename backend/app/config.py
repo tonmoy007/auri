@@ -80,6 +80,15 @@ class Settings(BaseSettings):
     ADMIN_BOOTSTRAP_EMAIL: str = ""
     ADMIN_BOOTSTRAP_PASSWORD: str = ""
 
+    # Session tokens for dashboard logins. SESSION_TOKEN_SECRET falls back to
+    # SECRET_KEY when empty; signing refuses to run outside development while
+    # that value is still the shipped placeholder.
+    SESSION_TOKEN_SECRET: str = ""
+    ACCESS_TOKEN_TTL_MINUTES: int = 30
+    REFRESH_TOKEN_TTL_HOURS: int = 12
+    LOGIN_MAX_ATTEMPTS: int = 5  # per email, before the window locks out
+    LOGIN_ATTEMPT_WINDOW_SECONDS: int = 300
+
     # ── LiveKit (Phase 7) ────────────────────────────────────────────────────
     # Self-hosted only — see docker-compose.yml's `livekit` service (--dev
     # mode). Defaults match that service's devkey/secret; LAN IP (not

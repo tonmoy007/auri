@@ -99,3 +99,9 @@ class User(Base):
         nullable=True,
         comment="Timestamp of the account's most recent successful login",
     )
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Bumped on logout — every session token carrying an older value is rejected",
+    )
