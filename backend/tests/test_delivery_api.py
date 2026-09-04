@@ -16,6 +16,7 @@ import pytest_asyncio
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from app.models.confession import ModerationSeverity
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -73,7 +74,10 @@ async def _create_forwarded_confession(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         created = (await client.post("/api/v1/confessions", json=payload)).json()
 
@@ -153,7 +157,10 @@ async def test_queue_excludes_pending_and_flagged_confessions(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         pending = (await client.post("/api/v1/confessions", json=payload)).json()
 
@@ -231,7 +238,10 @@ async def test_mark_delivered_returns_404_for_pending_confession(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         pending = (await client.post("/api/v1/confessions", json=payload)).json()
 

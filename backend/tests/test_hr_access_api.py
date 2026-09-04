@@ -298,13 +298,11 @@ async def test_hr_access_requires_a_session(api_client: AsyncClient) -> None:
 
 @pytest.mark.asyncio
 async def test_legacy_admin_api_key_cannot_read_confession_content(
-    api_client: AsyncClient, monkeypatch
+    api_client: AsyncClient, set_setting
 ) -> None:
     # Arrange — the shared secret has no named actor, so it can never be
     # the subject of an audit row; content access must require a session
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "ADMIN_API_KEY", "legacy-admin-secret")
+    set_setting("ADMIN_API_KEY", "legacy-admin-secret")
 
     # Act
     response = await api_client.get(

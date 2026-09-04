@@ -23,7 +23,7 @@ from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
 from app.models.audit_event import AuditAction, ContentTier
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 from app.models.user import User, UserRole
 from app.services import audit_service
 
@@ -149,10 +149,16 @@ async def list_moderation_queue(
     The queue serves full transcripts — reviewing content is the job — so a
     staff listing is audited at the ``raw`` tier.
     """
+    # Crisis items sort ahead of everything else regardless of age: the
+    # queue is worked top-down, and a self-harm disclosure must not wait
+    # behind a week-old policy flag.
     stmt = (
         select(Confession)
         .where(Confession.status == ConfessionStatus.flagged)
-        .order_by(Confession.created_at)
+        .order_by(
+            (Confession.severity != ModerationSeverity.crisis.value),
+            Confession.created_at,
+        )
     )
     result = await session.execute(stmt)
     queue = list(result.scalars().all())
@@ -209,6 +215,54 @@ async def reject_confession(
     confession.status = ConfessionStatus.deleted
     await _record_decision(
         session, request, actor, confession, AuditAction.moderation_reject, clock()
+    )
+
+    await session.flush()
+    await session.refresh(confession)
+    return confession
+
+
+@router.post(
+    "/{confession_id}/acknowledge",
+    response_model=ConfessionResponse,
+    summary="Record that a named person has seen a crisis item",
+)
+async def acknowledge_crisis(
+    confession_id: uuid.UUID,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    actor: User | None = Depends(moderation_actor),
+    clock: ClockDependency = Depends(get_clock),
+) -> Confession:
+    """Acknowledge a crisis item, stopping its SLA clock.
+
+    Acknowledgement is separate from approve/reject on purpose: it answers
+    "has a human actually seen this yet?", which is the only question that
+    matters while someone may be in danger. It requires a named actor, so
+    the bot's anonymous shared-key path cannot silence the banner.
+    """
+    if actor is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acknowledging a crisis item requires a signed-in account",
+        )
+
+    confession = await _fetch_flagged_or_404(session, confession_id)
+    if confession.severity != ModerationSeverity.crisis.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Only crisis items are acknowledged",
+        )
+
+    confession.acknowledged_by = actor.id
+    confession.acknowledged_at = clock()
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=AuditAction.crisis_acknowledge,
+        target_confession_id=confession.id,
+        content_tier=ContentTier.raw,
+        source_ip=audit_service.client_ip(request),
     )
 
     await session.flush()

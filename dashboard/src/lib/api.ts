@@ -171,6 +171,8 @@ export interface Insights {
   sentiment_trend: SentimentPoint[]
 }
 
+export type ModerationSeverity = 'none' | 'policy' | 'harassment' | 'crisis'
+
 export interface QueueItem {
   id: string
   transcript: string
@@ -178,7 +180,10 @@ export interface QueueItem {
   category: string | null
   sentiment: string | null
   status: string
+  severity: ModerationSeverity
   created_at: string
+  acknowledged_by: string | null
+  acknowledged_at: string | null
   reviewed_by: string | null
   reviewed_at: string | null
 }
@@ -247,4 +252,7 @@ export const moderationApi = {
 
   decide: (request: Requester, confessionId: string, decision: 'approve' | 'reject') =>
     request<QueueItem>(`/moderation/${confessionId}/${decision}`, { method: 'POST' }),
+
+  acknowledge: (request: Requester, confessionId: string) =>
+    request<QueueItem>(`/moderation/${confessionId}/acknowledge`, { method: 'POST' }),
 }

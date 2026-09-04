@@ -13,6 +13,7 @@ from app.exceptions import (
     SentimentError,
     SummarizationError,
 )
+from app.models.confession import ModerationSeverity
 from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
@@ -212,42 +213,49 @@ class LLMService:
             raise CounselingError("LLM failed to produce a counseling response")
         return result
 
-    def moderate(self, text: str) -> bool:
-        """Decide whether *text* needs human moderator review before delivery.
+    def moderate(self, text: str) -> ModerationSeverity:
+        """Classify why *text* needs human review before delivery, if it does.
 
-        Flags content indicating imminent self-harm, threats of violence,
-        harassment naming a specific coworker, or illegal activity.
+        Returns a severity rather than a yes/no so the queue can tell a
+        suicide note apart from a swearing complaint — with one boolean,
+        the first waits behind the second.
 
-        Fails **closed**: any LLM error or unparseable response returns
-        ``True`` (flagged) rather than letting borderline content skip
-        review — the opposite fallback direction from :meth:`categorize`/
-        :meth:`summarize`, which fail open to avoid losing a confession.
+        Fails **closed**: any LLM error or unparseable answer returns
+        ``policy`` (held for review) rather than ``none``. It deliberately
+        does *not* fail to ``crisis``: escalating every model hiccup to the
+        crisis banner would train reviewers to ignore it.
 
         Args:
-            text: Already de-identified transcript.
+            text: Raw transcript (see the call site in confessions.py for
+                why moderation reads the original, not the redacted copy).
 
         Returns:
-            ``True`` if the confession should be queued for moderator
-            review instead of delivered directly.
+            The :class:`ModerationSeverity` describing the content.
         """
         prompt = self._build_delimited_prompt(
             instruction=(
-                "Does the following confession contain any of: imminent "
-                "self-harm or suicidal intent, threats of violence, "
-                "harassment naming a specific coworker, or illegal "
-                "activity? Answer with exactly one word: YES or NO."
+                "Classify the following confession for safety review. Answer "
+                "with exactly one word:\n"
+                "crisis - imminent self-harm, suicidal intent, or a threat of "
+                "violence to anyone;\n"
+                "harassment - targeted abuse or harassment naming a specific "
+                "person;\n"
+                "policy - other content needing review, such as illegal "
+                "activity;\n"
+                "none - nothing requiring review."
             ),
             content=text,
         )
-        result = self._call_llm(prompt).strip().upper()
+        result = self._call_llm(prompt).strip().lower()
 
-        if result not in {"YES", "NO"}:
+        try:
+            return ModerationSeverity(result)
+        except ValueError:
             logger.warning(
                 "moderation check returned an unparseable result %r; failing closed",
                 result,
             )
-            return True
-        return result == "YES"
+            return ModerationSeverity.policy
 
     # ── Internal helpers ──────────────────────────────────────────────────
 

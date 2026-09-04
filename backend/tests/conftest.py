@@ -11,11 +11,14 @@ state, so no test can influence another (AGENTS.md §16.3).
 
 from __future__ import annotations
 
+import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
+from typing import Any
 
+import pytest
 import pytest_asyncio
-from app.config import settings
+from app.config import Settings, settings
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
@@ -36,6 +39,40 @@ TEST_SESSION_SECRET = "test-session-secret-not-a-real-one"
 TEST_PASSWORD = "correct-horse-battery"
 
 StaffFactory = Callable[..., Awaitable[tuple[User, dict[str, str]]]]
+SettingPatcher = Callable[[str, Any], None]
+
+
+@pytest.fixture
+def set_setting(monkeypatch) -> SettingPatcher:
+    """Patch a config value everywhere it is currently held.
+
+    ``test_config.py`` reloads ``app.config`` to exercise DATABASE_URL
+    assembly, which mints a *new* ``settings`` singleton. Modules that did
+    ``from app.config import settings`` at import time keep the old object
+    forever, so patching only the freshly-imported one silently misses the
+    object the route actually reads — a full-suite-only failure that passes
+    in isolation. Patching every live instance sidesteps the ordering trap.
+    """
+
+    def _set(name: str, value: Any) -> None:
+        patched: set[int] = set()
+        for candidate in (settings, *_live_settings_objects()):
+            if id(candidate) in patched:
+                continue
+            patched.add(id(candidate))
+            monkeypatch.setattr(candidate, name, value)
+
+    return _set
+
+
+def _live_settings_objects() -> list[Settings]:
+    """Return every ``Settings`` instance reachable as a module attribute."""
+    found = []
+    for module in list(sys.modules.values()):
+        candidate = getattr(module, "settings", None)
+        if isinstance(candidate, Settings):
+            found.append(candidate)
+    return found
 
 
 @pytest_asyncio.fixture
@@ -65,7 +102,11 @@ async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 @pytest_asyncio.fixture
 async def api_client(db_engine: AsyncEngine, monkeypatch) -> AsyncIterator[AsyncClient]:
     """ASGI client bound to the test database, with a real signing secret."""
-    monkeypatch.setattr(settings, "SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
+    for candidate in {
+        id(settings): settings,
+        **{id(o): o for o in _live_settings_objects()},
+    }.values():
+        monkeypatch.setattr(candidate, "SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
     login_throttle.reset_all()
 
     session_factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)

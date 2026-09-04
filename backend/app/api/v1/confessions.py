@@ -16,7 +16,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import parse_comma_separated_list, settings
 from app.database import get_async_session
 from app.exceptions import DeidentificationError, RateLimitError
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import (
+    Confession,
+    ConfessionStatus,
+    ModerationSeverity,
+)
 from app.models.user import AnonymousUser
 from app.services.llm import LLMService
 
@@ -66,6 +70,9 @@ class ConfessionResponse(BaseModel):
     status: ConfessionStatus
     recipient_dept: str | None
     delivered_at: datetime | None
+    severity: str
+    acknowledged_by: uuid.UUID | None
+    acknowledged_at: datetime | None
     reviewed_by: uuid.UUID | None
     reviewed_at: datetime | None
     counselor_response: str | None
@@ -252,19 +259,21 @@ def _safe_counsel(llm_service: LLMService, text: str) -> str:
         return _FALLBACK_COUNSELOR_RESPONSE
 
 
-def _safe_moderate(llm_service: LLMService, text: str) -> bool:
-    """Run the moderation check, failing **closed** (flagged) on error.
+def _safe_moderate(llm_service: LLMService, text: str) -> ModerationSeverity:
+    """Run the moderation check, failing **closed** (held) on error.
 
     Unlike categorization/summarization, a moderation failure must not
     silently let content through — ``LLMService.moderate`` already fails
     closed internally, but any exception escaping it (network error, etc.)
-    is treated the same way here.
+    is treated the same way here. It fails to ``policy`` rather than
+    ``crisis``: a held item is safe, a false crisis alarm is noise that
+    teaches reviewers to ignore the real ones.
     """
     try:
         return llm_service.moderate(text)
     except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
-        logger.warning("moderation check failed, flagging for review: %s", exc)
-        return True
+        logger.warning("moderation check failed, holding for review: %s", exc)
+        return ModerationSeverity.policy
 
 
 def _upsert_anonymous_user(
@@ -340,7 +349,7 @@ async def create_confession(
     # itself fail (refusal, meta-commentary) and corrupt its output, which
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
-    is_flagged = _safe_moderate(llm_service, body.transcript)
+    severity = _safe_moderate(llm_service, body.transcript)
     counselor_response = _safe_counsel(llm_service, deidentified_transcript)
 
     confession = Confession(
@@ -351,7 +360,12 @@ async def create_confession(
         ai_summary=ai_summary,
         sentiment=sentiment,
         pii_stripped=True,
-        status=ConfessionStatus.flagged if is_flagged else ConfessionStatus.pending,
+        status=(
+            ConfessionStatus.pending
+            if severity is ModerationSeverity.none
+            else ConfessionStatus.flagged
+        ),
+        severity=severity.value,
         counselor_response=counselor_response,
     )
     session.add(confession)

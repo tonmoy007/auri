@@ -25,7 +25,7 @@ from app.exceptions import (
     JustificationRequiredError,
     RawAccessNotPermittedError,
 )
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,9 @@ MAX_PAGE_SIZE = 100
 # Raw text is only reachable for items a human already had to look at.
 # An ordinary pending or delivered confession has no read-the-original path.
 RAW_ELIGIBLE_STATUSES: tuple[ConfessionStatus, ...] = (ConfessionStatus.flagged,)
+# Crisis items stay readable after approval: a welfare follow-up should not
+# be blocked because the item was released back into the normal flow.
+RAW_ELIGIBLE_SEVERITIES: tuple[str, ...] = (ModerationSeverity.crisis.value,)
 
 _SUMMARY_COLUMNS = (
     Confession.id,
@@ -177,7 +180,7 @@ async def read_raw(
             "is required to read a raw transcript"
         )
 
-    stmt = select(*_SUMMARY_COLUMNS, Confession.transcript).where(
+    stmt = select(*_SUMMARY_COLUMNS, Confession.severity, Confession.transcript).where(
         Confession.id == confession_id,
         Confession.status != ConfessionStatus.deleted,
     )
@@ -185,7 +188,10 @@ async def read_raw(
     if row is None:
         raise ConfessionNotFoundError(f"no visible confession with id {confession_id}")
 
-    if row.status not in RAW_ELIGIBLE_STATUSES:
+    if (
+        row.status not in RAW_ELIGIBLE_STATUSES
+        and row.severity not in RAW_ELIGIBLE_SEVERITIES
+    ):
         raise RawAccessNotPermittedError(
             f"confessions in status '{row.status.value}' do not expose their "
             "original transcript; only escalated items do"

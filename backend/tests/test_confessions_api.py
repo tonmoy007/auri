@@ -26,6 +26,7 @@ from app.api.v1.confessions import _FALLBACK_COUNSELOR_RESPONSE, get_clock
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from app.models.confession import ModerationSeverity
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -90,7 +91,10 @@ async def _create_confession(
             "app.api.v1.confessions.LLMService.summarize",
             return_value="A brief summary.",
         ),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
     return response.json()
@@ -118,7 +122,10 @@ async def test_create_confession_returns_201_with_deidentified_transcript(
             "app.api.v1.confessions.LLMService.summarize",
             return_value="A brief summary.",
         ),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
 
@@ -470,7 +477,8 @@ async def test_create_confession_moderates_raw_transcript_not_deidentified(
             return_value="A brief summary.",
         ),
         patch(
-            "app.api.v1.confessions.LLMService.moderate", return_value=False
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
         ) as mock_moderate,
     ):
         response = await client.post("/api/v1/confessions", json=payload)
@@ -502,7 +510,10 @@ async def test_create_confession_includes_counselor_response(
             "app.api.v1.confessions.LLMService.summarize",
             return_value="A brief summary.",
         ),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
         patch(
             "app.api.v1.confessions.LLMService.counsel",
             return_value="You have been heard.",
@@ -540,7 +551,10 @@ async def test_create_confession_falls_back_when_counsel_fails(
             "app.api.v1.confessions.LLMService.summarize",
             return_value="A brief summary.",
         ),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
         patch(
             "app.api.v1.confessions.LLMService.counsel",
             side_effect=RuntimeError("LLM unavailable"),

@@ -17,7 +17,7 @@ from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.conftest import TEST_PASSWORD, StaffFactory
+from tests.conftest import TEST_PASSWORD, TEST_SESSION_SECRET, StaffFactory
 
 LOGIN_PATH = "/api/v1/auth/login"
 
@@ -131,10 +131,10 @@ async def test_login_rejects_deactivated_account(
 
 @pytest.mark.asyncio
 async def test_login_locks_out_after_the_configured_failure_count(
-    api_client: AsyncClient, make_staff: StaffFactory, monkeypatch
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting
 ) -> None:
     # Arrange
-    monkeypatch.setattr(settings, "LOGIN_MAX_ATTEMPTS", 3)
+    set_setting("LOGIN_MAX_ATTEMPTS", 3)
     await make_staff(UserRole.hr, "hr.lead@example.com")
     bad_credentials = {"email": "hr.lead@example.com", "password": "wrong-password"}
 
@@ -151,10 +151,10 @@ async def test_login_locks_out_after_the_configured_failure_count(
 
 @pytest.mark.asyncio
 async def test_successful_login_clears_earlier_failures(
-    api_client: AsyncClient, make_staff: StaffFactory, monkeypatch
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting
 ) -> None:
     # Arrange
-    monkeypatch.setattr(settings, "LOGIN_MAX_ATTEMPTS", 3)
+    set_setting("LOGIN_MAX_ATTEMPTS", 3)
     await make_staff(UserRole.hr, "hr.lead@example.com")
     good_credentials = {"email": "hr.lead@example.com", "password": TEST_PASSWORD}
 
@@ -203,15 +203,13 @@ async def test_me_rejects_a_request_with_no_token(api_client: AsyncClient) -> No
 
 @pytest.mark.asyncio
 async def test_me_rejects_a_token_signed_with_another_secret(
-    api_client: AsyncClient, make_staff: StaffFactory, monkeypatch
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting
 ) -> None:
     # Arrange
     user, _ = await make_staff(UserRole.hr)
-    monkeypatch.setattr(settings, "SESSION_TOKEN_SECRET", "a-different-secret")
+    set_setting("SESSION_TOKEN_SECRET", "a-different-secret")
     forged = create_access_token(user, datetime.now(timezone.utc))
-    monkeypatch.setattr(
-        settings, "SESSION_TOKEN_SECRET", "test-session-secret-not-a-real-one"
-    )
+    set_setting("SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
 
     # Act
     response = await api_client.get(
@@ -419,11 +417,11 @@ async def test_admin_session_reaches_admin_routes(
 
 @pytest.mark.asyncio
 async def test_legacy_admin_api_key_still_reaches_admin_routes(
-    api_client: AsyncClient, monkeypatch
+    api_client: AsyncClient, set_setting
 ) -> None:
     # Arrange — the Phase 10 shared secret must keep working (11.2 adds a
     # second auth path, it does not remove the first)
-    monkeypatch.setattr(settings, "ADMIN_API_KEY", "legacy-admin-secret")
+    set_setting("ADMIN_API_KEY", "legacy-admin-secret")
 
     # Act
     response = await api_client.get(
@@ -436,10 +434,10 @@ async def test_legacy_admin_api_key_still_reaches_admin_routes(
 
 @pytest.mark.asyncio
 async def test_wrong_legacy_admin_api_key_is_refused(
-    api_client: AsyncClient, monkeypatch
+    api_client: AsyncClient, set_setting
 ) -> None:
     # Arrange
-    monkeypatch.setattr(settings, "ADMIN_API_KEY", "legacy-admin-secret")
+    set_setting("ADMIN_API_KEY", "legacy-admin-secret")
 
     # Act
     response = await api_client.get(

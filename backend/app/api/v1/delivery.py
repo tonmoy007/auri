@@ -13,13 +13,13 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,10 @@ async def _fetch_undelivered_or_404(
         Confession.id == confession_id,
         Confession.status == ConfessionStatus.forwarded,
         Confession.delivered_at.is_(None),
+        or_(
+            Confession.severity != ModerationSeverity.crisis.value,
+            Confession.acknowledged_at.isnot(None),
+        ),
     )
     result = await session.execute(stmt)
     confession = result.scalar_one_or_none()
@@ -78,11 +82,18 @@ async def list_delivery_queue(
     session: AsyncSession = Depends(get_async_session),
 ) -> list[Confession]:
     """Return every forwarded confession not yet marked delivered, oldest first."""
+    # A crisis item never rides the automatic delivery path until a named
+    # person has acknowledged it. Handing "I want to hurt myself" to a
+    # department chat unattended is the failure this guard exists to stop.
     stmt = (
         select(Confession)
         .where(
             Confession.status == ConfessionStatus.forwarded,
             Confession.delivered_at.is_(None),
+            or_(
+                Confession.severity != ModerationSeverity.crisis.value,
+                Confession.acknowledged_at.isnot(None),
+            ),
         )
         .order_by(Confession.created_at)
     )

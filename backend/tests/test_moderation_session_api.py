@@ -118,12 +118,10 @@ async def test_rejecting_from_a_session_records_the_reviewer_and_audits_it(
 
 @pytest.mark.asyncio
 async def test_bot_path_still_works_and_stays_anonymous(
-    api_client: AsyncClient, db_session: AsyncSession, monkeypatch
+    api_client: AsyncClient, db_session: AsyncSession, set_setting
 ) -> None:
     # Arrange — 11.8 adds a caller, it does not change the existing one
-    from app.config import settings
-
-    monkeypatch.setattr(settings, "MODERATION_API_KEY", "bot-secret")
+    set_setting("MODERATION_API_KEY", "bot-secret")
     confession = await _add_flagged(db_session)
 
     # Act

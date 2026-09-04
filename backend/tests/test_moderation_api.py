@@ -16,6 +16,7 @@ import pytest_asyncio
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from app.models.confession import ModerationSeverity
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -73,7 +74,10 @@ async def _create_flagged_confession(client: AsyncClient) -> dict:
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=True),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.crisis,
+        ),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
     return response.json()

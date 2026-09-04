@@ -22,6 +22,20 @@ class ConfessionStatus(str, enum.Enum):
     flagged = "flagged"
 
 
+class ModerationSeverity(str, enum.Enum):
+    """Why a confession was held back, in order of urgency.
+
+    ``moderate()`` used to answer a single yes/no, which queued a suicide
+    note behind a swearing complaint. Splitting the answer is what lets the
+    crisis path exist at all.
+    """
+
+    none = "none"
+    policy = "policy"
+    harassment = "harassment"
+    crisis = "crisis"
+
+
 class Confession(Base):
     """An anonymous confession submitted by a device user.
 
@@ -35,6 +49,7 @@ class Confession(Base):
         Index("ix_confessions_device_token_hash", "device_token_hash"),
         Index("ix_confessions_status", "status"),
         Index("ix_confessions_created_at", "created_at"),
+        Index("ix_confessions_severity", "severity"),
     )
 
     device_token_hash: Mapped[str] = mapped_column(
@@ -89,6 +104,23 @@ class Confession(Base):
         DateTime(timezone=True),
         nullable=True,
         comment="When the bot confirmed Telegram delivery to the recipient department",
+    )
+    severity: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ModerationSeverity.none.value,
+        comment="A ModerationSeverity value from the safety check",
+    )
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Staff account that explicitly acknowledged a crisis item",
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a crisis item was acknowledged; null means nobody has looked yet",
     )
     reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
