@@ -17,6 +17,7 @@ from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
 from app.models.confession import ModerationSeverity
+from app.models.department import Department
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
@@ -39,6 +40,12 @@ async def client(monkeypatch) -> AsyncIterator[AsyncClient]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    # Forward validation reads the departments table (11.10), so the target
+    # department has to exist before a confession can be forwarded to it.
+    async with session_factory() as seed_session:
+        seed_session.add(Department(name="HR", telegram_chat_id="1", is_active=True))
+        await seed_session.commit()
 
     async def override_get_session() -> AsyncIterator:
         async with session_factory() as session:

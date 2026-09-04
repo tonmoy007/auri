@@ -188,6 +188,13 @@ export interface QueueItem {
   reviewed_at: string | null
 }
 
+export interface DepartmentEntry {
+  name: string
+  telegram_chat_id: string | null
+  is_active: boolean
+  undelivered_count: number
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -255,4 +262,37 @@ export const moderationApi = {
 
   acknowledge: (request: Requester, confessionId: string) =>
     request<QueueItem>(`/moderation/${confessionId}/acknowledge`, { method: 'POST' }),
+}
+
+export const departmentsApi = {
+  getDirectory: (request: Requester) =>
+    request<DepartmentEntry[]>('/departments/directory'),
+
+  create: (request: Requester, name: string, telegramChatId: string) =>
+    request<DepartmentEntry>('/departments/directory', {
+      method: 'POST',
+      body: JSON.stringify({
+        name,
+        telegram_chat_id: telegramChatId === '' ? null : telegramChatId,
+      }),
+    }),
+
+  update: (
+    request: Requester,
+    name: string,
+    telegramChatId: string,
+    isActive: boolean,
+  ) =>
+    request<DepartmentEntry>(`/departments/directory/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        telegram_chat_id: telegramChatId === '' ? null : telegramChatId,
+        is_active: isActive,
+      }),
+    }),
+
+  remove: (request: Requester, name: string) =>
+    request<void>(`/departments/directory/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
 }

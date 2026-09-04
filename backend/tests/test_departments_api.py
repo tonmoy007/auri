@@ -1,52 +1,64 @@
-"""Integration tests for the departments directory API (app.api.v1.departments)."""
+"""Integration tests for the public departments endpoint.
+
+Rewritten for 11.10: the directory moved from the ``DEPARTMENTS`` env string
+into the ``departments`` table, so the old cases (which reloaded
+``app.config`` and asserted against the env value) were asserting against a
+source of truth that no longer exists. The env value now only *seeds* an
+empty table, which is covered in test_departments_directory.py.
+"""
 
 from __future__ import annotations
 
-import importlib
-from collections.abc import AsyncIterator
-
 import pytest
-import pytest_asyncio
-from app.main import app
-from httpx import ASGITransport, AsyncClient
-
-
-@pytest_asyncio.fixture
-async def client() -> AsyncIterator[AsyncClient]:
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as ac:
-        yield ac
+from app.models.department import Department
+from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_list_departments_returns_default_directory(client: AsyncClient) -> None:
+async def test_list_departments_returns_the_directory_contents(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange
+    db_session.add_all(
+        [
+            Department(name="HR", telegram_chat_id="1", is_active=True),
+            Department(name="Engineering", telegram_chat_id="2", is_active=True),
+        ]
+    )
+    await db_session.commit()
+
     # Act
-    response = await client.get("/api/v1/departments")
+    response = await api_client.get("/api/v1/departments")
 
     # Assert
     assert response.status_code == 200
-    assert response.json() == {"departments": ["HR", "Engineering", "Management"]}
+    assert response.json() == {"departments": ["Engineering", "HR"]}
 
 
 @pytest.mark.asyncio
-async def test_list_departments_reflects_configured_setting(
-    client: AsyncClient, monkeypatch
+async def test_list_departments_is_empty_before_anything_is_configured(
+    api_client: AsyncClient,
 ) -> None:
-    # Arrange
-    monkeypatch.setenv("DEPARTMENTS", "Legal, Finance ,, Security")
-    import app.api.v1.departments as departments_module
-    import app.config as config_module
-
-    importlib.reload(config_module)
-    monkeypatch.setattr(departments_module, "settings", config_module.settings)
-
+    # Arrange — an unseeded directory reports nothing rather than inventing
+    # defaults the operator never chose
     # Act
-    response = await client.get("/api/v1/departments")
+    response = await api_client.get("/api/v1/departments")
 
     # Assert
-    assert response.json() == {"departments": ["Legal", "Finance", "Security"]}
+    assert response.json() == {"departments": []}
 
-    # Cleanup
-    monkeypatch.delenv("DEPARTMENTS", raising=False)
-    importlib.reload(config_module)
-    importlib.reload(departments_module)
+
+@pytest.mark.asyncio
+async def test_list_departments_needs_no_credentials(
+    api_client: AsyncClient, db_session: AsyncSession
+) -> None:
+    # Arrange — the mobile Forward screen has no session to present
+    db_session.add(Department(name="HR", telegram_chat_id="1", is_active=True))
+    await db_session.commit()
+
+    # Act
+    response = await api_client.get("/api/v1/departments")
+
+    # Assert
+    assert response.status_code == 200

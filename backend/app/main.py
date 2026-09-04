@@ -16,6 +16,7 @@ from app.config import parse_comma_separated_list, settings
 from app.database import async_session_factory, engine
 from app.exceptions import AuthConfigurationError, RateLimitError
 from app.observability import init_sentry, mount_metrics
+from app.services.department_service import seed_from_env_if_empty
 from app.services.settings_service import load_cache as load_config_cache
 from app.services.user_service import bootstrap_admin
 
@@ -84,6 +85,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning(
             "Could not load live config overrides (DB may not be ready)", error=str(exc)
         )
+
+    try:
+        async with async_session_factory() as session:
+            await seed_from_env_if_empty(session)
+    except Exception as exc:  # noqa: BLE001 — seeding the department directory is a first-run convenience; a failure here (DB not ready) must not take the API down, and it retries on the next start
+        logger.warning("Could not seed the department directory", error=str(exc))
 
     try:
         async with async_session_factory() as session:

@@ -25,6 +25,7 @@ from app.models.app_setting import AppSetting  # noqa: F401
 from app.models.audit_event import AuditEvent  # noqa: F401
 from app.models.base import Base
 from app.models.confession import Confession  # noqa: F401
+from app.models.department import Department  # noqa: F401
 from app.models.user import AnonymousUser, User  # noqa: F401
 
 # Convenience reference.

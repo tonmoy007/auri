@@ -4,6 +4,7 @@ import { BuildPanel } from '@/components/BuildPanel'
 import { ConfigTable } from '@/components/ConfigTable'
 import { AuditPanel } from '@/components/AuditPanel'
 import { ConnectionBar } from '@/components/ConnectionBar'
+import { DirectoryPanel } from '@/components/DirectoryPanel'
 import { InsightsPanel } from '@/components/InsightsPanel'
 import { QueuePanel } from '@/components/QueuePanel'
 import { LoginScreen } from '@/components/LoginScreen'
@@ -31,6 +32,7 @@ import {
 const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'insights', label: 'Insights', roles: ['hr'] },
   { value: 'queue', label: 'Queue', roles: ['hr', 'moderator'] },
+  { value: 'directory', label: 'Directory', roles: ['hr'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -231,6 +233,10 @@ function App() {
 
           <TabsContent value="queue">
             <QueuePanel />
+          </TabsContent>
+
+          <TabsContent value="directory">
+            <DirectoryPanel />
           </TabsContent>
 
           <TabsContent value="audit">

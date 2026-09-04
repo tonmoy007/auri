@@ -47,6 +47,18 @@ class DuplicateConfessionError(DatabaseError):
     """Raised when a confession violates a uniqueness constraint."""
 
 
+class DepartmentNotFoundError(DatabaseError):
+    """Raised when a department lookup by name finds no matching row."""
+
+
+class DuplicateDepartmentError(DatabaseError):
+    """Raised when a department name is already in the directory."""
+
+
+class DepartmentInUseError(DatabaseError):
+    """Raised when deleting a department that still has undelivered confessions."""
+
+
 class DuplicateUserError(DatabaseError):
     """Raised when creating a staff account whose email is already registered."""
 

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import parse_comma_separated_list, settings
+from app.config import settings
 from app.database import get_async_session
 from app.exceptions import DeidentificationError, RateLimitError
 from app.models.confession import (
@@ -22,6 +22,7 @@ from app.models.confession import (
     ModerationSeverity,
 )
 from app.models.user import AnonymousUser
+from app.services import department_service
 from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
@@ -494,7 +495,10 @@ async def forward_confession(
             detail=f"Cannot forward confession in status '{confession.status.value}'",
         )
 
-    known_departments = parse_comma_separated_list(settings.DEPARTMENTS)
+    known_departments = [
+        department.name
+        for department in await department_service.list_departments(session)
+    ]
     if body.department not in known_departments:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

@@ -55,6 +55,9 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not settings.delivery_enabled:
         return
 
+    # The backend resolves routing from the departments table and sends it
+    # with each item; the bot's own DEPARTMENT_CHAT_IDS map is now only a
+    # fallback for a backend that predates the directory (11.10).
     chat_ids = settings.department_chat_id_map()
     delivered_ids: set[str] = context.bot_data.setdefault("delivered_ids", set())
 
@@ -77,7 +80,9 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             continue
 
         department = item.get("recipient_dept")
-        chat_id = chat_ids.get(department) if department else None
+        chat_id = item.get("recipient_chat_id") or (
+            chat_ids.get(department) if department else None
+        )
         if chat_id is None:
             logger.error(
                 "no Telegram chat configured for department %r "

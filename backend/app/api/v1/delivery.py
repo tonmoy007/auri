@@ -20,12 +20,25 @@ from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
+from app.services import department_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/delivery", tags=["delivery"])
 
 ClockDependency = Callable[[], datetime]
+
+
+class DeliveryQueueItem(ConfessionResponse):
+    """A queued confession plus the chat the backend says it belongs in.
+
+    The routing target now lives in the ``departments`` table, so the bot no
+    longer keeps its own copy of the mapping. Sending it here means the two
+    can no longer disagree — the failure mode that made an unmapped
+    department invisible to everyone who could fix it.
+    """
+
+    recipient_chat_id: str | None
 
 
 def get_clock() -> ClockDependency:
@@ -74,13 +87,13 @@ async def _fetch_undelivered_or_404(
 
 @router.get(
     "/queue",
-    response_model=list[ConfessionResponse],
+    response_model=list[DeliveryQueueItem],
     dependencies=[Depends(require_delivery_service)],
     summary="List forwarded confessions awaiting Telegram delivery",
 )
 async def list_delivery_queue(
     session: AsyncSession = Depends(get_async_session),
-) -> list[Confession]:
+) -> list[DeliveryQueueItem]:
     """Return every forwarded confession not yet marked delivered, oldest first."""
     # A crisis item never rides the automatic delivery path until a named
     # person has acknowledged it. Handing "I want to hurt myself" to a
@@ -98,7 +111,7 @@ async def list_delivery_queue(
         .order_by(Confession.created_at)
     )
     result = await session.execute(stmt)
-    return list(result.scalars().all())
+    return [await _with_chat_id(session, item) for item in result.scalars().all()]
 
 
 @router.post(
@@ -125,3 +138,16 @@ async def mark_delivered(
     await session.flush()
     await session.refresh(confession)
     return confession
+
+
+async def _with_chat_id(
+    session: AsyncSession, confession: Confession
+) -> DeliveryQueueItem:
+    """Attach the department's configured chat id to a queued confession."""
+    chat_id = (
+        await department_service.resolve_chat_id(session, confession.recipient_dept)
+        if confession.recipient_dept
+        else None
+    )
+    base = ConfessionResponse.model_validate(confession, from_attributes=True)
+    return DeliveryQueueItem(**base.model_dump(), recipient_chat_id=chat_id)
