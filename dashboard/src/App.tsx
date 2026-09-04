@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { BuildPanel } from '@/components/BuildPanel'
 import { ConfigTable } from '@/components/ConfigTable'
+import { AuditPanel } from '@/components/AuditPanel'
 import { ConnectionBar } from '@/components/ConnectionBar'
 import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
@@ -29,6 +30,7 @@ const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
+  { value: 'audit', label: 'Audit', roles: ['admin'] },
 ]
 
 function App() {
@@ -209,6 +211,9 @@ function App() {
                 onReset={handleReset}
               />
             )}
+          </TabsContent>
+          <TabsContent value="audit">
+            <AuditPanel />
           </TabsContent>
         </Tabs>
       )}

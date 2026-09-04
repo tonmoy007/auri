@@ -95,6 +95,15 @@ def require_role(*roles: UserRole) -> Callable[[User], Awaitable[User]]:
     return dependency
 
 
+# Built once at import rather than per route definition, so `Depends(...)`
+# receives a stable dependency object (FastAPI caches per-request results by
+# identity, and a fresh closure per call would defeat that).
+require_admin_role = require_role(UserRole.admin)
+require_hr_role = require_role(UserRole.hr)
+# The moderation queue is shared: moderators review it, HR also works it.
+require_queue_role = require_role(UserRole.moderator, UserRole.hr)
+
+
 def _matches_admin_api_key(candidate: str | None) -> bool:
     """Return ``True`` if *candidate* is the configured admin service key.
 

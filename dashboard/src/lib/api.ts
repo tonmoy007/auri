@@ -121,6 +121,24 @@ export const authApi = {
     apiRequest<StaffUser>(baseUrl, '/auth/me', auth),
 }
 
+export interface AuditEvent {
+  id: string
+  actor_user_id: string
+  action: string
+  target_confession_id: string | null
+  content_tier: 'summary' | 'raw' | null
+  justification: string | null
+  source_ip: string | null
+  created_at: string
+}
+
+export interface AuditPage {
+  items: AuditEvent[]
+  total: number
+  limit: number
+  offset: number
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -155,4 +173,20 @@ export const adminApi = {
     }),
 
   getBuildStatus: (request: Requester) => request<BuildStatus>('/admin/build-apk/status'),
+}
+
+export const auditApi = {
+  list: (
+    request: Requester,
+    filters: { action?: string; limit: number; offset: number },
+  ) => {
+    const query = new URLSearchParams({
+      limit: String(filters.limit),
+      offset: String(filters.offset),
+    })
+    if (filters.action) query.set('action', filters.action)
+    return request<AuditPage>(`/audit?${query.toString()}`)
+  },
+
+  listActions: (request: Requester) => request<string[]>('/audit/actions'),
 }
