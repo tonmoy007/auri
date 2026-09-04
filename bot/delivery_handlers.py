@@ -21,6 +21,17 @@ def _delivery_headers(settings: BotSettings) -> dict[str, str]:
     return {"X-Delivery-Api-Key": settings.delivery_api_key or ""}
 
 
+def delivery_dedupe_key(item: dict) -> str:
+    """Return the key identifying *item*'s current delivery state.
+
+    Keyed on ``updated_at`` as well as the confession id: a deliberate
+    resend (11.11) clears ``delivered_at``, which bumps ``updated_at``, so
+    the item gets a new key and is sent again — while a fast repeat poll of
+    the unchanged row still dedupes against the previous send.
+    """
+    return f"{item['id']}:{item.get('updated_at', '')}"
+
+
 def _format_delivery_message(item: dict) -> str:
     """Render a forwarded confession as a recipient-facing Telegram message.
 
@@ -76,11 +87,7 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for item in queue:
         confession_id = item["id"]
-        # Key on the row's updated_at as well as its id: a deliberate resend
-        # (11.11) clears delivered_at, which bumps updated_at, so the item
-        # gets a new key and is sent again — while a fast repeat poll of the
-        # unchanged row still dedupes.
-        dedupe_key = f"{confession_id}:{item.get('updated_at', '')}"
+        dedupe_key = delivery_dedupe_key(item)
         if dedupe_key in delivered_ids:
             continue
 
