@@ -219,7 +219,10 @@ async def test_resending_an_undelivered_item_is_refused(
 
 @pytest.mark.asyncio
 async def test_a_resent_item_reappears_in_the_bot_delivery_queue(
-    api_client: AsyncClient, db_session: AsyncSession, make_staff: StaffFactory, set_setting
+    api_client: AsyncClient,
+    db_session: AsyncSession,
+    make_staff: StaffFactory,
+    set_setting,
 ) -> None:
     # Arrange
     set_setting("DELIVERY_API_KEY", "delivery-secret")

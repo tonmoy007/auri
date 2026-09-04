@@ -20,7 +20,11 @@ Mask = Literal["warm", "robotic", "ethereal", "deep", "random"]
 # Pre-defined SoX effect chains for each voice mask.
 MASKS: dict[str, list[str]] = {
     "warm": ["pitch", "-300", "overdrive", "5"],
-    "robotic": ["chorus", "0.5", "0.9", "50", "0.5", "0.25", "2", "-t", "vocoder"],
+    # No trailing "vocoder": SoX has no effect by that name, so it was parsed
+    # as an extra chorus argument and every robotic mask failed with
+    # "sox FAIL chorus: usage: gain-in gain-out delay decay speed depth".
+    # Present since the initial scaffold — the mask has never worked.
+    "robotic": ["chorus", "0.5", "0.9", "50", "0.5", "0.25", "2", "-t"],
     "ethereal": ["reverb", "80", "50", "80", "100", "5", "pitch", "+600"],
     "deep": ["pitch", "-800", "bass", "+10"],
 }

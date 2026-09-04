@@ -7,6 +7,11 @@ AAC-to-WAV transcode gate, and temp-file cleanup all run for real.
 
 from __future__ import annotations
 
+import math
+import shutil
+import struct
+import subprocess
+import wave
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -184,3 +189,65 @@ def test_modulate_raises_runtime_error_on_sox_nonzero_exit(
         pytest.raises(RuntimeError, match="sox: unsupported effect"),
     ):
         modulator.modulate(src, "warm")
+
+
+# ── Real-SoX validation ──────────────────────────────────────────────────
+#
+# Every other test in this file mocks subprocess, so it proves the argv is
+# assembled as written — never that SoX accepts it. That gap let the
+# "robotic" mask ship broken from the initial scaffold: it carried a
+# trailing "vocoder" token, which is not a SoX effect, so SoX read it as an
+# extra chorus argument and rejected the whole chain. These cases run the
+# real binary. CI installs sox and ffmpeg so they actually execute there.
+
+
+def _write_probe_wav(path: Path) -> Path:
+    """Write a one-second 220 Hz mono WAV for SoX to chew on."""
+    with wave.open(str(path), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(16000)
+        handle.writeframes(
+            b"".join(
+                struct.pack("<h", int(12000 * math.sin(2 * math.pi * 220 * t / 16000)))
+                for t in range(16000)
+            )
+        )
+    return path
+
+
+@pytest.mark.skipif(shutil.which("sox") is None, reason="sox binary not installed")
+@pytest.mark.parametrize("mask_name", sorted(MASKS))
+def test_every_mask_chain_is_accepted_by_real_sox(
+    mask_name: str, tmp_path: Path
+) -> None:
+    # Arrange
+    src = _write_probe_wav(tmp_path / "probe.wav")
+    dst = tmp_path / f"{mask_name}.wav"
+
+    # Act
+    result = subprocess.run(
+        ["sox", str(src), str(dst), *MASKS[mask_name]],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    # Assert
+    assert result.returncode == 0, f"{mask_name}: {result.stderr.strip()}"
+    assert dst.stat().st_size > 0
+
+
+@pytest.mark.skipif(shutil.which("sox") is None, reason="sox binary not installed")
+def test_robotic_mask_produces_audio_rather_than_failing(tmp_path: Path) -> None:
+    # Arrange — regression: this exact chain failed with
+    # "sox FAIL chorus: usage: gain-in gain-out delay decay speed depth"
+    modulator = VoiceModulator(output_dir=tmp_path / "out")
+    src = _write_probe_wav(tmp_path / "probe.wav")
+
+    # Act
+    masked = Path(modulator.modulate(src, "robotic"))
+
+    # Assert
+    assert masked.exists()
+    assert masked.stat().st_size > 0

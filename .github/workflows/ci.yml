@@ -90,6 +90,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
 
+      - name: Install audio tooling
+        # voice_mod.py shells out to these, and the mask chains are only
+        # really validated by running them. Without sox installed those
+        # tests skip, which is how a mask that SoX always rejected shipped
+        # from the initial scaffold unnoticed.
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends sox ffmpeg
+
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
