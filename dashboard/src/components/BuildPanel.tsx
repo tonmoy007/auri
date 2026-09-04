@@ -5,11 +5,10 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
+import { useAuth } from '@/hooks/useAuth'
 import { adminApi, ApiError, type BuildStatus } from '@/lib/api'
 
 interface BuildPanelProps {
-  baseUrl: string
-  adminKey: string
   /** Pre-fills the backend-URL field — the live ngrok URL if one's running. */
   suggestedBackendUrl: string | null
 }
@@ -25,7 +24,8 @@ const STATUS_VARIANT: Record<BuildStatus['status'], 'default' | 'destructive' | 
 
 /** Trigger a local `gradlew assembleRelease` with a given backend URL baked
  * in, and poll its status/log until it finishes. */
-export function BuildPanel({ baseUrl, adminKey, suggestedBackendUrl }: BuildPanelProps) {
+export function BuildPanel({ suggestedBackendUrl }: BuildPanelProps) {
+  const { authedRequest } = useAuth()
   const [backendUrlDraft, setBackendUrlDraft] = useState('')
   const [build, setBuild] = useState<BuildStatus | null>(null)
   const [starting, setStarting] = useState(false)
@@ -42,28 +42,27 @@ export function BuildPanel({ baseUrl, adminKey, suggestedBackendUrl }: BuildPane
   // without this, reloading the page (or just opening this tab) shows a
   // blank panel even though the backend has real build state to report.
   useEffect(() => {
-    if (!adminKey) return
     adminApi
-      .getBuildStatus(baseUrl, adminKey)
+      .getBuildStatus(authedRequest)
       .then((s) => setBuild((prev) => prev ?? s))
       .catch(() => {
         // No prior build state (or backend unreachable) — leave the panel blank, same as before.
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, adminKey])
+  }, [authedRequest])
 
   useEffect(() => {
-    if (!adminKey || build?.status !== 'running') return
+    if (build?.status !== 'running') return
     const id = setInterval(async () => {
       try {
-        const status = await adminApi.getBuildStatus(baseUrl, adminKey)
+        const status = await adminApi.getBuildStatus(authedRequest)
         setBuild(status)
       } catch {
         // Transient poll failure — next tick retries; don't spam toasts.
       }
     }, POLL_INTERVAL_MS)
     return () => clearInterval(id)
-  }, [baseUrl, adminKey, build?.status])
+  }, [authedRequest, build?.status])
 
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight })
@@ -76,7 +75,7 @@ export function BuildPanel({ baseUrl, adminKey, suggestedBackendUrl }: BuildPane
     }
     setStarting(true)
     try {
-      const status = await adminApi.startBuild(baseUrl, adminKey, backendUrlDraft.trim())
+      const status = await adminApi.startBuild(authedRequest, backendUrlDraft.trim())
       setBuild(status)
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'Could not start build'

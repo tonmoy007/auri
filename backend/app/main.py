@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from app.api.v1 import router as api_v1_router
 from app.config import parse_comma_separated_list, settings
 from app.database import async_session_factory, engine
-from app.exceptions import RateLimitError
+from app.exceptions import AuthConfigurationError, RateLimitError
 from app.observability import init_sentry, mount_metrics
 from app.services.settings_service import load_cache as load_config_cache
 from app.services.user_service import bootstrap_admin
@@ -140,6 +140,19 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         """Map a domain ``RateLimitError`` to an HTTP 429 response."""
         return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+    @app.exception_handler(AuthConfigurationError)
+    async def auth_configuration_error_handler(
+        request: Request, exc: AuthConfigurationError
+    ) -> JSONResponse:
+        """Map a missing session secret to a 503, not a generic 500.
+
+        Sessions cannot be issued at all in this state — that is deliberate
+        (see app/services/auth_tokens.py), and the operator needs to see
+        *why* rather than a stack trace.
+        """
+        logger.error("staff sessions unavailable", error=str(exc))
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # ── Routers ───────────────────────────────────────────────────────────
     app.include_router(api_v1_router)
