@@ -212,6 +212,21 @@ def _safe_categorize(llm_service: LLMService, text: str) -> str | None:
         return None
 
 
+def _safe_classify_sentiment(llm_service: LLMService, text: str) -> str | None:
+    """Classify tone, returning ``None`` on failure instead of blocking creation.
+
+    Sentiment only feeds aggregate reporting (11.6), so a missing label
+    costs a chart bucket, never the confession.
+    """
+    try:
+        return llm_service.classify_sentiment(text)
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
+        logger.warning(
+            "sentiment classification failed, continuing without it: %s", exc
+        )
+        return None
+
+
 def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
     """Summarize *text*, returning ``None`` on failure instead of blocking creation."""
     try:
@@ -317,6 +332,7 @@ async def create_confession(
 
     category = _safe_categorize(llm_service, deidentified_transcript)
     ai_summary = _safe_summarize(llm_service, deidentified_transcript)
+    sentiment = _safe_classify_sentiment(llm_service, deidentified_transcript)
     # Moderation runs on the ORIGINAL transcript, not the de-identified one:
     # discovered via live testing (2026-07-18) that a de-identify call can
     # itself fail (refusal, meta-commentary) and corrupt its output, which
@@ -331,6 +347,7 @@ async def create_confession(
         transcript=deidentified_transcript,
         category=category,
         ai_summary=ai_summary,
+        sentiment=sentiment,
         pii_stripped=True,
         status=ConfessionStatus.flagged if is_flagged else ConfessionStatus.pending,
         counselor_response=counselor_response,

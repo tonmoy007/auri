@@ -11,6 +11,7 @@ from app.api.v1.confessions import router as confessions_router
 from app.api.v1.delivery import router as delivery_router
 from app.api.v1.departments import router as departments_router
 from app.api.v1.health import router as health_router
+from app.api.v1.hr import router as hr_router
 from app.api.v1.moderation import router as moderation_router
 from app.api.v1.stt import router as stt_router
 from app.api.v1.tts import router as tts_router
@@ -23,6 +24,7 @@ router.include_router(auth_router)
 router.include_router(admin_router)
 router.include_router(audit_router)
 router.include_router(confessions_router)
+router.include_router(hr_router)
 router.include_router(departments_router)
 router.include_router(moderation_router)
 router.include_router(delivery_router)

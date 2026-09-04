@@ -27,6 +27,10 @@ class SummarizationError(ProcessingError):
     """Raised when LLM summarisation fails to produce a usable summary."""
 
 
+class SentimentError(ProcessingError):
+    """Raised when LLM sentiment classification produces no usable label."""
+
+
 class CounselingError(ProcessingError):
     """Raised when LLM counseling-response generation fails to produce a usable reply."""
 
@@ -81,6 +85,14 @@ class RateLimitError(ValidationError):
 
 class InvalidSessionTokenError(ValidationError):
     """Raised when a session token is missing, malformed, expired, or revoked."""
+
+
+class JustificationRequiredError(ValidationError):
+    """Raised when a raw-transcript read is attempted without a stated reason."""
+
+
+class RawAccessNotPermittedError(ValidationError):
+    """Raised when a confession is not eligible for raw-transcript access."""
 
 
 class InvalidEmailError(ValidationError):

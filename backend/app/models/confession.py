@@ -61,6 +61,11 @@ class Confession(Base):
         nullable=True,
         comment="Categorisation label produced by LLM (e.g. 'health', 'faith', 'relationships')",
     )
+    sentiment: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="Aggregate-reporting tone label: negative, neutral or positive",
+    )
     pii_stripped: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,

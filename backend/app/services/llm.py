@@ -7,7 +7,12 @@ from collections.abc import Callable
 from typing import Final, Literal
 
 from app.config import settings
-from app.exceptions import CategorizationError, CounselingError, SummarizationError
+from app.exceptions import (
+    CategorizationError,
+    CounselingError,
+    SentimentError,
+    SummarizationError,
+)
 from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
@@ -21,6 +26,9 @@ _CONTENT_END: Final[str] = "<<<END_USER_CONTENT>>>"
 # Gemini, then OpenAI as the final paid fallback. Claude is opt-in only —
 # not part of the automatic chain.
 _AUTO_CHAIN: Final[tuple[Provider, ...]] = ("ollama", "gemini", "openai")
+
+# The only sentiment labels the aggregation layer knows how to bucket.
+SENTIMENTS: Final[frozenset[str]] = frozenset({"negative", "neutral", "positive"})
 
 
 class LLMService:
@@ -97,6 +105,38 @@ class LLMService:
         if not result:
             logger.error("categorization returned an empty result")
             raise CategorizationError("LLM categorization failed to produce a label")
+        return result
+
+    def classify_sentiment(self, text: str) -> str:
+        """Classify the emotional tone of *text* for aggregate reporting.
+
+        Used only for trend charts (11.6), never to decide what happens to
+        a confession — a wrong label must not change anyone's treatment.
+
+        Args:
+            text: Already de-identified transcript.
+
+        Returns:
+            One of ``"negative"``, ``"neutral"`` or ``"positive"``.
+
+        Raises:
+            SentimentError: If the LLM returns anything outside that set.
+        """
+        prompt = self._build_delimited_prompt(
+            instruction=(
+                "Classify the overall emotional tone of the following "
+                "workplace confession. Answer with exactly one word: "
+                "negative, neutral, or positive."
+            ),
+            content=text,
+        )
+        result = self._call_llm(prompt).strip().lower()
+
+        if result not in SENTIMENTS:
+            logger.error("sentiment classification returned %r", result)
+            raise SentimentError(
+                "LLM sentiment classification produced no usable label"
+            )
         return result
 
     def summarize(self, text: str) -> str:
