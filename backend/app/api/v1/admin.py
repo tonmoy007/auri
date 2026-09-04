@@ -44,6 +44,7 @@ _LLM_KEYS: tuple[str, ...] = (
     "ANTHROPIC_MODEL",
 )
 _STT_KEYS: tuple[str, ...] = ("WHISPER_MODEL",)
+_ANALYTICS_KEYS: tuple[str, ...] = ("ANALYTICS_MIN_COHORT",)
 _VOICE_MASK_KEYS: tuple[str, ...] = tuple(
     f"VOICE_MASK_{name.upper()}" for name in MASKS
 )
@@ -52,7 +53,9 @@ _VOICE_MASK_KEYS: tuple[str, ...] = tuple(
 # machine's default `java`. Empty means "inherit the backend process's own
 # JAVA_HOME".
 _BUILD_KEYS: tuple[str, ...] = ("ANDROID_JAVA_HOME",)
-ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUILD_KEYS)
+ALLOWED_CONFIG_KEYS = frozenset(
+    _LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUILD_KEYS + _ANALYTICS_KEYS
+)
 
 # repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
 _MOBILE_DIR = Path(__file__).resolve().parents[4] / "mobile"
@@ -132,6 +135,7 @@ class ConfigResponse(BaseModel):
     stt: list[ConfigEntry]
     voice_masks: list[ConfigEntry]
     build: list[ConfigEntry]
+    analytics: list[ConfigEntry]
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -179,6 +183,7 @@ async def get_config_all() -> ConfigResponse:
         stt=_entries(_STT_KEYS),
         voice_masks=_entries(_VOICE_MASK_KEYS),
         build=_entries(_BUILD_KEYS),
+        analytics=_entries(_ANALYTICS_KEYS),
     )
 
 

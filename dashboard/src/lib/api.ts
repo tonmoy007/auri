@@ -9,6 +9,7 @@ export interface ConfigResponse {
   stt: ConfigEntry[]
   voice_masks: ConfigEntry[]
   build: ConfigEntry[]
+  analytics: ConfigEntry[]
 }
 
 export type BuildStatusValue = 'idle' | 'running' | 'success' | 'failed'
@@ -139,6 +140,37 @@ export interface AuditPage {
   offset: number
 }
 
+export interface Bucket {
+  label: string
+  /** `null` when the bucket was suppressed — not the same as zero. */
+  count: number | null
+  suppressed: boolean
+}
+
+export interface SentimentPoint {
+  label: string
+  buckets: Bucket[]
+}
+
+export interface Insights {
+  range_start: string
+  range_end: string
+  min_cohort: number
+  total: Bucket
+  volume_by_day: Bucket[]
+  volume_by_week: Bucket[]
+  by_category: Bucket[]
+  by_sentiment: Bucket[]
+  by_department: Bucket[]
+  forwarded: Bucket
+  blind: Bucket
+  flagged: Bucket
+  flagged_rate: number | null
+  delivered: Bucket
+  median_hours_to_delivery: number | null
+  sentiment_trend: SentimentPoint[]
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -189,4 +221,11 @@ export const auditApi = {
   },
 
   listActions: (request: Requester) => request<string[]>('/audit/actions'),
+}
+
+export const hrApi = {
+  getInsights: (request: Requester, range: { since: string; until: string }) => {
+    const query = new URLSearchParams({ since: range.since, until: range.until })
+    return request<Insights>(`/hr/insights?${query.toString()}`)
+  },
 }

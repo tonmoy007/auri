@@ -11,7 +11,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 from app.config import settings
-from app.exceptions import CategorizationError, CounselingError, SummarizationError
+from app.exceptions import (
+    CategorizationError,
+    CounselingError,
+    SentimentError,
+    SummarizationError,
+)
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
 
@@ -57,6 +62,30 @@ def test_categorize_strips_whitespace_and_lowercases_llm_response() -> None:
 
     # Assert
     assert category == "health"
+
+
+def test_classify_sentiment_normalises_a_valid_label() -> None:
+    # Arrange
+    service = LLMService(provider="openai")
+
+    # Act
+    with patch.object(LLMService, "_call_openai", return_value=" Negative \n"):
+        sentiment = service.classify_sentiment("some confession text")
+
+    # Assert
+    assert sentiment == "negative"
+
+
+def test_classify_sentiment_rejects_a_label_outside_the_known_set() -> None:
+    # Arrange — an invented label would silently create a phantom chart bucket
+    service = LLMService(provider="openai")
+
+    # Act / Assert
+    with (
+        patch.object(LLMService, "_call_openai", return_value="devastated"),
+        pytest.raises(SentimentError),
+    ):
+        service.classify_sentiment("some confession text")
 
 
 def test_categorize_raises_categorization_error_on_empty_llm_response() -> None:

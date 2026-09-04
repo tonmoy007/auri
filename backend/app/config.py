@@ -39,6 +39,11 @@ class Settings(BaseSettings):
         10  # cost-abuse guard on POST /api/v1/voice/mask
     )
 
+    # ── HR analytics (Phase 11) ──────────────────────────────────────────
+    # Smallest bucket size an aggregate may report. Anything smaller is
+    # suppressed, because a 2-person chart identifies those 2 people.
+    ANALYTICS_MIN_COHORT: int = 5
+
     # ── Data retention ────────────────────────────────────────────────────
     RETENTION_HOURS: int = 24  # purge forwarded/deleted confessions after this long
 

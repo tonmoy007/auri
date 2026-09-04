@@ -4,6 +4,7 @@ import { BuildPanel } from '@/components/BuildPanel'
 import { ConfigTable } from '@/components/ConfigTable'
 import { AuditPanel } from '@/components/AuditPanel'
 import { ConnectionBar } from '@/components/ConnectionBar'
+import { InsightsPanel } from '@/components/InsightsPanel'
 import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
 import { Button } from '@/components/ui/button'
@@ -27,6 +28,7 @@ import {
  * Later Phase 11 tabs register here as they land.
  */
 const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
+  { value: 'insights', label: 'Insights', roles: ['hr'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -49,7 +51,9 @@ function App() {
   const visibleTabs = TAB_ACCESS.filter(
     (tab) => usingLegacyKey || (user !== null && tab.roles.includes(user.role)),
   )
-  const canSeeDevTabs = visibleTabs.length > 0
+  // Only the admin/dev panels talk to /admin/*; an HR session must not fire
+  // those requests just because it can see the Insights tab.
+  const canSeeDevTabs = visibleTabs.some((tab) => tab.value === 'config')
 
   const loadConfig = useCallback(async () => {
     if (!authorized || !canSeeDevTabs) return
@@ -181,6 +185,13 @@ function App() {
                   onReset={handleReset}
                 />
                 <ConfigTable
+                  title="HR Analytics"
+                  description="Smallest bucket size an aggregate may report; smaller cohorts are suppressed."
+                  entries={config.analytics}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
                   title="Voice Masks"
                   description="SoX effect chain per mask, as a JSON list of arguments."
                   entries={config.voice_masks}
@@ -212,6 +223,10 @@ function App() {
               />
             )}
           </TabsContent>
+          <TabsContent value="insights">
+            <InsightsPanel />
+          </TabsContent>
+
           <TabsContent value="audit">
             <AuditPanel />
           </TabsContent>

@@ -123,8 +123,8 @@
         "11.3": "completed",
         "11.4": "completed",
         "11.5": "completed",
-        "11.6": "pending",
-        "11.7": "pending",
+        "11.6": "completed",
+        "11.7": "completed",
         "11.8": "pending",
         "11.9": "pending",
         "11.10": "pending",
@@ -154,5 +154,5 @@
     }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-09-04T02:05:00+06:00"
+  "updated_at": "2026-09-04T02:35:00+06:00"
 }

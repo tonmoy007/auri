@@ -9,7 +9,7 @@ items, and always writes an audit event — see
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -25,7 +25,7 @@ from app.exceptions import (
 from app.models.audit_event import AuditAction, ContentTier
 from app.models.confession import ConfessionStatus
 from app.models.user import User
-from app.services import audit_service, confession_access
+from app.services import audit_service, confession_access, insights_service
 
 router = APIRouter(prefix="/hr", tags=["hr"])
 
@@ -183,3 +183,84 @@ async def read_confession_raw(
         source_ip=audit_service.client_ip(request),
     )
     return ConfessionRawResponse.model_validate(raw)
+
+
+class BucketResponse(BaseModel):
+    """One aggregate number, or an explicit refusal to report it.
+
+    ``suppressed`` is not the same as zero: it means "there were people
+    here, but too few to show without identifying them".
+    """
+
+    label: str
+    count: int | None
+    suppressed: bool
+
+    model_config = {"from_attributes": True}
+
+
+class SentimentPointResponse(BaseModel):
+    """Sentiment split for one ISO week."""
+
+    label: str
+    buckets: list[BucketResponse]
+
+    model_config = {"from_attributes": True}
+
+
+class InsightsResponse(BaseModel):
+    """Aggregate reporting payload, already suppressed server-side."""
+
+    range_start: datetime
+    range_end: datetime
+    min_cohort: int
+    total: BucketResponse
+    volume_by_day: list[BucketResponse]
+    volume_by_week: list[BucketResponse]
+    by_category: list[BucketResponse]
+    by_sentiment: list[BucketResponse]
+    by_department: list[BucketResponse]
+    forwarded: BucketResponse
+    blind: BucketResponse
+    flagged: BucketResponse
+    flagged_rate: float | None
+    delivered: BucketResponse
+    median_hours_to_delivery: float | None
+    sentiment_trend: list[SentimentPointResponse]
+
+    model_config = {"from_attributes": True}
+
+
+@router.get(
+    "/insights",
+    response_model=InsightsResponse,
+    summary="Aggregate confession reporting with small-cohort suppression (HR)",
+)
+async def read_insights(
+    request: Request,
+    since: datetime | None = Query(None),
+    until: datetime | None = Query(None),
+    session: AsyncSession = Depends(get_async_session),
+    actor: User = Depends(require_hr_role),
+) -> InsightsResponse:
+    """Return aggregates over the requested window (default: last 30 days).
+
+    Every bucket smaller than ``ANALYTICS_MIN_COHORT`` comes back
+    suppressed. The client is never sent a number it is expected to hide.
+    """
+    end = until or datetime.now(timezone.utc)
+    start = since or end - timedelta(days=insights_service.DEFAULT_RANGE_DAYS)
+    if start > end:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="'since' must not be after 'until'",
+        )
+
+    insights = await insights_service.build_insights(session, start, end)
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=AuditAction.insights_read,
+        source_ip=audit_service.client_ip(request),
+    )
+    return InsightsResponse.model_validate(insights)
