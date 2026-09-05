@@ -53,6 +53,7 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [environment, setEnvironment] = useState<Environment>(defaultEnvironment);
   const [status, setStatus] = useState<ConfessionStatus>('idle');
   const [doorOpen, setDoorOpen] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const recorder = useAudioRecorder();
   const haptics = useHaptics();
 
@@ -114,6 +115,31 @@ export default function ConfessionScreen(): React.JSX.Element {
     }
   }, [recorder, id, voiceMask, haptics]);
 
+  /**
+   * Leave the booth without submitting.
+   *
+   * Always available, including mid-recording: this is a confession booth,
+   * and someone who wants out must be able to get out. Nothing has been
+   * sent at this point, so an abandoned recording is simply discarded —
+   * `useAudioRecorder` stops and unloads the hardware recording on unmount.
+   * The door closes on the way out, matching the exit choreography the
+   * submit path already uses.
+   */
+  const handleExitBooth = useCallback(async () => {
+    if (isExiting) return;
+    setIsExiting(true);
+    haptics.selectionChanged();
+    setDoorOpen(false);
+    await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
+    // Reached directly via a deep link there is nothing to pop back to, so
+    // fall back to the landing screen rather than stranding the user here.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }, [isExiting, haptics]);
+
   const handleToggleEnvironment = useCallback(() => {
     haptics.selectionChanged();
     setEnvironment((prev: Environment) => {
@@ -166,8 +192,21 @@ export default function ConfessionScreen(): React.JSX.Element {
         </ThreeCanvas>
       </Pressable>
 
-      {/* Status overlay */}
+      {/* Status overlay — the back control lives here rather than floating
+          on its own, so every persistent control stays in the one top
+          cluster this screen already groups them into. */}
       <View style={styles.statusBar}>
+        <Pressable
+          onPress={handleExitBooth}
+          disabled={isExiting}
+          accessibilityRole="button"
+          accessibilityLabel="Leave the booth"
+          accessibilityHint="Discards this recording without sending it"
+          style={styles.backButton}
+        >
+          <Text style={styles.backButtonText}>‹</Text>
+        </Pressable>
+
         {status === 'processing' ? (
           <ShimmerText style={styles.statusText}>
             {recorder.isUploading
@@ -220,14 +259,31 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   statusBar: {
+    // 52, not 60: the row is now as tall as the 44pt back-button target, so
+    // this keeps the status text at roughly its original height and leaves a
+    // gap above the environment hint at 104 instead of butting against it.
     position: 'absolute',
-    top: 60,
+    top: 52,
     left: spacing.lg,
     right: spacing.lg,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     zIndex: 10,
+  },
+  // 44x44 is the iOS HIG minimum touch target (AGENTS.md §6.1). The chevron
+  // glyph itself is small, so the tappable box is sized rather than padded.
+  backButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: -spacing.sm,
+  },
+  backButtonText: {
+    fontSize: typography.fontSize.xxl,
+    color: colors.candleGlow,
+    lineHeight: typography.fontSize.xxl,
   },
   statusText: {
     fontSize: typography.fontSize.sm,
