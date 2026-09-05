@@ -1,7 +1,7 @@
 // Auri — Home screen
 // Entry point with 'Enter Auri' button, 3D background preview, and tagline
 
-import React, { useCallback, useRef } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -29,20 +29,32 @@ export default function HomeScreen(): React.JSX.Element {
   const haptics = useHaptics();
   const fadeToBlack = useRef(new Animated.Value(0)).current;
 
-  // Belt-and-suspenders reset: the in-callback reset below can be skipped by
-  // the native driver when this screen is backgrounded (pushed under the
-  // confession screen) — its animated node gets detached while off-focus, so
-  // a `setValue` fired while unfocused doesn't always reach the native view.
-  // That left this screen permanently blacked out (but still tappable) after
-  // navigating back. Resetting again on every focus guarantees it clears.
+  // The fade-to-black overlay is mounted only while the booth entry
+  // transition is actually running.
+  //
+  // It used to be mounted permanently with its opacity driven by a
+  // native-driver animated value, and reset with `setValue(0)`. That reset
+  // is unreliable here: while this screen sits under the booth its animated
+  // node is detached, so a `setValue` from JS does not always reach the
+  // native view — and resetting again on focus did not fix it either. The
+  // screen came back fully black but still tappable, which is indis-
+  // tinguishable from the app having died. Unmounting the overlay removes
+  // the failure mode instead of trying to out-race it: an overlay that is
+  // not rendered cannot black the screen out, whatever the animated value
+  // happens to hold.
+  const [isEnteringBooth, setIsEnteringBooth] = useState(false);
+
   useFocusEffect(
     useCallback(() => {
+      setIsEnteringBooth(false);
       fadeToBlack.setValue(0);
     }, [fadeToBlack]),
   );
 
   const handleEnterAuri = useCallback(() => {
     haptics.selectionChanged();
+    fadeToBlack.setValue(0);
+    setIsEnteringBooth(true);
     Animated.timing(fadeToBlack, {
       toValue: 1,
       duration: ENTRY_FADE_MS,
@@ -117,11 +129,14 @@ export default function HomeScreen(): React.JSX.Element {
         </Text>
       </View>
 
-      {/* Booth entry transition — fades to black before the booth screen mounts */}
-      <Animated.View
-        pointerEvents="none"
-        style={[styles.entryOverlay, { opacity: fadeToBlack }]}
-      />
+      {/* Booth entry transition — fades to black before the booth screen
+          mounts, and is unmounted the moment this screen is focused again. */}
+      {isEnteringBooth && (
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.entryOverlay, { opacity: fadeToBlack }]}
+        />
+      )}
     </View>
   );
 }
