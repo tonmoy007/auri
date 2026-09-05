@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
+import { configureForPlayback } from '../lib/audioSession';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ENDPOINTS, getApiBaseUrl } from '../config/api';
@@ -194,6 +195,10 @@ export default function ReviewScreen(): React.JSX.Element {
         setHasFinishedPlaying(false);
         return;
       }
+      // The booth restores this on stop, but the review screen is also
+      // reachable directly (deep link, or a resumed app), so don't assume
+      // the session is already configured for playback.
+      await configureForPlayback();
       const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((playbackStatus) => {
@@ -207,9 +212,13 @@ export default function ReviewScreen(): React.JSX.Element {
       setIsPlaying(true);
       setHasFinishedPlaying(false);
       await sound.playAsync();
-    } catch (_error: unknown) {
+    } catch (error: unknown) {
       setIsPlaying(false);
-      setActionError('Failed to play masked audio');
+      // Surface the real reason instead of swallowing it (AGENTS.md §15.1).
+      // A bare "Failed to play masked audio" gave neither the user nor the
+      // logs anything to act on.
+      const reason = error instanceof Error ? error.message : String(error);
+      setActionError(`Failed to play masked audio: ${reason}`);
     }
   }, [audioUri, isPlaying]);
 

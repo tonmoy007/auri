@@ -2,9 +2,10 @@
 // Custom hook wrapping expo-av for audio recording with permission management
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
 import type { AudioRecordingState, VoiceMask } from '../types';
+import { configureForPlayback, configureForRecording } from '../lib/audioSession';
 import {
   AUDIO_CONFIG,
   ENDPOINTS,
@@ -140,15 +141,7 @@ export function useAudioRecorder() {
         setState((prev) => ({ ...prev, hasPermission: granted }));
 
         if (granted) {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: true,
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: false,
-            interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-            interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-            shouldDuckAndroid: true,
-            playThroughEarpieceAndroid: false,
-          });
+          await configureForRecording();
         }
       } catch (_error: unknown) {
         setState((prev) => ({
@@ -286,6 +279,12 @@ export function useAudioRecorder() {
       }
 
       recordingRef.current = null;
+
+      // Hand the session back to playback. Without this the app stays in
+      // the recording configuration for the rest of its life, and the
+      // review screen's "play masked audio" inherits a session still set up
+      // to capture rather than play.
+      await configureForPlayback();
 
       if (!uri) {
         throw new Error('Recording produced no audio file');
