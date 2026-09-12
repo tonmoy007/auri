@@ -96,9 +96,13 @@ export default function ConfessionScreen(): React.JSX.Element {
       // shows an explicit error state if the transcript comes back null after
       // retries, and falls back to playing the original (unmasked) recording
       // if masking fails, rather than losing playback entirely.
+      // Both calls size their timeout from how long the recording actually
+      // ran, so a long confession is not failed by a budget meant for a
+      // short one.
+      const durationMs = recorder.durationMs;
       const [transcript, maskedAudioUri] = await Promise.all([
-        recorder.transcribeRecording(audioUri),
-        recorder.maskRecording(audioUri, voiceMask),
+        recorder.transcribeRecording(audioUri, durationMs),
+        recorder.maskRecording(audioUri, voiceMask, durationMs),
       ]);
       setStatus('done');
       // Swing the door shut before leaving the booth — the exit animation.

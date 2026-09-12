@@ -10,7 +10,7 @@ import {
   AUDIO_CONFIG,
   ENDPOINTS,
   MAX_RECORDING_DURATION_MS,
-  REQUEST_TIMEOUT_MS,
+  uploadTimeoutMsFor,
   getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
@@ -23,6 +23,20 @@ const METERING_UPDATE_INTERVAL_MS = 100;
 const MAX_UPLOAD_RETRIES = 2;
 /** Base delay before an upload retry, ms — doubles each attempt (500ms, 1000ms, ...). */
 const UPLOAD_RETRY_BASE_DELAY_MS = 500;
+
+/**
+ * The upload exceeded its time budget.
+ *
+ * Distinct from `UploadHttpError` because it must not be retried: the server
+ * carries on transcribing after the client gives up, so a retry only adds a
+ * second full transcription of the same audio.
+ */
+class UploadTimeoutError extends Error {
+  constructor() {
+    super('Upload timed out');
+    this.name = 'UploadTimeoutError';
+  }
+}
 
 /** HTTP error from the STT upload, carrying the status code so retry logic can tell client vs server errors apart. */
 class UploadHttpError extends Error {
@@ -47,11 +61,14 @@ function sleep(ms: number): Promise<void> {
 function uploadForTranscription(
   uri: string,
   deviceTokenHash: string,
+  durationMs: number,
   onProgress: (fraction: number) => void,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.timeout = REQUEST_TIMEOUT_MS;
+    // Scaled to the recording's length: transcription is slower than
+    // realtime, so a flat budget fails long confessions by construction.
+    xhr.timeout = uploadTimeoutMsFor(durationMs);
     xhr.open('POST', `${getApiBaseUrl()}${ENDPOINTS.stt}`);
     xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
 
@@ -82,7 +99,7 @@ function uploadForTranscription(
     };
 
     xhr.onerror = () => reject(new UploadHttpError(0, 'Network error during upload'));
-    xhr.ontimeout = () => reject(new UploadHttpError(0, 'Upload timed out'));
+    xhr.ontimeout = () => reject(new UploadTimeoutError());
 
     const formData = new FormData();
     formData.append('audio', {
@@ -326,7 +343,7 @@ export function useAudioRecorder() {
    * callers can fall back to a placeholder transcript instead of losing the
    * recording the user just made.
    */
-  const transcribeRecording = useCallback(async (uri: string): Promise<string | null> => {
+  const transcribeRecording = useCallback(async (uri: string, durationMs: number): Promise<string | null> => {
     setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
 
     const deviceTokenHash = await hashDeviceToken();
@@ -334,7 +351,7 @@ export function useAudioRecorder() {
 
     for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
       try {
-        const transcript = await uploadForTranscription(uri, deviceTokenHash, (fraction) => {
+        const transcript = await uploadForTranscription(uri, deviceTokenHash, durationMs, (fraction) => {
           setState((prev) => ({ ...prev, uploadProgress: fraction }));
         });
         setState((prev) => ({
@@ -347,7 +364,12 @@ export function useAudioRecorder() {
       } catch (error: unknown) {
         lastError = error;
         const isClientError = error instanceof UploadHttpError && error.httpStatus >= 400;
-        if (isClientError || attempt === MAX_UPLOAD_RETRIES) {
+        // A timeout is not transient here: the server keeps transcribing
+        // after the client gives up, so each "retry" starts another full
+        // transcription of the same audio while the user waits out another
+        // whole budget for a result that was never going to arrive sooner.
+        const isTimeout = error instanceof UploadTimeoutError;
+        if (isClientError || isTimeout || attempt === MAX_UPLOAD_RETRIES) {
           break;
         }
         await sleep(UPLOAD_RETRY_BASE_DELAY_MS * 2 ** attempt);
@@ -371,7 +393,7 @@ export function useAudioRecorder() {
    * to sidestep that — see `backend/app/api/v1/voice.py`.
    */
   const maskRecording = useCallback(
-    async (uri: string, mask: VoiceMask): Promise<string | null> => {
+    async (uri: string, mask: VoiceMask, durationMs: number): Promise<string | null> => {
       try {
         const deviceTokenHash = await hashDeviceToken();
         const formData = new FormData();
@@ -382,11 +404,22 @@ export function useAudioRecorder() {
         } as unknown as Blob);
         formData.append('mask', mask);
 
-        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
-          method: 'POST',
-          headers: { 'X-Device-Token-Hash': deviceTokenHash },
-          body: formData,
-        });
+        // `fetch` carries no timeout of its own, so without this the masking
+        // request could hang indefinitely and leave the booth stuck on
+        // "Anonymizing…" with no way forward.
+        const abort = new AbortController();
+        const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
+        let response: Response;
+        try {
+          response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
+            method: 'POST',
+            headers: { 'X-Device-Token-Hash': deviceTokenHash },
+            body: formData,
+            signal: abort.signal,
+          });
+        } finally {
+          clearTimeout(abortTimer);
+        }
         if (!response.ok) {
           throw new Error(`Voice masking failed (${response.status})`);
         }
