@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # How long a reply is kept after it was written (>= 1: zero would delete every
     # reply the moment it is emptied).
     REPLY_RETENTION_DAYS: int = Field(default=30, ge=1)
+    # How often the retention job is expected to run. The Privacy panel calls it
+    # overdue once a run is older than this, and states that a confession can
+    # therefore outlive RETENTION_HOURS by up to this long.
+    RETENTION_EXPECTED_RUN_HOURS: int = Field(default=6, ge=1)
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3

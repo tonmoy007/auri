@@ -210,6 +210,56 @@ export interface ThemesReport {
 /** Report periods the Themes tab offers, in days. */
 export const THEME_PERIOD_DAYS = [7, 14, 30] as const
 
+export interface PrivacyFact {
+  id: string
+  statement: string
+}
+
+export interface RetentionRun {
+  ran_at: string
+  /** The windows this run actually enforced, kept in the log as evidence. */
+  retention_hours: number
+  reply_retention_days: number
+  /** Each count is suppressed below the cohort, like every other figure. */
+  deleted: Bucket
+  emptied_to_shell: Bucket
+  expired_replies: Bucket
+}
+
+export interface RetentionOverview {
+  retention_hours: number
+  reply_retention_days: number
+  /** How often the job is expected to run; overdue is measured against this. */
+  expected_run_hours: number
+  /** `null` when the job has never recorded a run. */
+  last_run: RetentionRun | null
+  /** True when no run is recorded, or the last is older than the expected gap. */
+  overdue: boolean
+  due_to_delete: Bucket
+  due_to_empty: Bucket
+  due_to_expire: Bucket
+}
+
+export interface StaffMember {
+  email: string
+  role: UserRole
+  last_login_at: string | null
+}
+
+export interface StaffOverview {
+  role_counts: Record<string, number>
+  /** Named accounts: present for administrators only, `null` for HR. */
+  members: StaffMember[] | null
+}
+
+export interface PrivacyOverview {
+  min_cohort: number
+  guarantees: PrivacyFact[]
+  limits: PrivacyFact[]
+  retention: RetentionOverview
+  staff: StaffOverview
+}
+
 export type ModerationSeverity = 'none' | 'policy' | 'harassment' | 'crisis'
 
 export interface QueueItem {
@@ -359,6 +409,10 @@ export const hrApi = {
       method: 'PUT',
       body: JSON.stringify({ reply }),
     }),
+}
+
+export const privacyApi = {
+  getOverview: (request: Requester) => request<PrivacyOverview>('/privacy/overview'),
 }
 
 export const moderationApi = {

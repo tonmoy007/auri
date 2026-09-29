@@ -5,6 +5,7 @@ from app.models.audit_event import AuditAction, AuditEvent, ContentTier
 from app.models.base import Base
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 from app.models.department import Department
+from app.models.retention_run import RetentionRun
 from app.models.user import AnonymousUser, User, UserRole
 
 __all__ = [
@@ -18,6 +19,7 @@ __all__ = [
     "ContentTier",
     "Department",
     "ModerationSeverity",
+    "RetentionRun",
     "User",
     "UserRole",
 ]

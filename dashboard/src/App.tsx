@@ -7,6 +7,7 @@ import { ConnectionBar } from '@/components/ConnectionBar'
 import { DeliveryPanel } from '@/components/DeliveryPanel'
 import { DirectoryPanel } from '@/components/DirectoryPanel'
 import { InsightsPanel } from '@/components/InsightsPanel'
+import { PrivacyPanel } from '@/components/PrivacyPanel'
 import { QueuePanel } from '@/components/QueuePanel'
 import { RepliesPanel } from '@/components/RepliesPanel'
 import { LoginScreen } from '@/components/LoginScreen'
@@ -39,6 +40,7 @@ const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'delivery', label: 'Delivery', roles: ['hr'] },
   { value: 'replies', label: 'Replies', roles: ['hr'] },
   { value: 'themes', label: 'Themes', roles: ['hr'] },
+  { value: 'privacy', label: 'Privacy', roles: ['hr', 'admin'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -255,6 +257,10 @@ function App() {
 
           <TabsContent value="themes">
             <ThemesPanel />
+          </TabsContent>
+
+          <TabsContent value="privacy">
+            <PrivacyPanel />
           </TabsContent>
 
           <TabsContent value="audit">

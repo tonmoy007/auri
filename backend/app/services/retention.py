@@ -34,7 +34,18 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import cast
 
-from sqlalchemy import CursorResult, Delete, Update, delete, or_, update
+from sqlalchemy import (
+    ColumnElement,
+    CursorResult,
+    Delete,
+    Update,
+    and_,
+    delete,
+    func,
+    or_,
+    select,
+    update,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -45,6 +56,39 @@ logger = logging.getLogger(__name__)
 _PURGEABLE_STATUSES = (ConfessionStatus.forwarded, ConfessionStatus.deleted)
 
 
+def _withdrawn_or_unreplied_due(cutoff: datetime) -> ColumnElement[bool]:
+    """Rows to delete outright: stale, and with no reply worth keeping."""
+    keeps_reply = and_(
+        Confession.status == ConfessionStatus.forwarded,
+        Confession.hr_reply.is_not(None),
+    )
+    return and_(
+        Confession.status.in_(_PURGEABLE_STATUSES),
+        Confession.updated_at < cutoff,
+        ~keeps_reply,
+    )
+
+
+def _emptying_due(cutoff: datetime) -> ColumnElement[bool]:
+    """Rows to empty to a shell: stale, forwarded, replied, not yet emptied."""
+    return and_(
+        Confession.status == ConfessionStatus.forwarded,
+        Confession.hr_reply.is_not(None),
+        Confession.purged_at.is_(None),
+        Confession.updated_at < cutoff,
+    )
+
+
+def _expiry_due(reply_cutoff: datetime, stale_cutoff: datetime) -> ColumnElement[bool]:
+    """Rows whose reply is past retention and that are emptied or stale anyway."""
+    return and_(
+        Confession.status == ConfessionStatus.forwarded,
+        Confession.hr_replied_at.is_not(None),
+        Confession.hr_replied_at < reply_cutoff,
+        or_(Confession.purged_at.is_not(None), Confession.updated_at < stale_cutoff),
+    )
+
+
 @dataclass(frozen=True)
 class RetentionResult:
     """How many rows one retention run touched, by what it did to them."""
@@ -52,6 +96,54 @@ class RetentionResult:
     deleted: int
     emptied_to_shell: int
     expired_replies: int
+
+
+@dataclass(frozen=True)
+class DueCounts:
+    """How many rows the next run would act on, by what it would do to them."""
+
+    to_delete: int
+    to_empty: int
+    to_expire: int
+
+
+async def _count(session: AsyncSession, predicate: ColumnElement[bool]) -> int:
+    """Count the confession rows matching *predicate*."""
+    return await session.scalar(select(func.count()).where(predicate)) or 0
+
+
+async def count_due(
+    session: AsyncSession,
+    now: datetime,
+    retention_hours: int,
+    reply_retention_days: int,
+) -> DueCounts:
+    """Count what a run at *now* would delete, empty and expire, without doing it.
+
+    Uses the very predicates the run itself uses, so the figure cannot drift
+    from what the job actually does.
+
+    Args:
+        session: Active database session.
+        now: Current time, injected.
+        retention_hours: How long a confession lives after its last change.
+        reply_retention_days: How long a reply lives after it was written.
+
+    Returns:
+        The three counts.
+    """
+    cutoff = now - timedelta(hours=retention_hours)
+    reply_cutoff = now - timedelta(days=reply_retention_days)
+    return DueCounts(
+        to_delete=await _count(session, _withdrawn_or_unreplied_due(cutoff)),
+        # A row whose reply is already past retention is expired first, so it
+        # is not also counted as one that would be emptied.
+        to_empty=await _count(
+            session,
+            and_(_emptying_due(cutoff), ~_expiry_due(reply_cutoff, cutoff)),
+        ),
+        to_expire=await _count(session, _expiry_due(reply_cutoff, cutoff)),
+    )
 
 
 async def _execute_bulk(session: AsyncSession, statement: Delete | Update) -> int:
@@ -87,15 +179,7 @@ async def purge_stale_confessions(
         The number of rows deleted.
     """
     cutoff = now - timedelta(hours=retention_hours)
-    keeps_reply = (
-        Confession.status == ConfessionStatus.forwarded,
-        Confession.hr_reply.is_not(None),
-    )
-    stmt = delete(Confession).where(
-        Confession.status.in_(_PURGEABLE_STATUSES),
-        Confession.updated_at < cutoff,
-        ~(keeps_reply[0] & keeps_reply[1]),
-    )
+    stmt = delete(Confession).where(_withdrawn_or_unreplied_due(cutoff))
     deleted_count = await _execute_bulk(session, stmt)
 
     if deleted_count:
@@ -127,12 +211,7 @@ async def empty_replied_confessions(
     cutoff = now - timedelta(hours=retention_hours)
     stmt = (
         update(Confession)
-        .where(
-            Confession.status == ConfessionStatus.forwarded,
-            Confession.hr_reply.is_not(None),
-            Confession.purged_at.is_(None),
-            Confession.updated_at < cutoff,
-        )
+        .where(_emptying_due(cutoff))
         .values(
             transcript="",
             ai_summary=None,
@@ -180,12 +259,7 @@ async def expire_old_replies(
     """
     reply_cutoff = now - timedelta(days=reply_retention_days)
     stale_cutoff = now - timedelta(hours=retention_hours)
-    stmt = delete(Confession).where(
-        Confession.status == ConfessionStatus.forwarded,
-        Confession.hr_replied_at.is_not(None),
-        Confession.hr_replied_at < reply_cutoff,
-        or_(Confession.purged_at.is_not(None), Confession.updated_at < stale_cutoff),
-    )
+    stmt = delete(Confession).where(_expiry_due(reply_cutoff, stale_cutoff))
     expired = await _execute_bulk(session, stmt)
     if expired:
         logger.info(
@@ -233,10 +307,17 @@ async def _main() -> None:
 
     logging.basicConfig(level=settings.LOG_LEVEL)
 
+    from app.services.retention_status import record_run
+
+    now = datetime.now(timezone.utc)
     async with async_session_factory() as session:
         result = await run_retention(
+            session, now, settings.RETENTION_HOURS, settings.REPLY_RETENTION_DAYS
+        )
+        await record_run(
             session,
-            datetime.now(timezone.utc),
+            now,
+            result,
             settings.RETENTION_HOURS,
             settings.REPLY_RETENTION_DAYS,
         )

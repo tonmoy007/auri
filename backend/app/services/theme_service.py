@@ -32,11 +32,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.exceptions import ThemeClusteringError
 from app.models.confession import Confession, ConfessionStatus, content_present
 from app.services import insights_service, theme_clustering
-from app.services.llm import LLMService
+from app.services.llm import LLMService, Provider
 from app.services.theme_clustering import SummaryItem, ThemeGroup, Window
 from app.services.theme_report import ThemeReport, ThemeSummary, summarise_themes
 
 logger = logging.getLogger(__name__)
+
+# The one provider that reads summaries for theme grouping. The privacy panel
+# derives its "stays on this server" statement from this value, so changing it
+# changes what the panel says.
+THEMES_PROVIDER: Final[Provider] = "ollama"
 
 METHOD_MODEL: Final = "model"
 METHOD_CATEGORY: Final = "category"
@@ -223,7 +228,7 @@ async def _themes_for(
     instead so HR is never left with an unexplained blank.
     """
     groups, method, notice = await _choose_groups(
-        items, llm or LLMService(provider="ollama")
+        items, llm or LLMService(provider=THEMES_PROVIDER)
     )
     summary = summarise_themes(items, groups, threshold)
     if method == METHOD_MODEL and not summary.themes:
