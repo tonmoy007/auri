@@ -317,3 +317,99 @@ def test_complete_fences_untrusted_content_and_strips_the_reply() -> None:
     assert (
         "<<<BEGIN_USER_CONTENT>>>\nuntrusted words\n<<<END_USER_CONTENT>>>" in seen[0]
     )
+
+
+# ── Credentials and content never reach the logs (11.19) ─────────────────
+
+
+def test_gemini_key_is_sent_in_a_header_never_in_the_url() -> None:
+    # Arrange
+    service = LLMService(provider="gemini")
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, **kwargs: object) -> Mock:
+        captured.update(url=url, **kwargs)
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+        }
+        return response
+
+    # Act
+    with (
+        patch("httpx.post", side_effect=fake_post),
+        patch(
+            "app.services.llm.get_config",
+            side_effect=lambda _n, d: "g-key-1234" if _n == "GEMINI_API_KEY" else d,
+        ),
+    ):
+        service._call_gemini("hello")
+
+    # Assert
+    assert "g-key-1234" not in str(captured["url"])
+    assert "params" not in captured
+    assert captured["headers"] == {"x-goog-api-key": "g-key-1234"}
+
+
+def test_a_failed_gemini_call_logs_nothing_that_contains_the_key(caplog) -> None:
+    # Arrange — an httpx error's text embeds the request URL
+    service = LLMService(provider="gemini")
+
+    def failing_post(
+        url: str, params: dict[str, str] | None = None, **kwargs: object
+    ) -> Mock:
+        query = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+        raise RuntimeError(f"boom calling {url}" + (f"?{query}" if query else ""))
+
+    # Act
+    with (
+        caplog.at_level("WARNING"),
+        patch("httpx.post", side_effect=failing_post),
+        patch(
+            "app.services.llm.get_config",
+            side_effect=lambda _n, d: "g-key-1234" if _n == "GEMINI_API_KEY" else d,
+        ),
+    ):
+        service._call_gemini("hello")
+
+    # Assert
+    assert "boom calling" in caplog.text
+    assert "g-key-1234" not in caplog.text
+
+
+def test_an_unparseable_moderation_answer_is_logged_by_length_not_content(
+    caplog,
+) -> None:
+    # Arrange — moderation reads the ORIGINAL transcript, so its output can echo it
+    service = LLMService(provider="ollama")
+    echoed = "the person said their manager Dana touched them"
+
+    # Act
+    with (
+        caplog.at_level("WARNING"),
+        patch.object(LLMService, "_call_ollama", return_value=echoed),
+    ):
+        severity = service.moderate("original words")
+
+    # Assert
+    assert severity.value == "policy"
+    assert "Dana" not in caplog.text
+    assert f"{len(echoed)} chars" in caplog.text
+
+
+def test_an_unusable_sentiment_answer_is_logged_by_length_not_content(caplog) -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    echoed = "this reads like a private detail about Dana"
+
+    # Act
+    with (
+        caplog.at_level("ERROR"),
+        patch.object(LLMService, "_call_ollama", return_value=echoed),
+        pytest.raises(SentimentError),
+    ):
+        service.classify_sentiment("a confession")
+
+    # Assert
+    assert "Dana" not in caplog.text
+    assert f"{len(echoed)} chars" in caplog.text

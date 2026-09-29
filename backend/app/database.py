@@ -22,7 +22,7 @@ DATABASE_URL: str = settings.DATABASE_URL or (
 engine = create_async_engine(
     DATABASE_URL,
     poolclass=NullPool,  # Disable pooling for serverless-friendly behaviour.
-    echo=settings.ENVIRONMENT == "development",
+    echo=settings.SQL_ECHO,
 )
 
 async_session_factory = async_sessionmaker(

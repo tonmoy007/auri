@@ -134,7 +134,8 @@ class LLMService:
         result = self._call_llm(prompt).strip().lower()
 
         if result not in SENTIMENTS:
-            logger.error("sentiment classification returned %r", result)
+            # Length only: the reply can echo the confession it was given.
+            logger.error("sentiment classification returned %d chars", len(result))
             raise SentimentError(
                 "LLM sentiment classification produced no usable label"
             )
@@ -251,9 +252,12 @@ class LLMService:
         try:
             return ModerationSeverity(result)
         except ValueError:
+            # Length only: moderation reads the ORIGINAL transcript, so an
+            # unparseable reply can quote it back.
             logger.warning(
-                "moderation check returned an unparseable result %r; failing closed",
-                result,
+                "moderation check returned an unparseable result (%d chars); "
+                "failing closed",
+                len(result),
             )
             return ModerationSeverity.policy
 
@@ -387,7 +391,9 @@ class LLMService:
         try:
             resp = httpx.post(
                 url,
-                params={"key": gemini_api_key},
+                # A header, not ?key=: httpx puts the URL (and so the key) in
+                # every error message, and those messages are logged.
+                headers={"x-goog-api-key": gemini_api_key},
                 json={"contents": [{"parts": [{"text": prompt}]}]},
                 timeout=60,
             )

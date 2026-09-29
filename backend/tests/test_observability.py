@@ -72,6 +72,9 @@ def test_init_sentry_calls_sentry_sdk_init_when_dsn_is_set() -> None:
     _, kwargs = mock_init.call_args
     assert kwargs["dsn"] == "https://examplePublicKey@o0.ingest.sentry.io/0"
     assert kwargs["environment"] == "production"
+    # Request bodies carry the raw transcript and device hash on a failed submit
+    assert kwargs["max_request_body_size"] == "never"
+    assert kwargs["send_default_pii"] is False
 
 
 # ── Authentication ───────────────────────────────────────────────────────
@@ -300,3 +303,16 @@ async def test_metrics_fold_an_unknown_http_method_into_one_label(
     # Assert
     assert _request_count(OTHER_METHOD_LABEL, "/health", 405) == before + 1
     assert "BREWCOFFEE" not in body
+
+
+def test_sql_echo_is_off_by_default_even_in_development() -> None:
+    # Arrange
+    from app.config import Settings
+    from app.database import engine
+
+    # Act
+    configured = Settings(_env_file=None, ENVIRONMENT="development")
+
+    # Assert — echo logs INSERT parameters: transcripts, summaries, reply text
+    assert configured.SQL_ECHO is False
+    assert engine.echo is False

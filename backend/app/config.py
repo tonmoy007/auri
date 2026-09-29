@@ -114,6 +114,9 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development | staging | production
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: str = ""  # empty disables Sentry entirely
+    # Log every SQL statement with its parameters. Off by default, including in
+    # development: the parameters are transcripts, summaries and reply text.
+    SQL_ECHO: bool = False
 
     @model_validator(mode="after")
     def _reply_outlives_confession(self) -> Settings:

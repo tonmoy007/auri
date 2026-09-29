@@ -59,7 +59,15 @@ def init_sentry(dsn: str, environment: str) -> None:
 
     import sentry_sdk
 
-    sentry_sdk.init(dsn=dsn, environment=environment, traces_sample_rate=0.1)
+    sentry_sdk.init(
+        dsn=dsn,
+        environment=environment,
+        traces_sample_rate=0.1,
+        # A failed POST /confessions would otherwise ship the request body:
+        # the raw transcript and the device hash.
+        send_default_pii=False,
+        max_request_body_size="never",
+    )
 
 
 def _route_label(request: Request) -> str:
