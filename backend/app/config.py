@@ -72,6 +72,7 @@ class Settings(BaseSettings):
     MODERATOR_TELEGRAM_CHAT_ID: str = ""  # flagged confessions relay here for review
     MODERATION_API_KEY: str = ""  # shared secret the bot uses to call /moderation/*
     DELIVERY_API_KEY: str = ""  # shared secret the bot uses to call /delivery/*
+    METRICS_API_KEY: str = ""  # bearer token a Prometheus scrape job sends to /metrics
 
     # ── Admin dashboard (Phase 10, local dev) ───────────────────────────────
     ADMIN_API_KEY: str = (
