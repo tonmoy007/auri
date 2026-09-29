@@ -121,18 +121,19 @@ async def create_department(
             status_code=status.HTTP_409_CONFLICT, detail=str(exc)
         ) from exc
 
+    response = DepartmentResponse(
+        name=department.name,
+        telegram_chat_id=department.telegram_chat_id,
+        is_active=department.is_active,
+        undelivered_count=0,
+    )
     await audit_service.record(
         session,
         actor=actor,
         action=AuditAction.department_write,
         source_ip=audit_service.client_ip(request),
     )
-    return DepartmentResponse(
-        name=department.name,
-        telegram_chat_id=department.telegram_chat_id,
-        is_active=department.is_active,
-        undelivered_count=0,
-    )
+    return response
 
 
 @router.put(
@@ -157,18 +158,20 @@ async def update_department(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
         ) from exc
 
+    response = DepartmentResponse(
+        name=department.name,
+        telegram_chat_id=department.telegram_chat_id,
+        is_active=department.is_active,
+        undelivered_count=await department_service.undelivered_count(session, name),
+    )
+    # Last database call: it commits, so nothing after it may fail.
     await audit_service.record(
         session,
         actor=actor,
         action=AuditAction.department_write,
         source_ip=audit_service.client_ip(request),
     )
-    return DepartmentResponse(
-        name=department.name,
-        telegram_chat_id=department.telegram_chat_id,
-        is_active=department.is_active,
-        undelivered_count=await department_service.undelivered_count(session, name),
-    )
+    return response
 
 
 @router.delete(

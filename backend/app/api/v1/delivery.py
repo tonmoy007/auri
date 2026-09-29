@@ -282,21 +282,13 @@ async def resend_confession(
         )
 
     confession.delivered_at = None
-    await audit_service.record(
-        session,
-        actor=actor,
-        action=AuditAction.delivery_retry,
-        target_confession_id=confession.id,
-        source_ip=audit_service.client_ip(request),
-    )
     await session.flush()
-
     chat_id = (
         await department_service.resolve_chat_id(session, confession.recipient_dept)
         if confession.recipient_dept
         else None
     )
-    return DeliveryOverviewItem(
+    item = DeliveryOverviewItem(
         id=confession.id,
         recipient_dept=confession.recipient_dept,
         recipient_chat_id=chat_id,
@@ -305,3 +297,13 @@ async def resend_confession(
         delivered_at=None,
         blocked_reason=_blocked_reason(confession, chat_id),
     )
+    # Last database call: it commits, so nothing after it may fail and leave the
+    # change committed behind an error response.
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=AuditAction.delivery_retry,
+        target_confession_id=confession.id,
+        source_ip=audit_service.client_ip(request),
+    )
+    return item

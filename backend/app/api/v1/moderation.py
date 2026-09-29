@@ -120,10 +120,17 @@ async def _record_decision(
     fake actor.
     """
     if actor is None:
+        await session.flush()
+        await session.refresh(confession)
         return
 
     confession.reviewed_by = actor.id
     confession.reviewed_at = now
+    # Flush and reload BEFORE recording: record() commits, so it must be the last
+    # database call, or a failure after it leaves the decision committed behind
+    # an error response.
+    await session.flush()
+    await session.refresh(confession)
     await audit_service.record(
         session,
         actor=actor,
@@ -192,9 +199,6 @@ async def approve_confession(
     await _record_decision(
         session, request, actor, confession, AuditAction.moderation_approve, clock()
     )
-
-    await session.flush()
-    await session.refresh(confession)
     return confession
 
 
@@ -216,9 +220,6 @@ async def reject_confession(
     await _record_decision(
         session, request, actor, confession, AuditAction.moderation_reject, clock()
     )
-
-    await session.flush()
-    await session.refresh(confession)
     return confession
 
 
@@ -256,6 +257,9 @@ async def acknowledge_crisis(
 
     confession.acknowledged_by = actor.id
     confession.acknowledged_at = clock()
+    await session.flush()
+    await session.refresh(confession)
+    # Last database call: it commits, so nothing after it may fail.
     await audit_service.record(
         session,
         actor=actor,
@@ -264,7 +268,4 @@ async def acknowledge_crisis(
         content_tier=ContentTier.raw,
         source_ip=audit_service.client_ip(request),
     )
-
-    await session.flush()
-    await session.refresh(confession)
     return confession

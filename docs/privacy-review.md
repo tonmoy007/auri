@@ -77,7 +77,7 @@ Not audited here — the LiveKit real-time pipeline (plan Phase 7) if it ships, 
 |---|---|---|
 | Confessor's own phone | Their confessions (including the stored transcript), HR's replies, and a cached copy of the voice-masked recording | — |
 | Moderator | On the Queue tab, the **full transcript** of every item held for review, with no reason required | Listing is audited at the `raw` tier when done from a dashboard session; not when done from Telegram with the bot's key |
-| HR | Summary, category and mood label of each confession (individually, with department and exact send time); aggregates on Insights and Themes; delivery metadata; the Queue; replies. The **full transcript** only of items held for review (crisis items stay readable after release), with a written reason of at least 12 characters | Yes, for dashboard sessions: account, time, tier, reason. Audit rows are committed after the response is sent (see finding 5) |
+| HR | Summary, category and mood label of each confession (individually, with department and exact send time); aggregates on Insights and Themes; delivery metadata; the Queue; replies. The **full transcript** only of items held for review (crisis items stay readable after release), with a written reason of at least 12 characters | Yes, for dashboard sessions: account, time, tier, reason. The row is committed before the response is sent, so a failure to record it fails the request and releases nothing (finding 5) |
 | Admin | All of the above, the audit trail, staff accounts, and the live configuration | Config changes are not audited |
 | Department Telegram chats | Category, summary and the first 1,000 characters of the transcript of every forwarded confession; moderators' chat gets 500 characters | No, and Telegram keeps the messages after this system deletes the confession |
 | Anyone with database access | Every stored transcript, which confessions came from the same phone, and the ability to read, forward or withdraw them with that phone's stored hash | No |
@@ -101,7 +101,7 @@ The first draft of the panel made eight guarantees; six overstated what the syst
 | 2 | `moderate()` and `classify_sentiment()` logged model output with `%r`; moderation reads the *original* transcript | **Fixed** (11.19) |
 | 3 | SQL echo was on whenever `ENVIRONMENT=development` (the default), logging every INSERT's transcript, summary and reply | **Fixed** (11.19) |
 | 4 | Sentry attaches JSON request bodies regardless of the PII flag | **Fixed** (11.19) |
-| 5 | The audit row is committed *after* the response is sent, so a failing commit still returns the content | **Open** — 11.20 |
+| 5 | The audit row was committed *after* the response was sent, so a failing commit still returned the content | **Fixed** (11.22). Trade-off: while the database cannot accept writes, audited dashboard reads fail too, including the moderation Queue |
 | 6 | Moderation from Telegram (the bot's shared key) and readers of the department chats are not audited | **Open** — 11.20, needs a decision |
 | 7 | The Queue tab shows every held transcript without a stated reason, contrary to the "reason required" rule for HR | **Open** — 11.20, needs a decision |
 | 8 | Telegram posts up to 1,000 transcript characters per forwarded confession, and the message footer says "The sender's identity is never stored or shared" | **Open** — 11.20 / 11.21; disclosed on the Privacy panel |

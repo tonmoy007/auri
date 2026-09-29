@@ -3,6 +3,13 @@
 There is deliberately no update or delete function here. An audit trail that
 its own subjects can edit proves nothing, so the only write path is
 :func:`record`.
+
+:func:`record` also **commits**. The request session's own commit runs after the
+response has gone out, so a row left to it can be lost after the content it
+describes has already been released. Committing here makes the row (and the
+change it accounts for, which every caller writes first) durable before the
+handler can return anything; if the commit fails the request fails and nothing
+is released.
 """
 
 from __future__ import annotations
@@ -37,7 +44,7 @@ async def record(
     justification: str | None = None,
     source_ip: str | None = None,
 ) -> AuditEvent:
-    """Append one audit row (the caller commits).
+    """Append one audit row and commit it (with any change already pending).
 
     Args:
         session: Active database session.
@@ -50,6 +57,12 @@ async def record(
 
     Returns:
         The persisted :class:`AuditEvent`.
+
+    Note:
+        Commits mid-request, so it must be the caller's **last database call**
+        (build the response first), and the caller's ORM objects must survive a
+        commit: the production session factory sets ``expire_on_commit=False``,
+        which a test pins.
     """
     event = AuditEvent(
         actor_user_id=actor.id,
@@ -59,14 +72,13 @@ async def record(
         justification=justification,
         source_ip=source_ip,
     )
+    # Read what the log line needs before committing: nothing after the commit
+    # should be able to fail and turn a durable row into an error response.
+    actor_id = actor.id
+    tier = content_tier.value if content_tier else "-"
     session.add(event)
-    await session.flush()
-    logger.info(
-        "audit: %s by %s (tier=%s)",
-        action.value,
-        actor.id,
-        content_tier.value if content_tier else "-",
-    )
+    await session.commit()
+    logger.info("audit: %s by %s (tier=%s)", action.value, actor_id, tier)
     return event
 
 
