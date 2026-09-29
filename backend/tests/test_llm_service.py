@@ -296,3 +296,24 @@ def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
     assert instruction in prompt
     assert content in prompt
     assert "untrusted" in prompt.lower()
+
+
+def test_complete_fences_untrusted_content_and_strips_the_reply() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    seen: list[str] = []
+
+    def fake_ollama(_self: LLMService, prompt: str) -> str:
+        seen.append(prompt)
+        return "  the reply  \n"
+
+    # Act
+    with patch.object(LLMService, "_call_ollama", new=fake_ollama):
+        reply = service.complete("Do the task.", "untrusted words")
+
+    # Assert
+    assert reply == "the reply"
+    assert seen[0].startswith("Do the task.")
+    assert (
+        "<<<BEGIN_USER_CONTENT>>>\nuntrusted words\n<<<END_USER_CONTENT>>>" in seen[0]
+    )

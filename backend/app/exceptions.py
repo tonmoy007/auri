@@ -31,6 +31,10 @@ class SentimentError(ProcessingError):
     """Raised when LLM sentiment classification produces no usable label."""
 
 
+class ThemeClusteringError(ProcessingError):
+    """Raised when the model's grouping of summaries into themes is unusable."""
+
+
 class CounselingError(ProcessingError):
     """Raised when LLM counseling-response generation fails to produce a usable reply."""
 

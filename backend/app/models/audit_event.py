@@ -35,6 +35,7 @@ class AuditAction(str, enum.Enum):
     delivery_retry = "delivery.retry"
     department_write = "department.write"
     insights_read = "insights.read"
+    themes_read = "themes.read"
 
 
 class ContentTier(str, enum.Enum):

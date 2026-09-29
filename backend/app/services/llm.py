@@ -257,6 +257,24 @@ class LLMService:
             )
             return ModerationSeverity.policy
 
+    def complete(self, instruction: str, content: str) -> str:
+        """Run a trusted *instruction* over untrusted *content* and return the reply.
+
+        For callers that own their own parsing and validation of the output
+        (theme grouping, 11.13). The content is delimited as data exactly as
+        in the task-specific methods above.
+
+        Args:
+            instruction: The trusted task instruction.
+            content: Untrusted text to operate on.
+
+        Returns:
+            The model's reply, or ``""`` if no provider answered.
+        """
+        return self._call_llm(
+            self._build_delimited_prompt(instruction, content)
+        ).strip()
+
     # ── Internal helpers ──────────────────────────────────────────────────
 
     @staticmethod

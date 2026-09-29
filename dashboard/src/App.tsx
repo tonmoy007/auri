@@ -11,6 +11,7 @@ import { QueuePanel } from '@/components/QueuePanel'
 import { RepliesPanel } from '@/components/RepliesPanel'
 import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
+import { ThemesPanel } from '@/components/ThemesPanel'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -37,6 +38,7 @@ const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'directory', label: 'Directory', roles: ['hr'] },
   { value: 'delivery', label: 'Delivery', roles: ['hr'] },
   { value: 'replies', label: 'Replies', roles: ['hr'] },
+  { value: 'themes', label: 'Themes', roles: ['hr'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -249,6 +251,10 @@ function App() {
 
           <TabsContent value="replies">
             <RepliesPanel />
+          </TabsContent>
+
+          <TabsContent value="themes">
+            <ThemesPanel />
           </TabsContent>
 
           <TabsContent value="audit">

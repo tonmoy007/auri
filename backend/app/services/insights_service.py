@@ -68,6 +68,14 @@ def _bucket(label: str, count: int, threshold: int) -> Bucket:
     return Bucket(label=label, count=count, suppressed=False)
 
 
+def suppress_small_cohort(label: str, count: int, threshold: int) -> Bucket:
+    """Apply the suppression rule to one count (shared with theme reporting).
+
+    Zero is reported; 1 to *threshold* - 1 comes back suppressed.
+    """
+    return _bucket(label, count, threshold)
+
+
 @dataclass(frozen=True)
 class SentimentPoint:
     """Sentiment split for a single week."""

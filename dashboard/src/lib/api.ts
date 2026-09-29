@@ -171,6 +171,45 @@ export interface Insights {
   sentiment_trend: SentimentPoint[]
 }
 
+export type ThemeSentimentStatus = 'ok' | 'suppressed' | 'no_previous_period'
+
+export interface ThemeEntry {
+  rank: number
+  label: string
+  confessions: number
+  /** Suppressed when 1 to min_cohort-1 people were in it last period. */
+  previous_period: Bucket
+  /** Fraction 0-1; `null` when too few members carried a sentiment. */
+  negative_share: number | null
+  previous_negative_share: number | null
+  /** Change in negative share (fraction points); `null` unless status is `ok`. */
+  sentiment_change: number | null
+  sentiment_status: ThemeSentimentStatus
+}
+
+/** How themes were formed: by the local model, by stored category, or not at all. */
+export type ThemesMethod = 'model' | 'category' | 'none'
+
+export interface ThemesReport {
+  range_start: string
+  range_end: string
+  days: number
+  min_cohort: number
+  method: ThemesMethod
+  notice: string | null
+  analysed: Bucket
+  /** True when a period had more confessions than the report reads. */
+  truncated: boolean
+  themes: ThemeEntry[]
+  /** Themes withheld for being smaller than min_cohort; their names are never sent. */
+  hidden_themes: number
+  digest_markdown: string
+  digest_csv: string
+}
+
+/** Report periods the Themes tab offers, in days. */
+export const THEME_PERIOD_DAYS = [7, 14, 30] as const
+
 export type ModerationSeverity = 'none' | 'policy' | 'harassment' | 'crisis'
 
 export interface QueueItem {
@@ -299,6 +338,9 @@ export const hrApi = {
     const query = new URLSearchParams({ since: range.since, until: range.until })
     return request<Insights>(`/hr/insights?${query.toString()}`)
   },
+
+  getThemes: (request: Requester, days: number) =>
+    request<ThemesReport>(`/hr/themes?days=${days}`),
 
   listConfessions: (
     request: Requester,
