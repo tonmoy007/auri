@@ -132,6 +132,40 @@ jobs:
         run: npx vitest run --passWithNoTests
 
   # ---------------------------------------------------------------------------
+  # Dashboard — HR/admin web app: types, lint, tests, production build
+  # ---------------------------------------------------------------------------
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: TypeScript type check
+        run: npx tsc -p tsconfig.app.json --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Vitest
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
   # Build — Docker image build verification
   # ---------------------------------------------------------------------------
   build:

@@ -152,7 +152,7 @@ Configured via GitHub branch protection rules:
 - **Flaky tests** must be quarantined or fixed within 24h.
 
 ### 5.3 CI Pipeline
-Defined in `.github/workflows/ci.yml`, four parallel jobs:
+Defined in `.github/workflows/ci.yml`, five parallel jobs:
 
 | Job | Stage | Command | Required |
 |---|---|---|---|
@@ -163,6 +163,10 @@ Defined in `.github/workflows/ci.yml`, four parallel jobs:
 | Lint | Mobile type check | `npx tsc --noEmit` (in `mobile/`) | ✅ |
 | Test | Python tests | `pytest backend/ bot/ --cov=backend --cov=bot` | ✅ |
 | Test | Mobile tests | `npx vitest --coverage` (in `mobile/`) | ✅ |
+| Dashboard | Type check | `npx tsc -p tsconfig.app.json --noEmit` (in `dashboard/`) | ✅ |
+| Dashboard | Lint | `npm run lint` (in `dashboard/`) | ✅ |
+| Dashboard | Tests | `npm test` (Vitest, in `dashboard/`) | ✅ |
+| Dashboard | Production build | `npm run build` (in `dashboard/`) | ✅ |
 | Build | Docker image build | `docker compose build` | ✅ |
 | Security | Trivy filesystem scan (HIGH/CRITICAL) | — | ✅ |
 

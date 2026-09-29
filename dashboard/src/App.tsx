@@ -17,35 +17,14 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAuth } from '@/hooks/useAuth'
+import { visibleTabsFor } from '@/lib/tabAccess'
 import {
   adminApi,
   ApiError,
   type ConfigResponse,
   type LiveKitStatus,
   type NgrokStatus,
-  type UserRole,
 } from '@/lib/api'
-
-/**
- * Which roles may see which tab.
- *
- * The Phase 10 developer tabs are admin-only: an HR lead has no business
- * rotating LLM API keys or building an APK, and a moderator less still.
- * Later Phase 11 tabs register here as they land.
- */
-const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
-  { value: 'insights', label: 'Insights', roles: ['hr'] },
-  { value: 'queue', label: 'Queue', roles: ['hr', 'moderator'] },
-  { value: 'directory', label: 'Directory', roles: ['hr'] },
-  { value: 'delivery', label: 'Delivery', roles: ['hr'] },
-  { value: 'replies', label: 'Replies', roles: ['hr'] },
-  { value: 'themes', label: 'Themes', roles: ['hr'] },
-  { value: 'privacy', label: 'Privacy', roles: ['hr', 'admin'] },
-  { value: 'config', label: 'Config', roles: ['admin'] },
-  { value: 'status', label: 'Status', roles: ['admin'] },
-  { value: 'build', label: 'Build', roles: ['admin'] },
-  { value: 'audit', label: 'Audit', roles: ['admin'] },
-]
 
 function App() {
   const { baseUrl, adminKey, updateConnection, user, signedIn, logout, authedRequest } = useAuth()
@@ -60,9 +39,7 @@ function App() {
   // dashboard is reachable either by signing in or by pasting that key.
   const usingLegacyKey = !signedIn && adminKey !== ''
   const authorized = signedIn || usingLegacyKey
-  const visibleTabs = TAB_ACCESS.filter(
-    (tab) => usingLegacyKey || (user !== null && tab.roles.includes(user.role)),
-  )
+  const visibleTabs = visibleTabsFor(user, usingLegacyKey)
   // Only the admin/dev panels talk to /admin/*; an HR session must not fire
   // those requests just because it can see the Insights tab.
   const canSeeDevTabs = visibleTabs.some((tab) => tab.value === 'config')

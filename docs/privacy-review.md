@@ -46,7 +46,7 @@ This is **deliberate**, not an oversight — see the 2026-07-18 fix (`app/api/v1
 
 `bot/moderation_handlers.py`'s `_format_queue_item()` sends `category`, `ai_summary`, and `transcript` to the moderator's chat — all three sourced from the `GET /api/v1/moderation/queue` response, which returns `ConfessionResponse` built from the DB row (de-identified transcript, per finding 3). The moderator never sees raw content.
 
-*(The recipient-facing delivery path — actually forwarding a confession's content to a real recipient, not the moderator — is not yet built; `bot/main.py`'s `handle_confession_message` is still an acknowledgement stub per plan task 4.5. Re-run this section of the review once that's implemented.)*
+*(The recipient-facing delivery path is now built; this section was re-run for it in the addendum below.)*
 
 ### 5. CLEAN — Other logging
 
@@ -59,7 +59,63 @@ Every other `logger.*` call across `backend/app` and `bot` that touches an excep
 | 1 | Bot error handler logged full `Update` (message content) on any failure | **Fixed** |
 | 2 | `moderate()` sends raw (non-de-identified) transcript to the external LLM | Documented, deliberate tradeoff — not fixed |
 | 3 | DB rows never store raw transcript or reversible identifiers | Clean |
-| 4 | Moderation-queue Telegram delivery only carries de-identified content | Clean |
+| 4 | Moderation-queue Telegram delivery only carries de-identified content | Clean — but see the addendum: "de-identified" means recognised details replaced, not anonymous |
 | 5 | No other log line carries transcript/summary content | Clean |
 
-Not audited here — call these next when they're built: the real recipient-delivery path (plan 4.5), and the LiveKit real-time pipeline (plan Phase 7) if it ships, since a live audio stream is a different leakage surface than a batch upload.
+Not audited here — the LiveKit real-time pipeline (plan Phase 7) if it ships, since a live audio stream is a different leakage surface than a batch upload. The recipient-delivery path (plan 4.5) is built now and is covered in the addendum below.
+
+---
+
+# Addendum — the HR access surface (Phase 11)
+
+**Date:** 2026-09-30
+**Why this exists:** the review above describes a system where nobody but the bot ever reads a confession. Since Phase 11 that is no longer true: staff sign in, read summaries, sometimes read transcripts, see aggregates, write replies, and read a Privacy panel. This addendum records who can now see what, the controls that limit it, and what an independent fact-check of the Privacy panel found when each of its sentences was traced to the code. The panel is built to say no more than this document does.
+
+## Who can see what
+
+| Who | What they can see | Recorded? |
+|---|---|---|
+| Confessor's own phone | Their confessions (including the stored transcript), HR's replies, and a cached copy of the voice-masked recording | — |
+| Moderator | On the Queue tab, the **full transcript** of every item held for review, with no reason required | Listing is audited at the `raw` tier when done from a dashboard session; not when done from Telegram with the bot's key |
+| HR | Summary, category and mood label of each confession (individually, with department and exact send time); aggregates on Insights and Themes; delivery metadata; the Queue; replies. The **full transcript** only of items held for review (crisis items stay readable after release), with a written reason of at least 12 characters | Yes, for dashboard sessions: account, time, tier, reason. Audit rows are committed after the response is sent (see finding 5) |
+| Admin | All of the above, the audit trail, staff accounts, and the live configuration | Config changes are not audited |
+| Department Telegram chats | Category, summary and the first 1,000 characters of the transcript of every forwarded confession; moderators' chat gets 500 characters | No, and Telegram keeps the messages after this system deletes the confession |
+| Anyone with database access | Every stored transcript, which confessions came from the same phone, and the ability to read, forward or withdraw them with that phone's stored hash | No |
+
+## Controls in place
+
+- **Tiered reads, enforced in the query.** The summary tier never selects the transcript column (11.5). A raw read is a `POST` with a stated reason, refused for ineligible items with no audit row and no content.
+- **k-anonymity suppression, server-side.** A figure covering fewer than `ANALYTICS_MIN_COHORT` (floored at 2) confessions is withheld before serialisation (11.6). Themes are stricter: a theme below the cohort is withheld *with its label*, and a sentiment share is withheld unless both the negative count and its complement are zero or at least the cohort, because `share × total` returns the exact count (11.13).
+- **Append-only audit trail** of staff reads and mutations (11.4), enforced at application level; there is no database trigger or revoked permission.
+- **Retention.** Forwarded and withdrawn confessions are removed at the first job run after `RETENTION_HOURS` of no change. A replied forwarded confession is emptied to a **reply-only shell**: the reply, its timestamps and the phone's hash remain for `REPLY_RETENTION_DAYS` after the reply (owner decision, 11.16). Shells are invisible to every staff and delivery query. Each run is logged with the windows it enforced (11.14), and the Privacy panel warns when a run is overdue against `RETENTION_EXPECTED_RUN_HOURS`.
+- **Themes stay local by default.** Grouping runs on local Ollama over summaries only; a remote OpenAI-compatible model can be configured (11.18) but plain `http` to a public address is refused unless explicitly allowed, and the panel reports where summaries actually go.
+- **Credentials and content kept out of logs** (11.19): the Gemini key is sent in a header, model replies are logged by length, SQL echo is opt-in, and Sentry does not attach request bodies.
+
+## Findings from the fact-check of the Privacy panel
+
+The first draft of the panel made eight guarantees; six overstated what the system does. It was rewritten before it shipped. The underlying gaps:
+
+| # | Finding | Status |
+|---|---|---|
+| 1 | The Gemini key was sent as a `?key=` URL parameter and printed by the failure log | **Fixed** (11.19). Rotate the key if those logs were ever shipped |
+| 2 | `moderate()` and `classify_sentiment()` logged model output with `%r`; moderation reads the *original* transcript | **Fixed** (11.19) |
+| 3 | SQL echo was on whenever `ENVIRONMENT=development` (the default), logging every INSERT's transcript, summary and reply | **Fixed** (11.19) |
+| 4 | Sentry attaches JSON request bodies regardless of the PII flag | **Fixed** (11.19) |
+| 5 | The audit row is committed *after* the response is sent, so a failing commit still returns the content | **Open** — 11.20 |
+| 6 | Moderation from Telegram (the bot's shared key) and readers of the department chats are not audited | **Open** — 11.20, needs a decision |
+| 7 | The Queue tab shows every held transcript without a stated reason, contrary to the "reason required" rule for HR | **Open** — 11.20, needs a decision |
+| 8 | Telegram posts up to 1,000 transcript characters per forwarded confession, and the message footer says "The sender's identity is never stored or shared" | **Open** — 11.20 / 11.21; disclosed on the Privacy panel |
+| 9 | The stored `device_token_hash` works as a bearer credential; `anonymous_users` is never purged | **Open** — 11.21 |
+| 10 | The mobile app writes masked recordings to its cache and never deletes any recording | **Open** — 11.21; disclosed on the Privacy panel |
+| 11 | A failed SoX voice mask leaves its output in `data/modulated` | **Open** — 11.21 |
+| 12 | When local speech-to-text fails or hears nothing, the raw audio is sent to OpenAI (`whisper-1`) | **Disclosed**, not changed; conditional on an OpenAI key being configured |
+| 13 | Every LLM step (de-identification, safety check, summary, category, mood label, the confessor's reply, the preview) uses the `auto` chain and can fall back to Gemini or OpenAI. Earlier in this document only `moderate()` was noted | **Disclosed**, not changed |
+| 14 | The stored transcript is the confessor's own words with *recognised* details replaced (`pii_stripped` is set even if only the regex ran); it is de-identified, not anonymous | **Disclosed**; the panel says "recognised" |
+| 15 | Pending and flagged confessions are never removed, and a reply to a pending confession is kept with it | **Disclosed**; a retention decision for these is open |
+| 16 | HR lists show individual confessions with department and exact time; Replies, Delivery and Queue print exact counts | **Disclosed**; suppression applies to Insights and Themes only |
+| 17 | Insights accepts arbitrary `since`/`until` windows, so two overlapping requests can be differenced to recover a suppressed bucket | **Open**, no task yet — needs complementary suppression or whole-day windows |
+| 18 | The reply-only shell keeps the device hash for up to `REPLY_RETENTION_DAYS` after the reply | **Decision recorded** (11.16) |
+
+## What the Privacy panel does about it
+
+`GET /api/v1/privacy/overview` builds its guarantees and its *limits* from the live configuration — including provider keys and the model address set in the Config tab — so a sentence cannot outlive the setting that made it true. Findings 8, 10, 12–16 above appear on it as limits, in the same plain language as the guarantees. When tasks 11.20 and 11.21 land, the corresponding limits must be edited or removed in `backend/app/services/privacy_overview.py`; the tests pin the wording to the configuration but cannot know that the code has changed underneath them.
