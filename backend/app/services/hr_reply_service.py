@@ -26,7 +26,7 @@ from app.exceptions import (
     HrReplyInvalidError,
     ReplyNotPermittedError,
 )
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, content_present
 from app.services import confession_access
 
 MAX_HR_REPLY_LENGTH: Final = 2000
@@ -91,13 +91,15 @@ async def _apply_reply(
     bot's delivery dedupe key.
 
     The status guard in the WHERE clause closes the race with the confessor's
-    soft delete: a row deleted after the eligibility read matches nothing.
+    soft delete, and ``content_present()`` the race with retention emptying the
+    row: either, after the eligibility read, matches nothing.
     """
     statement = (
         update(Confession)
         .where(
             Confession.id == confession_id,
             Confession.status.in_(REPLY_ELIGIBLE_STATUSES),
+            content_present(),
         )
         .values(hr_reply=reply, updated_at=Confession.updated_at)
     )

@@ -22,7 +22,12 @@ from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
 from app.database import get_async_session
 from app.models.audit_event import AuditAction
-from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
+from app.models.confession import (
+    Confession,
+    ConfessionStatus,
+    ModerationSeverity,
+    content_present,
+)
 from app.models.user import User
 from app.services import audit_service, department_service
 
@@ -89,6 +94,7 @@ async def _fetch_undelivered_or_404(
     stmt = select(Confession).where(
         Confession.id == confession_id,
         Confession.status == ConfessionStatus.forwarded,
+        content_present(),
         Confession.delivered_at.is_(None),
         or_(
             Confession.severity != ModerationSeverity.crisis.value,
@@ -123,6 +129,7 @@ async def list_delivery_queue(
         select(Confession)
         .where(
             Confession.status == ConfessionStatus.forwarded,
+            content_present(),
             Confession.delivered_at.is_(None),
             or_(
                 Confession.severity != ModerationSeverity.crisis.value,
@@ -214,7 +221,7 @@ async def read_delivery_overview(
     """
     stmt = (
         select(Confession)
-        .where(Confession.status == ConfessionStatus.forwarded)
+        .where(Confession.status == ConfessionStatus.forwarded, content_present())
         .order_by(Confession.created_at.desc())
     )
     result = await session.execute(stmt)
@@ -260,6 +267,7 @@ async def resend_confession(
     stmt = select(Confession).where(
         Confession.id == confession_id,
         Confession.status == ConfessionStatus.forwarded,
+        content_present(),
     )
     confession = (await session.execute(stmt)).scalar_one_or_none()
     if confession is None:

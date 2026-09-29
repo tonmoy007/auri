@@ -18,7 +18,7 @@ from app.exceptions import (
 )
 from app.models.confession import Confession, ConfessionStatus
 from app.services import confession_access, hr_reply_service
-from app.services.retention import purge_stale_confessions
+from app.services.retention import run_retention
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -126,10 +126,11 @@ async def test_writing_a_reply_preserves_updated_at(db_session: AsyncSession) ->
 
 
 @pytest.mark.asyncio
-async def test_replied_forwarded_row_is_still_purged_by_retention(
+async def test_a_reply_does_not_keep_the_forwarded_transcript_alive(
     db_session: AsyncSession,
 ) -> None:
-    # Arrange — a reply must not keep a forwarded transcript alive
+    # Arrange — retention used to delete such a row outright; now it keeps the
+    # reply for the confessor but must still drop the transcript on schedule
     now = datetime(2026, 9, 29, 12, 0, 0, tzinfo=timezone.utc)
     confession = await add_confession(
         db_session,
@@ -139,10 +140,14 @@ async def test_replied_forwarded_row_is_still_purged_by_retention(
     await hr_reply_service.write_reply(db_session, confession.id, "we heard you", now)
 
     # Act
-    purged = await purge_stale_confessions(db_session, now, 24)
+    await run_retention(db_session, now, 24, 30)
+    await db_session.commit()
+    db_session.expire_all()
+    await db_session.refresh(confession)
 
     # Assert
-    assert purged == 1
+    assert confession.transcript == ""
+    assert confession.hr_reply == "we heard you"
 
 
 @pytest.mark.asyncio
@@ -218,6 +223,48 @@ async def test_confession_deleted_after_the_read_is_not_written(
     stale_view = confession_access.ConfessionSummaryView(
         id=confession.id,
         status=ConfessionStatus.pending,
+        category=None,
+        sentiment=None,
+        ai_summary=None,
+        recipient_dept=None,
+        created_at=T1,
+        delivered_at=None,
+        severity="none",
+        hr_reply=None,
+        hr_replied_at=None,
+        hr_reply_edited_at=None,
+    )
+
+    async def read_stale_summary(
+        session: AsyncSession, confession_id: uuid.UUID
+    ) -> confession_access.ConfessionSummaryView:
+        return stale_view
+
+    monkeypatch.setattr(confession_access, "read_summary", read_stale_summary)
+
+    # Act
+    with pytest.raises(ConfessionNotFoundError):
+        await hr_reply_service.write_reply(
+            db_session, confession.id, "we heard you", T1
+        )
+
+    # Assert
+    assert await _reply_columns(db_session, confession.id) == (None, None, None)
+
+
+@pytest.mark.asyncio
+async def test_a_confession_emptied_after_the_read_is_not_written(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    # Arrange — retention empties the row between the eligibility read and the
+    # write; a stale read still shows it whole, so only the UPDATE's own
+    # content_present() guard can stop a reply landing on a shell
+    confession = await add_confession(db_session, status=ConfessionStatus.forwarded)
+    confession.purged_at = T1
+    await db_session.commit()
+    stale_view = confession_access.ConfessionSummaryView(
+        id=confession.id,
+        status=ConfessionStatus.forwarded,
         category=None,
         sentiment=None,
         ai_summary=None,

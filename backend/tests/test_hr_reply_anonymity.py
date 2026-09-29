@@ -51,6 +51,7 @@ EXPECTED_CONFESSOR_FIELDS = {
     "hr_reply",
     "hr_replied_at",
     "hr_reply_edited_at",
+    "purged_at",
 }
 HR_REPLY_FIELDS = {"hr_reply", "hr_replied_at", "hr_reply_edited_at"}
 STAFF_ONLY_KEYS = ("hr_reply_by", "reviewed_by", "acknowledged_by")

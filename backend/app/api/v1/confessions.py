@@ -112,6 +112,7 @@ class ConfessorConfessionResponse(BaseModel):
     hr_reply: str | None
     hr_replied_at: datetime | None
     hr_reply_edited_at: datetime | None
+    purged_at: datetime | None
 
     model_config = {"from_attributes": True}
 

@@ -27,7 +27,12 @@ from app.exceptions import (
     JustificationRequiredError,
     RawAccessNotPermittedError,
 )
-from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
+from app.models.confession import (
+    Confession,
+    ConfessionStatus,
+    ModerationSeverity,
+    content_present,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +115,7 @@ def _filtered(
 ) -> Select:
     """Build the filtered summary query shared by the list and its count."""
     stmt = select(*_SUMMARY_COLUMNS).where(
-        Confession.status != ConfessionStatus.deleted
+        Confession.status != ConfessionStatus.deleted, content_present()
     )
     if status is not None:
         stmt = stmt.where(Confession.status == status)
@@ -171,6 +176,7 @@ async def read_summary(
     stmt = select(*_SUMMARY_COLUMNS).where(
         Confession.id == confession_id,
         Confession.status != ConfessionStatus.deleted,
+        content_present(),
     )
     row = (await session.execute(stmt)).one_or_none()
     if row is None:
@@ -206,6 +212,7 @@ async def read_raw(
     stmt = select(*_SUMMARY_COLUMNS, Confession.transcript).where(
         Confession.id == confession_id,
         Confession.status != ConfessionStatus.deleted,
+        content_present(),
     )
     row = (await session.execute(stmt)).one_or_none()
     if row is None:

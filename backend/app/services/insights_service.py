@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, content_present
 from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
@@ -125,6 +125,7 @@ async def _grouped_counts(
         select(column, func.count())
         .where(
             Confession.status != ConfessionStatus.deleted,
+            content_present(),
             Confession.created_at >= start,
             Confession.created_at <= end,
         )
@@ -145,6 +146,7 @@ async def _timestamps(
     """
     stmt = select(Confession.created_at, Confession.delivered_at).where(
         Confession.status != ConfessionStatus.deleted,
+        content_present(),
         Confession.created_at >= start,
         Confession.created_at <= end,
     )
@@ -214,6 +216,7 @@ async def _weekly_sentiment(
     """Return per-ISO-week sentiment counts (timestamps + label only)."""
     stmt = select(Confession.created_at, Confession.sentiment).where(
         Confession.status != ConfessionStatus.deleted,
+        content_present(),
         Confession.created_at >= start,
         Confession.created_at <= end,
     )

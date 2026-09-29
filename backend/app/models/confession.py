@@ -6,7 +6,16 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    ColumnElement,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,6 +60,7 @@ class Confession(Base):
         Index("ix_confessions_created_at", "created_at"),
         Index("ix_confessions_severity", "severity"),
         Index("ix_confessions_hr_replied_at", "hr_replied_at"),
+        Index("ix_confessions_purged_at", "purged_at"),
     )
 
     device_token_hash: Mapped[str] = mapped_column(
@@ -154,3 +164,19 @@ class Confession(Base):
         nullable=True,
         comment="When the HR reply text last changed after the first save; null if never edited",
     )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When retention emptied this row down to a reply-only shell; null means it still holds its confession",
+    )
+
+
+def content_present() -> ColumnElement[bool]:
+    """SQL predicate: the row still holds its confession, not a reply-only shell.
+
+    Retention keeps a replied confession's reply (and the device hash needed to
+    show it to its confessor) after the confession itself is emptied. Every
+    query that serves staff, reports or delivery must add this so an emptied
+    row is never counted, listed, or re-delivered.
+    """
+    return Confession.purged_at.is_(None)

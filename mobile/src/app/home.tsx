@@ -33,6 +33,8 @@ interface ConfessionHistoryItem extends HrReplyFields {
   recipient_dept: string | null;
   delivered_at: string | null;
   created_at: string;
+  /** Set when retention removed the confession itself and kept only the reply. */
+  purged_at: string | null;
 }
 
 interface StatusPresentation {
@@ -42,6 +44,9 @@ interface StatusPresentation {
 
 /** Maps a confession's backend state to what the history list shows. */
 function describeStatus(item: ConfessionHistoryItem): StatusPresentation {
+  if (item.purged_at) {
+    return { label: 'Removed after 24h · reply kept', color: colors.slate400 };
+  }
   if (item.status === 'flagged') {
     return { label: 'Under review', color: colors.rose400 };
   }

@@ -18,7 +18,7 @@ from app.exceptions import (
     DepartmentNotFoundError,
     DuplicateDepartmentError,
 )
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, content_present
 from app.models.department import Department
 
 logger = logging.getLogger(__name__)
@@ -110,6 +110,7 @@ async def undelivered_count(session: AsyncSession, name: str) -> int:
             .where(
                 Confession.recipient_dept == name,
                 Confession.status == ConfessionStatus.forwarded,
+                content_present(),
                 Confession.delivered_at.is_(None),
             )
         )

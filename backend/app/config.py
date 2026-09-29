@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -46,6 +47,9 @@ class Settings(BaseSettings):
 
     # ── Data retention ────────────────────────────────────────────────────
     RETENTION_HOURS: int = 24  # purge forwarded/deleted confessions after this long
+    # How long a reply is kept after it was written (>= 1: zero would delete every
+    # reply the moment it is emptied).
+    REPLY_RETENTION_DAYS: int = Field(default=30, ge=1)
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3
@@ -110,6 +114,20 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"  # development | staging | production
     LOG_LEVEL: str = "INFO"
     SENTRY_DSN: str = ""  # empty disables Sentry entirely
+
+    @model_validator(mode="after")
+    def _reply_outlives_confession(self) -> Settings:
+        """Refuse a reply retention shorter than the confession's own.
+
+        Otherwise a reply would be deleted before the row is ever emptied, and
+        the reply-only shell would never exist.
+        """
+        if self.REPLY_RETENTION_DAYS * 24 < self.RETENTION_HOURS:
+            raise ValueError(
+                "REPLY_RETENTION_DAYS must cover at least RETENTION_HOURS "
+                f"(got {self.REPLY_RETENTION_DAYS} days vs {self.RETENTION_HOURS} hours)"
+            )
+        return self
 
 
 def parse_comma_separated_list(raw: str) -> list[str]:

@@ -30,7 +30,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.exceptions import ThemeClusteringError
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, content_present
 from app.services import insights_service, theme_clustering
 from app.services.llm import LLMService
 from app.services.theme_clustering import SummaryItem, ThemeGroup, Window
@@ -75,6 +75,7 @@ async def fetch_summary_items(
         select(Confession.ai_summary, Confession.sentiment, Confession.category)
         .where(
             Confession.status != ConfessionStatus.deleted,
+            content_present(),
             Confession.ai_summary.is_not(None),
             func.trim(Confession.ai_summary) != "",
             Confession.created_at > after,

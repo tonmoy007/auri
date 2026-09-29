@@ -30,6 +30,7 @@ async def add_confession(
     hr_reply: str | None = None,
     hr_replied_at: datetime | None = None,
     hr_reply_edited_at: datetime | None = None,
+    delivered_at: datetime | None = None,
 ) -> Confession:
     """Insert and commit one confession; ``None`` columns take their defaults."""
     confession = Confession(
@@ -43,6 +44,7 @@ async def add_confession(
         status=status,
         severity=severity,
         recipient_dept=department,
+        delivered_at=delivered_at,
         hr_reply=hr_reply,
         hr_replied_at=hr_replied_at,
         hr_reply_edited_at=hr_reply_edited_at,
