@@ -17,7 +17,7 @@ from app.main import app
 from app.models.confession import ConfessionStatus
 from app.models.retention_run import RetentionRun
 from app.models.user import UserRole
-from app.services import retention, settings_service, theme_service
+from app.services import retention, settings_service
 from app.services.retention import RetentionResult
 from app.services.retention_status import is_overdue, latest_run, record_run
 from httpx import AsyncClient
@@ -47,6 +47,11 @@ def pinned_clock_and_cohort(
         ("OPENAI_API_KEY", ""),
         ("SENTRY_DSN", ""),
         ("SQL_ECHO", False),
+        ("THEMES_LLM_BASE_URL", ""),
+        ("THEMES_LLM_MODEL", ""),
+        ("THEMES_LLM_API_KEY", ""),
+        ("THEMES_LLM_ALLOW_INSECURE_HTTP", False),
+        ("THEMES_LLM_SELF_HOSTED", False),
     ):
         set_setting(name, value)
     for name in (
@@ -374,19 +379,136 @@ async def test_the_themes_statement_follows_where_the_model_really_is(
 
 
 @pytest.mark.asyncio
-async def test_the_themes_statement_follows_the_provider_actually_used(
-    api_client: AsyncClient, make_staff: StaffFactory, monkeypatch
+@pytest.mark.parametrize(
+    ("url", "model", "self_hosted", "phrase", "host"),
+    [
+        (
+            "https://models.example.net",
+            "qwen3.5-9b",
+            False,
+            "where it runs is not verified",
+            "models.example.net",
+        ),
+        (
+            "http://10.0.0.7:8000",
+            "qwen3.5-9b",
+            False,
+            "where it runs is not verified",
+            "10.0.0.7",
+        ),
+        (
+            "https://localhost:8000",
+            "qwen3.5-9b",
+            False,
+            "where it runs is not verified",
+            "localhost",
+        ),
+        (
+            "https://models.example.net",
+            "qwen3.5-9b",
+            True,
+            "own infrastructure",
+            "models.example.net",
+        ),
+        (
+            "http://127.0.0.1:18000",
+            "qwen3.5-9b",
+            True,
+            "own infrastructure",
+            "127.0.0.1",
+        ),
+        (
+            "http://localhost:11434",
+            "gpt-oss:120b-cloud",
+            True,
+            "where it runs is not verified",
+            "localhost",
+        ),
+    ],
+    ids=[
+        "public",
+        "private",
+        "loopback",
+        "asserted-self-hosted",
+        "tunnel-asserted",
+        "cloud-model-overrides",
+    ],
+)
+async def test_the_themes_statement_never_infers_own_infrastructure_from_an_address(
+    url: str,
+    model: str,
+    self_hosted: bool,
+    phrase: str,
+    host: str,
+    api_client: AsyncClient,
+    make_staff: StaffFactory,
+    set_setting: SettingPatcher,
 ) -> None:
-    # Arrange — if grouping ever moves off this server, the panel must say so
-    monkeypatch.setattr(theme_service, "THEMES_PROVIDER", "openai")
+    # Arrange — a tunnel to localhost can reach any host, and a private address
+    # can sit on a shared network, so only the operator's assertion counts
+    set_setting("THEMES_LLM_BASE_URL", url)
+    set_setting("THEMES_LLM_MODEL", model)
+    set_setting("THEMES_LLM_SELF_HOSTED", self_hosted)
     _, headers = await make_staff(UserRole.hr)
 
     # Act
     themes = _fact((await _overview(api_client, headers))["guarantees"], "themes")
 
     # Assert
-    assert "outside this organisation" in themes
-    assert "own infrastructure" not in themes
+    assert phrase in themes
+    assert host in themes
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("url", "unencrypted"),
+    [
+        ("https://models.example.net", False),
+        ("http://127.0.0.1:18000", False),
+        ("http://localhost:8000", False),
+        ("http://10.0.0.7:8000", True),
+        ("http://192.168.1.9:8000", True),
+    ],
+)
+async def test_plain_http_beyond_this_machine_is_disclosed_as_unencrypted(
+    url: str,
+    unencrypted: bool,
+    api_client: AsyncClient,
+    make_staff: StaffFactory,
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("THEMES_LLM_BASE_URL", url)
+    set_setting("THEMES_LLM_MODEL", "qwen3.5-9b")
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    body = await _overview(api_client, headers)
+
+    # Assert
+    ids = {fact["id"] for fact in body["limits"]}
+    assert ("themes_unencrypted" in ids) is unencrypted
+
+
+@pytest.mark.asyncio
+async def test_a_refused_endpoint_is_reported_as_sending_nothing(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange — plain http to a public address is refused, so nothing is sent
+    set_setting("THEMES_LLM_BASE_URL", "http://118.67.212.45:8000")
+    set_setting("THEMES_LLM_MODEL", "qwen3.5-9b")
+    set_setting("OPENAI_API_KEY", "sk-secret-value")
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    response = await api_client.get(PATH, headers=headers)
+
+    # Assert
+    themes = _fact(response.json()["guarantees"], "themes")
+    assert "cannot be used" in themes
+    assert "not sent to any model" in themes
+    assert "118.67.212.45" not in response.text
+    assert "sk-secret-value" not in response.text
 
 
 @pytest.mark.asyncio

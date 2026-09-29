@@ -67,6 +67,9 @@ def init_sentry(dsn: str, environment: str) -> None:
         # the raw transcript and the device hash.
         send_default_pii=False,
         max_request_body_size="never",
+        # Stack frames would otherwise carry local variables into the event: an
+        # HTTP client's headers (an API key) and the summaries being processed.
+        include_local_variables=False,
     )
 
 

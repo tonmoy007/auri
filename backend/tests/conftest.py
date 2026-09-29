@@ -75,6 +75,24 @@ def _live_settings_objects() -> list[Settings]:
     return found
 
 
+@pytest.fixture(autouse=True)
+def isolate_optional_endpoints(set_setting: SettingPatcher) -> None:
+    """Blank the optional remote-model settings, whatever a developer's .env holds.
+
+    A dev machine may point the themes model at a real server with a real key;
+    no test may reach it, or depend on it.
+    """
+    for name, value in (
+        ("THEMES_LLM_BASE_URL", ""),
+        ("THEMES_LLM_MODEL", ""),
+        ("THEMES_LLM_API_KEY", ""),
+        ("THEMES_LLM_USE_OPENAI_API_KEY", False),
+        ("THEMES_LLM_SELF_HOSTED", False),
+        ("THEMES_LLM_ALLOW_INSECURE_HTTP", False),
+    ):
+        set_setting(name, value)
+
+
 @pytest_asyncio.fixture
 async def db_engine() -> AsyncIterator[AsyncEngine]:
     """A fresh in-memory database with the full schema created."""

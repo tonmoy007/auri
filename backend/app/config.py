@@ -69,6 +69,24 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-1.5-flash"
     OPENAI_API_KEY: str = ""
+    # Optional OpenAI-compatible model (for example vLLM) for HR theme grouping,
+    # used instead of local Ollama. Environment only: deliberately not editable
+    # from the dashboard, so no one can silently repoint where summaries go.
+    THEMES_LLM_BASE_URL: str = ""
+    THEMES_LLM_MODEL: str = ""
+    THEMES_LLM_API_KEY: str = ""
+    # Send OPENAI_API_KEY to the themes server when THEMES_LLM_API_KEY is empty.
+    # Off by default: that key is normally a real OpenAI credential and must not
+    # go to another server unless the operator says so on purpose.
+    THEMES_LLM_USE_OPENAI_API_KEY: bool = False
+    # Assert that the themes server runs on this organisation's own infrastructure.
+    # An address cannot prove it (an SSH tunnel to localhost can reach anywhere),
+    # so the Privacy panel only says "own infrastructure" when told so.
+    THEMES_LLM_SELF_HOSTED: bool = False
+    # Plain http to a public address sends the key and summaries unencrypted;
+    # refused unless this is set on purpose.
+    THEMES_LLM_ALLOW_INSECURE_HTTP: bool = False
+    THEMES_LLM_TIMEOUT_SECONDS: int = Field(default=120, ge=5, le=600)
     OPENAI_MODEL: str = "gpt-4o-mini"
     # Claude is explicit-provider-only (LLMService(provider="claude")) — not
     # part of the "auto" chain above.

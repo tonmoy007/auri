@@ -29,19 +29,22 @@ from typing import Final
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.exceptions import ThemeClusteringError
+from app.exceptions import ThemeClusteringError, ThemesEndpointError
 from app.models.confession import Confession, ConfessionStatus, content_present
 from app.services import insights_service, theme_clustering
-from app.services.llm import LLMService, Provider
+from app.services.llm import LLMService, Provider, fence_untrusted
+from app.services.openai_compatible import chat_complete
 from app.services.theme_clustering import SummaryItem, ThemeGroup, Window
 from app.services.theme_report import ThemeReport, ThemeSummary, summarise_themes
+from app.services.themes_endpoint import resolve_endpoint
 
 logger = logging.getLogger(__name__)
 
-# The one provider that reads summaries for theme grouping. The privacy panel
-# derives its "stays on this server" statement from this value, so changing it
-# changes what the panel says.
-THEMES_PROVIDER: Final[Provider] = "ollama"
+# The local provider that reads summaries when no themes endpoint is configured.
+# It is never the ``auto`` chain, which could reach Gemini or OpenAI. Where the
+# summaries actually go is decided by ``themes_endpoint.resolve_endpoint`` and
+# reported by the Privacy panel from the same function.
+THEMES_LOCAL_PROVIDER: Final[Provider] = "ollama"
 
 METHOD_MODEL: Final = "model"
 METHOD_CATEGORY: Final = "category"
@@ -49,7 +52,11 @@ METHOD_NONE: Final = "none"
 MODEL_ATTEMPTS: Final = 2
 
 NOTICE_FALLBACK: Final = (
-    "The local model was unavailable or gave an unusable answer, so themes "
+    "The themes model was unavailable or gave an unusable answer, so themes "
+    "are grouped by each confession's category instead."
+)
+NOTICE_ENDPOINT_REFUSED: Final = (
+    "The configured themes model address cannot be used ({reason}), so themes "
     "are grouped by each confession's category instead."
 )
 NOTICE_GROUPS_TOO_SMALL: Final = (
@@ -103,14 +110,23 @@ async def fetch_summary_items(
 
 
 async def _ask_model(llm: LLMService, content: str) -> str:
-    """Send *content* to the model in a worker thread and return its raw reply.
+    """Send *content* to the configured model and return its raw reply.
 
-    The blocking HTTP call must not run on the event loop: a slow local model
-    would otherwise stall every other request.
+    With no themes endpoint configured this is the local model, whose blocking
+    HTTP call runs in a worker thread so a slow model cannot stall every other
+    request. With one configured the summaries go to that OpenAI-compatible
+    server instead, awaited directly.
+
+    Raises:
+        ThemesEndpointError: If the configured address must not be used.
     """
-    return await asyncio.to_thread(
-        llm.complete, theme_clustering.CLUSTERING_INSTRUCTION, content
-    )
+    endpoint = resolve_endpoint()
+    if endpoint is None:
+        return await asyncio.to_thread(
+            llm.complete, theme_clustering.CLUSTERING_INSTRUCTION, content
+        )
+    prompt = fence_untrusted(theme_clustering.CLUSTERING_INSTRUCTION, content)
+    return await chat_complete(endpoint, prompt)
 
 
 def _parse_or_none(raw: str, item_count: int, attempt: int) -> list[ThemeGroup] | None:
@@ -153,6 +169,12 @@ async def _choose_groups(
     """Group *items* with the model, or by category if it cannot be used."""
     try:
         return await _group_with_model(items, llm), METHOD_MODEL, None
+    except ThemesEndpointError as exc:
+        # Nothing was sent anywhere. The message is fixed text: it never
+        # contains the address, a credential or the key.
+        logger.warning("themes endpoint refused: %s", exc)
+        notice = NOTICE_ENDPOINT_REFUSED.format(reason=exc)
+        return theme_clustering.group_by_category(items), METHOD_CATEGORY, notice
     except ThemeClusteringError as exc:
         # The message is fixed text and never quotes the model's reply.
         logger.warning("theme grouping fell back to categories: %s", exc)
@@ -228,7 +250,7 @@ async def _themes_for(
     instead so HR is never left with an unexplained blank.
     """
     groups, method, notice = await _choose_groups(
-        items, llm or LLMService(provider=THEMES_PROVIDER)
+        items, llm or LLMService(provider=THEMES_LOCAL_PROVIDER)
     )
     summary = summarise_themes(items, groups, threshold)
     if method == METHOD_MODEL and not summary.themes:

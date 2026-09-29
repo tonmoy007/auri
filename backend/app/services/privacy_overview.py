@@ -16,7 +16,6 @@ statements that had overclaimed.
 
 from __future__ import annotations
 
-import ipaddress
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
@@ -25,29 +24,21 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.exceptions import ThemesEndpointError
 from app.models.retention_run import RetentionRun
 from app.models.user import User, UserRole
-from app.services import insights_service, retention, retention_status, theme_service
+from app.services import insights_service, retention, retention_status
 from app.services.confession_access import MIN_JUSTIFICATION_LENGTH
 from app.services.insights_service import Bucket
 from app.services.settings_service import get_config
+from app.services.themes_endpoint import (
+    ThemesEndpoint,
+    is_local_host,
+    resolve_endpoint,
+)
 
 DEPARTMENT_TRANSCRIPT_CHARS = 1000
 MODERATOR_TRANSCRIPT_CHARS = 500
-_LOCAL_HOSTNAMES = frozenset({"localhost", "host.docker.internal", "ollama"})
-_LOCAL_NETWORKS = tuple(
-    ipaddress.ip_network(cidr)
-    for cidr in (
-        "127.0.0.0/8",
-        "::1/128",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "169.254.0.0/16",
-        "fc00::/7",
-        "fe80::/10",
-    )
-)
 
 
 @dataclass(frozen=True)
@@ -66,8 +57,7 @@ class PrivacySnapshot:
     retention_hours: int
     reply_retention_days: int
     expected_run_hours: int
-    themes_stay_local: bool
-    model_host: str
+    themes: ThemesRoute
     outside_ai: tuple[str, ...]
     openai_speech_fallback: bool
     error_tracking: bool
@@ -133,39 +123,58 @@ def _configured(name: str) -> str:
     return get_config(name, getattr(settings, name))
 
 
-def _host_is_local(host: str) -> bool:
-    """Whether *host* is this machine or an address on a private network.
+@dataclass(frozen=True)
+class ThemesRoute:
+    """Where theme grouping sends summaries, from the live configuration."""
 
-    Only loopback, RFC 1918, link-local and unique-local ranges count.
-    ``ipaddress``'s own ``is_private`` is wider (it includes documentation and
-    reserved ranges) and would call a public-looking address private.
+    stays_local: bool
+    host: str
+    refusal: str | None
+    configured_endpoint: bool = False
+    encrypted: bool = True
+
+
+def _ollama_route() -> ThemesRoute:
+    """The default route: the Ollama address, read the way the LLM code reads it.
+
+    An administrator can change the address and model from the Config tab, so
+    both are read live. A model named ``…-cloud`` is run by a third party even
+    when the address is local.
     """
-    if host in _LOCAL_HOSTNAMES:
-        return True
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return any(address in network for network in _LOCAL_NETWORKS)
-
-
-def model_host() -> str:
-    """The host the local model is reached at, from the live configuration."""
-    return urlparse(_configured("OLLAMA_BASE_URL")).hostname or ""
-
-
-def themes_stay_local() -> bool:
-    """Whether theme grouping runs on this organisation's own infrastructure.
-
-    True only if the provider used is Ollama, its address is loopback or
-    private, and the model is not an Ollama cloud model (those are named
-    ``…-cloud`` and are run by a third party). An administrator can change the
-    address and model from the Config tab, so this is read live.
-    """
-    if theme_service.THEMES_PROVIDER != "ollama":
-        return False
+    host = urlparse(_configured("OLLAMA_BASE_URL")).hostname or ""
     cloud_model = _configured("OLLAMA_MODEL").endswith("-cloud")
-    return _host_is_local(model_host()) and not cloud_model
+    return ThemesRoute(is_local_host(host) and not cloud_model, host, None)
+
+
+def _endpoint_route(endpoint: ThemesEndpoint) -> ThemesRoute:
+    """The route for a configured endpoint.
+
+    An address cannot prove where a server runs: an SSH tunnel to localhost can
+    reach any host, and a private address can be on a shared network. So the
+    panel says "own infrastructure" only when the operator asserts it with
+    ``THEMES_LLM_SELF_HOSTED``, and never for a ``-cloud`` model.
+    """
+    cloud_model = endpoint.model.endswith("-cloud")
+    own = settings.THEMES_LLM_SELF_HOSTED and not cloud_model
+    plain_http = endpoint.base_url.startswith("http://")
+    encrypted = not plain_http or endpoint.host in ("localhost", "127.0.0.1", "::1")
+    return ThemesRoute(own, endpoint.host, None, True, encrypted)
+
+
+def themes_route() -> ThemesRoute:
+    """Work out where summaries really go for theme grouping.
+
+    A configured ``THEMES_LLM_BASE_URL`` wins over local Ollama; if it is set
+    but refused, nothing is sent anywhere (themes fall back to categories) and
+    the refusal is reported instead.
+    """
+    try:
+        endpoint = resolve_endpoint()
+    except ThemesEndpointError as exc:
+        return ThemesRoute(True, "", str(exc))
+    if endpoint is None:
+        return _ollama_route()
+    return _endpoint_route(endpoint)
 
 
 def outside_ai_providers() -> tuple[str, ...]:
@@ -187,8 +196,7 @@ def build_snapshot() -> PrivacySnapshot:
         retention_hours=settings.RETENTION_HOURS,
         reply_retention_days=settings.REPLY_RETENTION_DAYS,
         expected_run_hours=settings.RETENTION_EXPECTED_RUN_HOURS,
-        themes_stay_local=themes_stay_local(),
-        model_host=model_host(),
+        themes=themes_route(),
         outside_ai=outside_ai_providers(),
         openai_speech_fallback=bool(_configured("OPENAI_API_KEY")),
         error_tracking=bool(settings.SENTRY_DSN),
@@ -198,11 +206,22 @@ def build_snapshot() -> PrivacySnapshot:
 
 def _themes_statement(snapshot: PrivacySnapshot) -> str:
     """Say where theme grouping runs, from where it actually runs."""
-    where = (
-        f"a model on this organisation's own infrastructure ({snapshot.model_host})"
-        if snapshot.themes_stay_local
-        else f"an AI service outside this organisation ({snapshot.model_host or 'unknown'})"
-    )
+    route = snapshot.themes
+    if route.refusal is not None:
+        return (
+            "Recurring themes are grouped by each confession's category, because "
+            f"the configured model address cannot be used ({route.refusal}). "
+            "Summaries are not sent to any model."
+        )
+    if route.configured_endpoint and not route.stays_local:
+        where = (
+            f"a model server configured by this organisation ({route.host}); "
+            "where it runs is not verified"
+        )
+    elif route.stays_local:
+        where = f"a model on this organisation's own infrastructure ({route.host})"
+    else:
+        where = f"an AI service outside this organisation ({route.host or 'unknown'})"
     return (
         f"Recurring themes are grouped by {where}, from de-identified summaries "
         "only, never original transcripts."
@@ -279,7 +298,7 @@ def _ai_limits(snapshot: PrivacySnapshot) -> list[Fact]:
         else "No outside speech service is configured, so recordings are "
         "transcribed on this server."
     )
-    return [
+    facts = [
         Fact(
             "raw_words_read",
             "Every step that reads a confession (cleaning it, the safety check, "
@@ -296,6 +315,15 @@ def _ai_limits(snapshot: PrivacySnapshot) -> list[Fact]:
             "the confession history and HR's replies.",
         ),
     ]
+    if not snapshot.themes.encrypted:
+        facts.append(
+            Fact(
+                "themes_unencrypted",
+                "Summaries and the access key for the themes model cross the "
+                "network without encryption (plain http to a non-local address).",
+            )
+        )
+    return facts
 
 
 def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:

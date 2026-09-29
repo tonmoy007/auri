@@ -35,6 +35,14 @@ class ThemeClusteringError(ProcessingError):
     """Raised when the model's grouping of summaries into themes is unusable."""
 
 
+class ThemesEndpointError(ProcessingError):
+    """Raised when the configured themes model address must not be used.
+
+    Its message is safe to show: it never contains a key, a credential or the
+    address itself.
+    """
+
+
 class CounselingError(ProcessingError):
     """Raised when LLM counseling-response generation fails to produce a usable reply."""
 

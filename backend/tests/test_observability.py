@@ -75,6 +75,8 @@ def test_init_sentry_calls_sentry_sdk_init_when_dsn_is_set() -> None:
     # Request bodies carry the raw transcript and device hash on a failed submit
     assert kwargs["max_request_body_size"] == "never"
     assert kwargs["send_default_pii"] is False
+    # Frames would otherwise carry local variables: an API key, the summaries
+    assert kwargs["include_local_variables"] is False
 
 
 # ── Authentication ───────────────────────────────────────────────────────
