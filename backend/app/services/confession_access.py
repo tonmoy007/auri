@@ -1,8 +1,10 @@
 """What HR is allowed to see of a confession, enforced in the query layer.
 
-The default view is the de-identified summary. The raw transcript is a
-separate, narrower tier: it requires a stated justification, only exists for
-items already escalated to human review, and always leaves an audit trail.
+The default view is the de-identified summary, which also carries the
+staff-written reply fields (``hr_reply`` and its two timestamps) and the
+severity. The raw transcript is a separate, narrower tier: it requires a
+stated justification, only exists for items already escalated to human
+review, and always leaves an audit trail.
 
 Enforcement lives here rather than in the API or the UI on purpose. A
 summary read never selects the transcript column at all, so raw text cannot
@@ -48,6 +50,10 @@ _SUMMARY_COLUMNS = (
     Confession.recipient_dept,
     Confession.created_at,
     Confession.delivered_at,
+    Confession.severity,
+    Confession.hr_reply,
+    Confession.hr_replied_at,
+    Confession.hr_reply_edited_at,
 )
 
 
@@ -63,6 +69,10 @@ class ConfessionSummaryView:
     recipient_dept: str | None
     created_at: datetime
     delivered_at: datetime | None
+    severity: str
+    hr_reply: str | None
+    hr_replied_at: datetime | None
+    hr_reply_edited_at: datetime | None
 
 
 @dataclass(frozen=True)
@@ -83,6 +93,10 @@ def _summary_from_row(row) -> ConfessionSummaryView:
         recipient_dept=row.recipient_dept,
         created_at=row.created_at,
         delivered_at=row.delivered_at,
+        severity=row.severity,
+        hr_reply=row.hr_reply,
+        hr_replied_at=row.hr_replied_at,
+        hr_reply_edited_at=row.hr_reply_edited_at,
     )
 
 
@@ -92,6 +106,7 @@ def _filtered(
     department: str | None,
     since: datetime | None,
     until: datetime | None,
+    replied: bool | None = None,
 ) -> Select:
     """Build the filtered summary query shared by the list and its count."""
     stmt = select(*_SUMMARY_COLUMNS).where(
@@ -107,6 +122,12 @@ def _filtered(
         stmt = stmt.where(Confession.created_at >= since)
     if until is not None:
         stmt = stmt.where(Confession.created_at <= until)
+    if replied is not None:
+        stmt = stmt.where(
+            Confession.hr_replied_at.is_not(None)
+            if replied
+            else Confession.hr_replied_at.is_(None)
+        )
     return stmt
 
 
@@ -119,14 +140,16 @@ async def list_summaries(
     until: datetime | None = None,
     limit: int = 25,
     offset: int = 0,
+    replied: bool | None = None,
 ) -> tuple[list[ConfessionSummaryView], int]:
     """Return a page of summary views, newest first, plus the total matches.
 
     Soft-deleted confessions are excluded: a confessor who deleted theirs
-    has withdrawn it, and HR reporting must honour that.
+    has withdrawn it, and HR reporting must honour that. *replied* keeps only
+    confessions that do (``True``) or do not (``False``) have an HR reply.
     """
     page_size = min(max(limit, 1), MAX_PAGE_SIZE)
-    stmt = _filtered(status, category, department, since, until)
+    stmt = _filtered(status, category, department, since, until, replied)
 
     total = await session.scalar(select(func.count()).select_from(stmt.subquery()))
     result = await session.execute(
@@ -180,7 +203,7 @@ async def read_raw(
             "is required to read a raw transcript"
         )
 
-    stmt = select(*_SUMMARY_COLUMNS, Confession.severity, Confession.transcript).where(
+    stmt = select(*_SUMMARY_COLUMNS, Confession.transcript).where(
         Confession.id == confession_id,
         Confession.status != ConfessionStatus.deleted,
     )

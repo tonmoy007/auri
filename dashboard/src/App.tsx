@@ -8,6 +8,7 @@ import { DeliveryPanel } from '@/components/DeliveryPanel'
 import { DirectoryPanel } from '@/components/DirectoryPanel'
 import { InsightsPanel } from '@/components/InsightsPanel'
 import { QueuePanel } from '@/components/QueuePanel'
+import { RepliesPanel } from '@/components/RepliesPanel'
 import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
 import { Button } from '@/components/ui/button'
@@ -35,6 +36,7 @@ const TAB_ACCESS: { value: string; label: string; roles: UserRole[] }[] = [
   { value: 'queue', label: 'Queue', roles: ['hr', 'moderator'] },
   { value: 'directory', label: 'Directory', roles: ['hr'] },
   { value: 'delivery', label: 'Delivery', roles: ['hr'] },
+  { value: 'replies', label: 'Replies', roles: ['hr'] },
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
@@ -243,6 +245,10 @@ function App() {
 
           <TabsContent value="delivery">
             <DeliveryPanel />
+          </TabsContent>
+
+          <TabsContent value="replies">
+            <RepliesPanel />
           </TabsContent>
 
           <TabsContent value="audit">

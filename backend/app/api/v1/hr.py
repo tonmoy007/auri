@@ -9,6 +9,7 @@ items, and always writes an audit event — see
 from __future__ import annotations
 
 import uuid
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -19,19 +20,32 @@ from app.api.deps import require_hr_role
 from app.database import get_async_session
 from app.exceptions import (
     ConfessionNotFoundError,
+    HrReplyInvalidError,
     JustificationRequiredError,
     RawAccessNotPermittedError,
+    ReplyNotPermittedError,
 )
 from app.models.audit_event import AuditAction, ContentTier
 from app.models.confession import ConfessionStatus
 from app.models.user import User
-from app.services import audit_service, confession_access, insights_service
+from app.services import (
+    audit_service,
+    confession_access,
+    hr_reply_service,
+    insights_service,
+)
 
 router = APIRouter(prefix="/hr", tags=["hr"])
 
+ClockDependency = Callable[[], datetime]
+
 
 class ConfessionSummaryResponse(BaseModel):
-    """The default HR view of a confession — summary only, no transcript."""
+    """The default HR view of a confession — summary only, no transcript.
+
+    Carries the staff-written reply and its timestamps, never its author:
+    who wrote it lives only in the audit trail.
+    """
 
     id: uuid.UUID
     status: ConfessionStatus
@@ -41,6 +55,10 @@ class ConfessionSummaryResponse(BaseModel):
     recipient_dept: str | None
     created_at: datetime
     delivered_at: datetime | None
+    severity: str
+    hr_reply: str | None
+    hr_replied_at: datetime | None
+    hr_reply_edited_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -66,6 +84,24 @@ class RawAccessRequest(BaseModel):
     justification: str = Field(..., min_length=1, max_length=2000)
 
 
+class HrReplyRequest(BaseModel):
+    """The organisation's reply to a confessor.
+
+    The service is authoritative: it strips the text and applies the limit
+    to what is stored. The bounds here only reject an obviously unusable
+    body before it reaches the service.
+    """
+
+    reply: str = Field(
+        ..., min_length=1, max_length=hr_reply_service.MAX_HR_REPLY_LENGTH
+    )
+
+
+def get_clock() -> ClockDependency:
+    """FastAPI dependency providing the current-time function (see delivery.py)."""
+    return lambda: datetime.now(timezone.utc)
+
+
 @router.get(
     "/confessions",
     response_model=ConfessionPage,
@@ -78,6 +114,7 @@ async def list_confessions(
     department: str | None = Query(None, max_length=128),
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
+    replied: bool | None = Query(None),
     limit: int = Query(25, ge=1, le=confession_access.MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_async_session),
@@ -93,6 +130,7 @@ async def list_confessions(
         until=until,
         limit=limit,
         offset=offset,
+        replied=replied,
     )
     await audit_service.record(
         session,
@@ -137,6 +175,70 @@ async def read_confession_summary(
         source_ip=audit_service.client_ip(request),
     )
     return ConfessionSummaryResponse.model_validate(summary)
+
+
+async def _save_reply_or_http_error(
+    session: AsyncSession, confession_id: uuid.UUID, text: str, now: datetime
+) -> hr_reply_service.ReplyWriteResult:
+    """Write the reply, translating domain refusals into HTTP errors.
+
+    Each message is a fixed string from the service and never contains the
+    submitted text.
+    """
+    try:
+        return await hr_reply_service.write_reply(session, confession_id, text, now)
+    except HrReplyInvalidError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)
+        ) from exc
+    except ConfessionNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)
+        ) from exc
+    except ReplyNotPermittedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=str(exc)
+        ) from exc
+
+
+@router.put(
+    "/confessions/{confession_id}/reply",
+    response_model=ConfessionSummaryResponse,
+    summary="Write or edit the organisation's reply to a confession (HR)",
+)
+async def write_confession_reply(
+    confession_id: uuid.UUID,
+    body: HrReplyRequest,
+    request: Request,
+    session: AsyncSession = Depends(get_async_session),
+    actor: User = Depends(require_hr_role),
+    clock: ClockDependency = Depends(get_clock),
+) -> ConfessionSummaryResponse:
+    """Save the reply the confessor will see in their own history.
+
+    The author goes to the audit trail, never onto the confession. A save
+    that changes the text is audited as ``hr_reply.write``. Re-saving
+    identical text writes nothing, but it still served summary content, so
+    it is audited as a summary-tier read. Failed requests write no audit
+    row, and the reply text is never logged or audited.
+    """
+    result = await _save_reply_or_http_error(
+        session, confession_id, body.reply, clock()
+    )
+    await audit_service.record(
+        session,
+        actor=actor,
+        action=(
+            AuditAction.hr_reply_write
+            if result.changed
+            else AuditAction.confession_read
+        ),
+        target_confession_id=confession_id,
+        content_tier=ContentTier.summary,
+        justification=None,
+        source_ip=audit_service.client_ip(request),
+    )
+    return ConfessionSummaryResponse.model_validate(result.view)
 
 
 @router.post(

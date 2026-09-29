@@ -17,10 +17,16 @@ import { colors } from '../theme/colors';
 import { typography, spacing, borderRadius } from '../theme';
 import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
+import {
+  formatHistoryDate,
+  presentHrReply,
+  type HrReplyFields,
+} from '../lib/historyPresentation';
+import { HrReplyCard } from '../components/HrReplyCard';
 
 type ApiConfessionStatus = 'pending' | 'forwarded' | 'deleted' | 'flagged';
 
-interface ConfessionHistoryItem {
+interface ConfessionHistoryItem extends HrReplyFields {
   id: string;
   status: ApiConfessionStatus;
   category: string | null;
@@ -45,16 +51,6 @@ function describeStatus(item: ConfessionHistoryItem): StatusPresentation {
       : { label: 'Forwarded · awaiting delivery', color: colors.candleGlow };
   }
   return { label: 'Pending', color: colors.slate400 };
-}
-
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 /**
@@ -148,13 +144,14 @@ export default function HomeScreen(): React.JSX.Element {
           }
           renderItem={({ item }) => {
             const statusInfo = describeStatus(item);
+            const reply = presentHrReply(item, formatHistoryDate);
             return (
               <View style={styles.card}>
                 <View style={styles.cardHeader}>
                   <Text style={styles.cardCategory}>
                     {item.category ?? 'Uncategorized'}
                   </Text>
-                  <Text style={styles.cardDate}>{formatDate(item.created_at)}</Text>
+                  <Text style={styles.cardDate}>{formatHistoryDate(item.created_at)}</Text>
                 </View>
                 <View style={styles.statusRow}>
                   <View style={[styles.statusDot, { backgroundColor: statusInfo.color }]} />
@@ -165,6 +162,7 @@ export default function HomeScreen(): React.JSX.Element {
                     <Text style={styles.recipientText}> · {item.recipient_dept}</Text>
                   ) : null}
                 </View>
+                {reply ? <HrReplyCard reply={reply} /> : null}
               </View>
             );
           }}

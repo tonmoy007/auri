@@ -206,6 +206,42 @@ export interface DepartmentEntry {
   undelivered_count: number
 }
 
+export type ConfessionStatus = 'pending' | 'forwarded' | 'deleted' | 'flagged'
+
+/** Longest reply the backend accepts; mirrors the backend's MAX_HR_REPLY_LENGTH. */
+export const HR_REPLY_MAX_LENGTH = 2000
+
+/**
+ * The summary tier of a confession, as HR sees it.
+ *
+ * Deliberately has no transcript and no author field: HR replies without
+ * reading the raw words, and the reply's author is recorded only in the audit
+ * trail. Timestamps are ISO 8601 strings.
+ */
+export interface ConfessionSummary {
+  id: string
+  status: ConfessionStatus
+  category: string | null
+  sentiment: string | null
+  severity: ModerationSeverity
+  ai_summary: string | null
+  recipient_dept: string | null
+  created_at: string
+  delivered_at: string | null
+  hr_reply: string | null
+  /** When the reply was first saved; never moves afterwards. */
+  hr_replied_at: string | null
+  /** When the reply text last changed after the first save; `null` if never edited. */
+  hr_reply_edited_at: string | null
+}
+
+export interface ConfessionSummaryPage {
+  items: ConfessionSummary[]
+  total: number
+  limit: number
+  offset: number
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -263,6 +299,24 @@ export const hrApi = {
     const query = new URLSearchParams({ since: range.since, until: range.until })
     return request<Insights>(`/hr/insights?${query.toString()}`)
   },
+
+  listConfessions: (
+    request: Requester,
+    filters: { replied?: boolean; limit: number; offset: number },
+  ) => {
+    const query = new URLSearchParams({
+      limit: String(filters.limit),
+      offset: String(filters.offset),
+    })
+    if (filters.replied !== undefined) query.set('replied', String(filters.replied))
+    return request<ConfessionSummaryPage>(`/hr/confessions?${query.toString()}`)
+  },
+
+  writeReply: (request: Requester, confessionId: string, reply: string) =>
+    request<ConfessionSummary>(`/hr/confessions/${confessionId}/reply`, {
+      method: 'PUT',
+      body: JSON.stringify({ reply }),
+    }),
 }
 
 export const moderationApi = {

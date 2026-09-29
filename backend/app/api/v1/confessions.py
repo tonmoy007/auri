@@ -83,6 +83,39 @@ class ConfessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ConfessorConfessionResponse(BaseModel):
+    """The device-token-scoped view of a confession, as its own confessor sees it.
+
+    Deliberately separate from :class:`ConfessionResponse`, which staff routes
+    (moderation, delivery) reuse. Staff-only fields (``reviewed_by``,
+    ``acknowledged_by``, any author id) must never be added here: the
+    confessor is told the reply comes from the organisation, and a staff
+    account id in this payload would name who wrote or approved it. A test
+    pins the exact field set.
+    """
+
+    id: uuid.UUID
+    voice_mask: str
+    transcript: str
+    ai_summary: str | None
+    category: str | None
+    pii_stripped: bool
+    status: ConfessionStatus
+    recipient_dept: str | None
+    delivered_at: datetime | None
+    severity: str
+    acknowledged_at: datetime | None
+    reviewed_at: datetime | None
+    counselor_response: str | None
+    created_at: datetime
+    updated_at: datetime
+    hr_reply: str | None
+    hr_replied_at: datetime | None
+    hr_reply_edited_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
+
 class ConfessionPreviewRequest(BaseModel):
     """Request body for previewing an AI summary before submission."""
 
@@ -310,7 +343,7 @@ def _upsert_anonymous_user(
 
 @router.post(
     "",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit a new anonymous confession",
 )
@@ -403,7 +436,7 @@ async def preview_confession(
 
 @router.get(
     "",
-    response_model=list[ConfessionResponse],
+    response_model=list[ConfessorConfessionResponse],
     summary="List past confessions for the requesting device",
 )
 async def list_confessions(
@@ -430,7 +463,7 @@ async def list_confessions(
 
 @router.get(
     "/{confession_id}",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     summary="Retrieve a confession by its UUID",
 )
 async def get_confession(
@@ -471,7 +504,7 @@ async def delete_confession(
 
 @router.post(
     "/{confession_id}/forward",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     summary="Forward a confession to a recipient department",
 )
 async def forward_confession(

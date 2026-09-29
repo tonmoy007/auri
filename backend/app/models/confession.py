@@ -50,6 +50,7 @@ class Confession(Base):
         Index("ix_confessions_status", "status"),
         Index("ix_confessions_created_at", "created_at"),
         Index("ix_confessions_severity", "severity"),
+        Index("ix_confessions_hr_replied_at", "hr_replied_at"),
     )
 
     device_token_hash: Mapped[str] = mapped_column(
@@ -137,4 +138,19 @@ class Confession(Base):
         Text,
         nullable=True,
         comment="LLM-generated compassionate reflection returned to the confessor after submission",
+    )
+    hr_reply: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Organisation's reply to the confessor, written by HR. The author is recorded only in audit_events (hr_reply.write)",
+    )
+    hr_replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the first HR reply was saved; null means no reply",
+    )
+    hr_reply_edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the HR reply text last changed after the first save; null if never edited",
     )

@@ -8,6 +8,13 @@ been delivered or discarded — nothing further reads them — so they are
 hard-deleted after ``settings.RETENTION_HOURS``. ``pending`` and
 ``flagged`` rows are never touched here: they are still awaiting action.
 
+A forwarded row can carry an HR reply that the confessor reads in their
+history. Those rows are still hard-deleted ``RETENTION_HOURS`` after
+``updated_at``, and the reply goes with them. Reply writes deliberately
+leave ``updated_at`` unchanged (see ``hr_reply_service``): if a save
+restarted the clock, re-saving a reply could keep a forwarded transcript
+alive indefinitely.
+
 Not run automatically inside the FastAPI process — invoke this module
 directly on a schedule (cron, k8s CronJob, etc.):
 

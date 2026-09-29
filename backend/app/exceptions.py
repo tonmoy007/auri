@@ -107,6 +107,14 @@ class RawAccessNotPermittedError(ValidationError):
     """Raised when a confession is not eligible for raw-transcript access."""
 
 
+class HrReplyInvalidError(ValidationError):
+    """Raised when an HR reply is blank, too long, or contains forbidden characters."""
+
+
+class ReplyNotPermittedError(ValidationError):
+    """Raised when a confession's status does not accept an HR reply."""
+
+
 class InvalidEmailError(ValidationError):
     """Raised when a staff account email is empty or structurally invalid."""
 
