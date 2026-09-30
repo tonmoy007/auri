@@ -6,9 +6,12 @@ Order of operations, and why:
    chunks from other traditions crowd the top 30 and leave a filtered question with
    nothing.
 2. Each side contributes its top 30; Reciprocal Rank Fusion (k=60) merges them.
-3. "Covered" is judged from the best raw scores, before any cap below removes chunks.
-4. A cap of two chunks per note, and a collapse of near-duplicates, keep the final
+3. A cap of two chunks per note, and a collapse of near-duplicates, keep the final
    ``top_k`` varied.
+4. "Covered" is the best cosine, or the best BM25 score among the chunks that are
+   returned. A chunk the model never sees cannot be the reason the library is said to
+   cover a question, and only a few matching terms count towards the BM25 score, so
+   the length of a question does not decide it.
 
 The question is only ever held in local variables: it is not logged or stored.
 """
@@ -25,13 +28,17 @@ import numpy.typing as npt
 from app.exceptions import PriestIndexError
 from app.priest.bm25_index import Bm25Index, fold
 from app.priest.embedder import EmbedModelInfo
-from app.priest.index_store import LoadedIndex
+from app.priest.index_store import LoadedIndex, check_manifest_digest
 from app.priest.types import Chunk, RetrievalResult, RetrievedChunk
 
 _SIDE_DEPTH: Final = 30
 _RRF_K: Final = 60
 _MAX_PER_NOTE: Final = 2
 _DUPLICATE_COSINE: Final = 0.95
+# Two same-titled notes in different folders are told apart unless they also read alike.
+_TITLE_TWIN_COSINE: Final = 0.85
+# How many matching terms count towards the BM25 half of the coverage decision.
+_COVER_TERMS: Final = 4
 
 Hits = Sequence[tuple[int, float]]
 
@@ -52,11 +59,7 @@ class IndexSource(Protocol):
     """The part of ``ActiveIndex`` that retrieval needs."""
 
     def get(self) -> LoadedIndex:
-        """The currently active index."""
-        ...
-
-    def check_digest(self, current: EmbedModelInfo) -> None:
-        """Raise ``PriestIndexError`` unless *current* matches the index's model."""
+        """The currently active index; may block while a new version loads."""
         ...
 
 
@@ -95,18 +98,33 @@ def _dense_hits(
     return [(int(rows[i]), float(scores[i])) for i in order]
 
 
+def _folder(note_path: str) -> str:
+    """The directory part of a note's relative path; empty for a top-level note."""
+    return note_path.rpartition("/")[0]
+
+
+def _is_title_twin(
+    row: int, other: int, chunks: tuple[Chunk, ...], cosine: float
+) -> bool:
+    """Whether two different notes are one note under two spellings of its title.
+
+    The titles must fold to the same text (the fold the BM25 index uses). Notes in one
+    folder are then twins outright; notes in different folders, such as a figure and a
+    story that share a name, are twins only when their passages also read alike.
+    """
+    a, b = chunks[row], chunks[other]
+    if a.note_path == b.note_path or fold(a.note_title) != fold(b.note_title):
+        return False
+    return _folder(a.note_path) == _folder(b.note_path) or cosine >= _TITLE_TWIN_COSINE
+
+
 def _is_duplicate(
     row: int, kept: list[int], chunks: tuple[Chunk, ...], vectors: np.ndarray
 ) -> bool:
-    """Whether *row* repeats a kept chunk: near-identical vector, or a same-titled note."""
-    title = fold(chunks[row].note_title)
+    """Whether *row* repeats a kept chunk: near-identical vector, or a title twin."""
     for other in kept:
-        if float(vectors[row] @ vectors[other]) >= _DUPLICATE_COSINE:
-            return True
-        if (
-            chunks[other].note_path != chunks[row].note_path
-            and fold(chunks[other].note_title) == title
-        ):
+        cosine = float(vectors[row] @ vectors[other])
+        if cosine >= _DUPLICATE_COSINE or _is_title_twin(row, other, chunks, cosine):
             return True
     return False
 
@@ -178,8 +196,11 @@ class Retriever:
                 model is not the one it was built with, or the query vector has the
                 wrong size.
         """
-        self._active.check_digest(await self._embedder.model_info())
-        loaded = self._active.get()
+        info = await self._embedder.model_info()
+        # One load per request: the digest is checked against the very index that is
+        # then queried, and a reload (a JSONL parse, np.load) stays off the event loop.
+        loaded = await asyncio.to_thread(self._active.get)
+        check_manifest_digest(loaded.manifest, info)
         if not loaded.chunks:
             raise PriestIndexError("the active index is empty")
         query = await self._embedder.embed_query(question)
@@ -192,14 +213,22 @@ class Retriever:
         allowed = None if traditions is None else frozenset(int(r) for r in rows)
         dense_hits = _dense_hits(loaded.vectors, query, rows)
         bm25_hits = bm25.search(question, _SIDE_DEPTH, allowed)
-        return self._result(loaded, dense_hits, bm25_hits)
+        return self._result(loaded, bm25, question, dense_hits, bm25_hits)
 
     def _result(
-        self, loaded: LoadedIndex, dense_hits: Hits, bm25_hits: Hits
+        self,
+        loaded: LoadedIndex,
+        bm25: Bm25Index,
+        question: str,
+        dense_hits: Hits,
+        bm25_hits: Hits,
     ) -> RetrievalResult:
-        """Fuse, cap and label the hits, and decide coverage from the raw best scores."""
+        """Fuse, cap and label the hits, and decide coverage.
+
+        The best cosine is the best of the dense side, before the caps. The best BM25
+        score is taken over the returned chunks only, on their best few terms.
+        """
         best_dense = dense_hits[0][1] if dense_hits else 0.0
-        best_bm25 = bm25_hits[0][1] if bm25_hits else 0.0
         dense_by_row, bm25_by_row = dict(dense_hits), dict(bm25_hits)
         chosen = _select(
             rrf_fuse(dense_hits, bm25_hits), loaded.chunks, loaded.vectors, self._top_k
@@ -213,6 +242,9 @@ class Retriever:
                 fused_score=fused,
             )
             for rank, (row, fused) in enumerate(chosen, start=1)
+        )
+        best_bm25 = bm25.coverage_score(
+            question, [row for row, _ in chosen], _COVER_TERMS
         )
         return RetrievalResult(
             chunks=chunks,

@@ -17,14 +17,16 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin_access
 from app.config import settings
 from app.database import session_dependency
-from app.services import settings_service
+from app.models.audit_event import AuditAction
+from app.models.user import User
+from app.services import audit_service, settings_service
 from app.services.voice_mod import MASKS
 
 logger = logging.getLogger(__name__)
@@ -222,14 +224,33 @@ async def get_config_all() -> ConfigResponse:
     )
 
 
+async def _audit_config_write(
+    session: AsyncSession, request: Request, actor: User | None, detail: str
+) -> None:
+    """Record a config change by key and action, never the value.
+
+    A value can be an address or a secret, and the kill switch and the Ollama address
+    change where questions go, so the change must be accountable.
+    """
+    await audit_service.record(
+        session,
+        actor=actor,
+        actor_label=None if actor else audit_service.ADMIN_KEY_ACTOR_LABEL,
+        action=AuditAction.config_write,
+        source_ip=audit_service.client_ip(request),
+        detail=detail,
+    )
+
+
 @router.put(
     "/config",
     response_model=ConfigEntry,
-    dependencies=[Depends(require_admin)],
     summary="Set a config override — takes effect immediately, no restart",
 )
 async def update_config(
     body: ConfigUpdateRequest,
+    request: Request,
+    actor: User | None = Depends(require_admin),
     session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Upsert *body.key* = *body.value*. Rejects unknown keys and, for
@@ -254,16 +275,20 @@ async def update_config(
             )
 
     await settings_service.set_config(session, body.key, body.value)
-    return ConfigEntry(key=body.key, value=_mask(body.key, body.value), source="db")
+    entry = ConfigEntry(key=body.key, value=_mask(body.key, body.value), source="db")
+    # Last database call: it commits, so nothing after it may fail.
+    await _audit_config_write(session, request, actor, f"set {body.key}")
+    return entry
 
 
 @router.delete(
     "/config/{key}",
-    dependencies=[Depends(require_admin)],
     summary="Clear a config override, reverting it to the .env/Settings() default",
 )
 async def reset_config(
     key: str,
+    request: Request,
+    actor: User | None = Depends(require_admin),
     session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Remove *key*'s DB override."""
@@ -273,7 +298,10 @@ async def reset_config(
             detail=f"Unknown config key: {key!r}",
         )
     await settings_service.clear_config(session, key)
-    return ConfigEntry(key=key, value=_mask(key, _default_for(key)), source="default")
+    entry = ConfigEntry(key=key, value=_mask(key, _default_for(key)), source="default")
+    # Last database call: it commits, so nothing after it may fail.
+    await _audit_config_write(session, request, actor, f"cleared {key}")
+    return entry
 
 
 @router.get(

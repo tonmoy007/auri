@@ -5,7 +5,8 @@ scripts, a sibling folder of scriptures with unverified licences. The preflight,
 sync script and the index builder all call the same rules here, so the allowlist
 cannot drift between them. Paths are relative to the ``religion-study`` folder and use
 ``/``. Nothing here opens a file except ``iter_vault_notes``, and that never follows a
-symlink.
+symlink, never opens a FIFO or device (a read could wait for ever) and never reads a
+note over ``MAX_NOTE_BYTES``.
 """
 
 from __future__ import annotations
@@ -13,9 +14,9 @@ from __future__ import annotations
 import hashlib
 import os
 import re
+import stat
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Final
 
 import yaml
@@ -36,6 +37,12 @@ EXCLUDED_TYPES: Final = frozenset(
 PLANNED: Final = "planned"
 BAD_FRONTMATTER: Final = "bad_frontmatter"
 BAD_ENCODING: Final = "bad_encoding"
+TOO_LARGE: Final = "too_large"
+# The largest note in the vault is about 100 KB; a note far beyond that is not prose.
+MAX_NOTE_BYTES: Final = 1_000_000
+# A frontmatter block, and a single frontmatter value turned into text, stay small.
+MAX_FRONTMATTER_CHARS: Final = 65_536
+MAX_SCALAR_CHARS: Final = 200
 
 _FRONTMATTER: Final = re.compile(
     r"\A---[ \t]*\r?\n(?:(?P<block>.*?)\r?\n)?---[ \t]*(?:\r?\n|\Z)", re.DOTALL
@@ -148,19 +155,38 @@ def _file_denial(name: str) -> str | None:
     return None if name.endswith(MARKDOWN_SUFFIX) else "not_markdown"
 
 
+def scalar_text(value: object) -> str:
+    """*value* as text if it is a short plain scalar, else an empty string.
+
+    Frontmatter comes from a file that may be hostile: a YAML alias can make a list
+    that is tiny in memory and gigabytes once printed. Only a string, number or bool of
+    at most ``MAX_SCALAR_CHARS`` characters is ever turned into text; a list, a
+    mapping, ``None`` or something long is not.
+    """
+    if isinstance(value, str):
+        return value if len(value) <= MAX_SCALAR_CHARS else ""
+    if isinstance(value, (bool, int, float)):
+        return str(value)
+    return ""
+
+
 def _normalise_tag(value: object) -> str:
-    """Lower-case a tag and drop a leading ``#``."""
-    return str(value).strip().lstrip("#").strip().lower()
+    """Lower-case a tag and drop a leading ``#``; empty when it is not plain text."""
+    return scalar_text(value).strip().lstrip("#").strip().lower()
 
 
 def tags_of(frontmatter: Mapping[str, object]) -> list[str]:
-    """The note's tags, lower-cased and without ``#``, from a YAML list or a string."""
+    """The note's tags, lower-cased and without ``#``, from a YAML list or a string.
+
+    Items that are not short plain scalars (nested lists, mappings, very long text)
+    are dropped.
+    """
     raw = frontmatter.get("tags")
-    if isinstance(raw, str):
-        return [_normalise_tag(raw)]
-    if isinstance(raw, (list, tuple)):
-        return [_normalise_tag(tag) for tag in raw if tag is not None]
-    return []
+    items = [raw] if isinstance(raw, str) else raw
+    if not isinstance(items, (list, tuple)):
+        return []
+    tags = (_normalise_tag(tag) for tag in items)
+    return [tag for tag in tags if tag]
 
 
 def exclusion_reason(frontmatter: Mapping[str, object]) -> str | None:
@@ -169,10 +195,10 @@ def exclusion_reason(frontmatter: Mapping[str, object]) -> str | None:
     Navigation types come back as ``type:<name>``; planned stubs (a ``planned`` tag or
     ``depth: planned``) as ``planned``. The builder records a count per reason.
     """
-    note_type = str(frontmatter.get("type") or "").strip().lower()
+    note_type = scalar_text(frontmatter.get("type")).strip().lower()
     if note_type in EXCLUDED_TYPES:
         return f"type:{note_type}"
-    depth = str(frontmatter.get("depth") or "").strip().lower()
+    depth = scalar_text(frontmatter.get("depth")).strip().lower()
     if depth == PLANNED or PLANNED in tags_of(frontmatter):
         return PLANNED
     return None
@@ -199,8 +225,9 @@ def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
     """Split a note into its YAML frontmatter mapping and the body.
 
     Raises:
-        FrontmatterError: When the opening fence has no closing one, or the YAML does
-            not parse into a mapping.
+        FrontmatterError: When the opening fence has no closing one, the block is
+            over ``MAX_FRONTMATTER_CHARS``, or the YAML does not parse into a mapping
+            (including YAML nested too deeply to parse).
     """
     text_no_bom = text.removeprefix(BOM)
     if not re.match(r"---[ \t]*\r?\n", text_no_bom):
@@ -208,9 +235,12 @@ def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
     match = _FRONTMATTER.match(text_no_bom)
     if match is None:
         raise FrontmatterError("frontmatter is never closed")
+    block = match.group("block") or ""
+    if len(block) > MAX_FRONTMATTER_CHARS:
+        raise FrontmatterError("frontmatter is too large")
     try:
-        loaded = yaml.safe_load(match.group("block") or "")
-    except (yaml.YAMLError, ValueError) as exc:
+        loaded = yaml.safe_load(block)
+    except (yaml.YAMLError, ValueError, RecursionError, MemoryError) as exc:
         raise FrontmatterError("frontmatter is not valid YAML") from exc
     if loaded is None:
         loaded = {}
@@ -221,13 +251,21 @@ def split_frontmatter(text: str) -> tuple[dict[str, object], str]:
     ]
 
 
+def _is_regular_file(path: str) -> bool:
+    """Whether *path* is a regular file itself: not a symlink, FIFO, socket or device."""
+    try:
+        return stat.S_ISREG(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
 def _allowed_files(dirpath: str, prefix: str, filenames: list[str]) -> list[str]:
     """Relative paths of the regular, allowed files listed in one directory."""
     rel_paths = [f"{prefix}{name}" for name in filenames]
     return [
         rel
         for rel, name in zip(rel_paths, filenames, strict=True)
-        if not os.path.islink(os.path.join(dirpath, name)) and not is_denied_path(rel)
+        if not is_denied_path(rel) and _is_regular_file(os.path.join(dirpath, name))
     ]
 
 
@@ -243,9 +281,35 @@ def _walk_allowed(root: str) -> list[str]:
     return sorted(found)
 
 
-def _load_note(root: str, rel_path: str) -> VaultNote:
-    """Read one allowed note, turning a read or parse failure into an exclusion."""
-    raw = Path(root, rel_path).read_bytes()
+def _open_regular(path: str) -> int | None:
+    """Open *path* for reading unless it is, by now, anything but a regular file.
+
+    The walk already checked, but a file can be swapped for a FIFO in between; opening
+    without blocking and looking at the open descriptor leaves no window.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        return None
+    return fd
+
+
+def _load_note(root: str, rel_path: str) -> VaultNote | None:
+    """Read one allowed note, turning a read or parse failure into an exclusion.
+
+    Returns ``None`` for a file that is not a regular file when opened.
+    """
+    fd = _open_regular(os.path.join(root, rel_path))
+    if fd is None:
+        return None
+    with os.fdopen(fd, "rb") as handle:
+        raw = handle.read(MAX_NOTE_BYTES + 1)
+    if len(raw) > MAX_NOTE_BYTES:
+        return VaultNote(rel_path, "", hashlib.sha256(b"").hexdigest(), {}, TOO_LARGE)
     digest = hashlib.sha256(raw).hexdigest()
     try:
         text = raw.decode("utf-8")
@@ -261,9 +325,13 @@ def _load_note(root: str, rel_path: str) -> VaultNote:
 def iter_vault_notes(root: os.PathLike[str] | str) -> Iterator[VaultNote]:
     """Yield every allowed note under *root* in path order, never following symlinks.
 
-    Denied paths are skipped without being opened. Excluded notes are still yielded,
-    with their ``exclusion_reason`` set, so the builder can count them per reason.
+    Denied paths are skipped without being opened, and so is anything that is not a
+    regular file. Excluded notes are still yielded, with their ``exclusion_reason``
+    set, so the builder can count them per reason; a note over ``MAX_NOTE_BYTES`` is
+    one of them, with no text.
     """
     base = os.fspath(root)
     for rel_path in _walk_allowed(base):
-        yield _load_note(base, rel_path)
+        note = _load_note(base, rel_path)
+        if note is not None:
+            yield note

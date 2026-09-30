@@ -4,6 +4,7 @@ Usage::
 
     python backend/scripts/eval_priest_retrieval.py [--index-dir DIR ...]
         [--gold FILE] [--report FILE] [--ollama-url URL] [--use-tradition]
+        [--top-k N]
 
 For each index it reports recall@3/6/10, MRR and latency p50/p95 for the three modes,
 scores the "is this covered?" decision (precision, recall and F1 of *not covered*), and
@@ -15,6 +16,13 @@ each note once. Recall@k is the share of a question's expected notes among the f
 notes; MRR is the mean of 1 / (rank of the first expected note), over the in-scope
 questions. Latency is the cost of one retrieval in that mode: BM25 alone, query
 embedding plus cosine for dense, and the production ``Retriever`` for hybrid.
+
+Hybrid is scored at what the app returns: ``--top-k`` chunks (default
+``PRIEST_TOP_K``), at most two per note, so a handful of distinct notes. A second,
+deeper hybrid figure (30 chunks) is reported beside it, labelled, for comparison with
+earlier reports; it flatters the app, which never shows that many. The gate is judged
+on the configured floors. The calibrated floors are fitted on the same questions they
+are scored on, so their F1 is in-sample: a description of the data, not a forecast.
 
 It skips, exit code 0, when an index is missing or unusable or Ollama cannot be
 reached, so it is safe in a scheduled job on a machine without either. Real problems
@@ -88,14 +96,18 @@ RECALL_KS: Final = (3, 6, 10)
 RANK_DEPTH: Final = max(RECALL_KS)
 # The retriever takes this many hits from each side before fusing (its _SIDE_DEPTH).
 SIDE_DEPTH: Final = 30
-# Fusion order does not depend on top_k, so a deep run gives the same first k notes
-# the app would show at its own top_k.
-HYBRID_TOP_K: Final = SIDE_DEPTH
+# The deep hybrid figure asks for this many chunks. The app returns its ``top_k`` (6 by
+# default) chunks, at most two per note, which is 3 to 6 distinct notes; the deep run is
+# only a comparison with the numbers of earlier reports, not what a user is shown.
+HYBRID_DEEP_TOP_K: Final = SIDE_DEPTH
+DEEP_MODE: Final = "hybrid_deep"
 # The largest values priest_config accepts; a floor this high switches its side off.
 DENSE_DISABLED: Final = 1.0
 BM25_DISABLED: Final = 1000.0
 _DENSE_DIGITS: Final = 3
 _BM25_DIGITS: Final = 2
+# What the app returns when PRIEST_TOP_K is not set.
+APP_TOP_K: Final = 6
 GATE_RECALL_AT_6: Final = 0.85
 GATE_NOT_COVERED_F1: Final = 0.85
 SCHEMA_VERSION: Final = 1
@@ -388,12 +400,19 @@ class ModeMetrics:
 
 @dataclass(frozen=True)
 class IndexEvaluation:
-    """Everything measured for one index."""
+    """Everything measured for one index.
+
+    ``modes`` holds BM25, dense and hybrid at the app's ``top_k``; ``hybrid_deep`` is
+    hybrid at 30 chunks. ``calibration`` is fitted on the same questions it is scored
+    on (in-sample); ``configured`` is what the floors in the settings actually do.
+    """
 
     version: str
     embed_model: str
     chunk_count: int
+    top_k: int
     modes: dict[str, ModeMetrics]
+    hybrid_deep: ModeMetrics
     configured_floors: tuple[float, float]
     configured: NotCoveredScores
     calibration: Calibration
@@ -493,10 +512,14 @@ async def evaluate_index(
     *,
     dense_floor: float,
     bm25_floor: float,
+    top_k: int = APP_TOP_K,
     use_tradition: bool = False,
     clock: Callable[[], float] = time.perf_counter,
 ) -> IndexEvaluation:
     """Run the three modes over *gold* against the active index.
+
+    Hybrid runs at *top_k*, as the app does, and once more at 30 chunks for the
+    labelled deep figure.
 
     Raises:
         PriestIndexError: If retrieval fails (an embedding error, a wrong dimension).
@@ -505,15 +528,18 @@ async def evaluate_index(
     loaded = active.get()
     bm25 = Bm25Index(loaded.chunks)
     retriever = Retriever(
+        active, embedder, dense_floor=dense_floor, bm25_floor=bm25_floor, top_k=top_k
+    )
+    deep = Retriever(
         active,
         embedder,
         dense_floor=dense_floor,
         bm25_floor=bm25_floor,
-        top_k=HYBRID_TOP_K,
+        top_k=HYBRID_DEEP_TOP_K,
     )
     await retriever.retrieve(gold[0].question, None)  # warm-up: BM25 build, model info
-    rankings: dict[str, list[list[str]]] = {mode: [] for mode in MODES}
-    latencies: dict[str, list[float]] = {mode: [] for mode in MODES}
+    rankings: dict[str, list[list[str]]] = {mode: [] for mode in (*MODES, DEEP_MODE)}
+    latencies: dict[str, list[float]] = {mode: [] for mode in (*MODES, DEEP_MODE)}
     score_rows: list[ScoreRow] = []
     predicted: list[bool] = []
     for question in gold:
@@ -540,11 +566,19 @@ async def evaluate_index(
             note_ranking([rc.chunk.note_path for rc in result.chunks], RANK_DEPTH)
         )
         latencies["hybrid"].append(ms)
+        found_deep, ms = await _timed(
+            clock, deep.retrieve(question.question, traditions)
+        )
+        rankings[DEEP_MODE].append(
+            note_ranking([rc.chunk.note_path for rc in found_deep.chunks], RANK_DEPTH)
+        )
+        latencies[DEEP_MODE].append(ms)
         score_rows.append(
             ScoreRow(result.best_dense, result.best_bm25, question.expected_covered)
         )
         predicted.append(result.covered)
     modes = {m: _mode_metrics(rankings[m], latencies[m], gold) for m in MODES}
+    deep_metrics = _mode_metrics(rankings[DEEP_MODE], latencies[DEEP_MODE], gold)
     missed = tuple(
         q.id
         for q, ranking in zip(gold, rankings["hybrid"], strict=True)
@@ -554,7 +588,9 @@ async def evaluate_index(
         version=loaded.manifest.version,
         embed_model=loaded.manifest.embed_model,
         chunk_count=len(loaded.chunks),
+        top_k=top_k,
         modes=modes,
+        hybrid_deep=deep_metrics,
         configured_floors=(dense_floor, bm25_floor),
         configured=not_covered_scores(predicted, [q.expected_covered for q in gold]),
         calibration=calibrate_floors(score_rows),
@@ -587,6 +623,8 @@ def _scores_json(
 def _calibrated_scores(evaluation: IndexEvaluation) -> dict[str, object]:
     c = evaluation.calibration
     return {
+        # Fitted on the questions it is scored on; never a held-out figure.
+        "in_sample": True,
         "dense_floor": c.dense_floor,
         "bm25_floor": c.bm25_floor,
         "precision": c.precision,
@@ -605,21 +643,24 @@ def _latency_json(stats: LatencyStats) -> dict[str, float | int]:
     }
 
 
+def _mode_json(m: ModeMetrics) -> dict[str, object]:
+    return {
+        **{f"recall@{k}": m.recall[k] for k in RECALL_KS},
+        "mrr": m.mrr,
+        "latency_ms": _latency_json(m.latency),
+    }
+
+
 def evaluation_json(evaluation: IndexEvaluation) -> dict[str, object]:
     """One index's results as JSON-ready data: metrics and question ids only."""
-    modes = {
-        mode: {
-            **{f"recall@{k}": m.recall[k] for k in RECALL_KS},
-            "mrr": m.mrr,
-            "latency_ms": _latency_json(m.latency),
-        }
-        for mode, m in evaluation.modes.items()
-    }
+    modes = {mode: _mode_json(m) for mode, m in evaluation.modes.items()}
+    modes[DEEP_MODE] = _mode_json(evaluation.hybrid_deep)
     dense, bm25 = evaluation.configured_floors
     return {
         "index_version": evaluation.version,
         "embed_model": evaluation.embed_model,
         "chunk_count": evaluation.chunk_count,
+        "top_k": evaluation.top_k,
         "modes": modes,
         "not_covered": {
             "configured": _scores_json(evaluation.configured, dense, bm25),
@@ -648,9 +689,10 @@ def summary_json(
 
 
 def _gate(evaluation: IndexEvaluation) -> bool:
+    """Hybrid recall@6 at the app's top_k, and F1 of the configured floors."""
     return (
         evaluation.modes["hybrid"].recall[6] >= GATE_RECALL_AT_6
-        and evaluation.calibration.f1 >= GATE_NOT_COVERED_F1
+        and evaluation.configured.f1 >= GATE_NOT_COVERED_F1
     )
 
 
@@ -661,16 +703,25 @@ def _index_section(number: int, e: IndexEvaluation) -> list[str]:
         f"Version {e.version}, {e.chunk_count} chunks.",
         "",
     ]
-    rows = [_mode_row(mode, m) for mode, m in e.modes.items()]
+    rows = [_mode_row(_mode_label(mode, e.top_k), m) for mode, m in e.modes.items()]
+    rows.append(_mode_row(f"hybrid deep ({HYBRID_DEEP_TOP_K} chunks)", e.hybrid_deep))
     headers = ["mode", *(f"recall@{k}" for k in RECALL_KS), "MRR", "p50 ms", "p95 ms"]
     lines += markdown_table(headers, rows)
     c = e.calibration
     dense, bm25 = e.configured_floors
     scores = [
         _score_row("configured", dense, bm25, e.configured),
-        _score_row("calibrated", c.dense_floor, c.bm25_floor, e.calibration),
+        _score_row(
+            "calibrated (in-sample)", c.dense_floor, c.bm25_floor, e.calibration
+        ),
     ]
     lines += [
+        "",
+        (
+            f"Hybrid is scored on the {e.top_k} chunks the app returns (at most two per "
+            f"note); the deep row asks for {HYBRID_DEEP_TOP_K} and is for comparison "
+            "with earlier reports only."
+        ),
         "",
         "Not-covered detection (precision, recall and F1 of *not covered*):",
         "",
@@ -682,11 +733,16 @@ def _index_section(number: int, e: IndexEvaluation) -> list[str]:
     lines += [
         "",
         (
-            f"Gate [A] (hybrid recall@6 >= {GATE_RECALL_AT_6}, calibrated F1 >= "
+            f"Gate [A] (hybrid recall@6 >= {GATE_RECALL_AT_6}, configured F1 >= "
             f"{GATE_NOT_COVERED_F1}): {verdict}."
         ),
         "",
-        "Pin these settings for this index:",
+        (
+            "The calibrated row is fitted on the same questions it is scored on, so "
+            "its F1 is in-sample and optimistic; it is not part of the gate."
+        ),
+        "",
+        "Floors that fit these questions (in-sample; check them on new questions):",
         "",
         f"    PRIEST_EMBED_MODEL={e.embed_model}",
         f"    PRIEST_MIN_RELEVANCE_DENSE={c.dense_floor}",
@@ -698,10 +754,15 @@ def _index_section(number: int, e: IndexEvaluation) -> list[str]:
     return lines
 
 
-def _mode_row(mode: str, m: ModeMetrics) -> list[Scalar]:
+def _mode_label(mode: str, top_k: int) -> str:
+    """The table label of a mode; hybrid says how many chunks it was scored on."""
+    return f"hybrid (top {top_k} chunks)" if mode == "hybrid" else mode
+
+
+def _mode_row(label: str, m: ModeMetrics) -> list[Scalar]:
     """One row of the per-mode table: recall at each k, MRR and latency."""
     return [
-        mode,
+        label,
         *(round(m.recall[k], 3) for k in RECALL_KS),
         round(m.mrr, 3),
         round(m.latency.p50, 1),
@@ -731,7 +792,7 @@ def _comparison_row(number: int, e: IndexEvaluation) -> list[Scalar]:
         e.embed_model,
         round(hybrid.recall[6], 3),
         round(hybrid.mrr, 3),
-        round(e.calibration.f1, 3),
+        round(e.configured.f1, 3),
         round(hybrid.latency.p95, 1),
     ]
 
@@ -766,7 +827,7 @@ def render_report(
                 "embed model",
                 "hybrid recall@6",
                 "hybrid MRR",
-                "calibrated F1",
+                "configured F1",
                 "hybrid p95 ms",
             ],
             rows,
@@ -798,6 +859,12 @@ def _parse_args(argv: Sequence[str] | None) -> argparse.Namespace:
     parser.add_argument("--report", type=Path, default=DEFAULT_REPORT)
     parser.add_argument("--ollama-url", default=settings.OLLAMA_BASE_URL)
     parser.add_argument("--use-tradition", action="store_true")
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=settings.PRIEST_TOP_K,
+        help="chunks the hybrid run returns, as the app does (default: PRIEST_TOP_K)",
+    )
     parser.add_argument(
         "--dense-floor", type=float, default=settings.PRIEST_MIN_RELEVANCE_DENSE
     )
@@ -838,6 +905,7 @@ async def _evaluate_one(
                 gold,
                 dense_floor=args.dense_floor,
                 bm25_floor=args.bm25_floor,
+                top_k=args.top_k,
                 use_tradition=args.use_tradition,
             )
         except (PriestIndexError, ValueError) as exc:
@@ -908,7 +976,9 @@ async def _run(args: argparse.Namespace, factory: EmbedderFactory) -> int:
         c = evaluation.calibration
         sys.stdout.write(
             f"{evaluation.embed_model}: hybrid recall@6 "
-            f"{evaluation.modes['hybrid'].recall[6]:.3f}, calibrated not-covered F1 {c.f1:.3f}\n"
+            f"{evaluation.modes['hybrid'].recall[6]:.3f} (top {evaluation.top_k} chunks), "
+            f"configured not-covered F1 {evaluation.configured.f1:.3f}, "
+            f"calibrated F1 {c.f1:.3f} (in-sample)\n"
             f"PRIEST_MIN_RELEVANCE_DENSE={c.dense_floor} PRIEST_MIN_RELEVANCE_BM25={c.bm25_floor}\n"
         )
     sys.stdout.write("wrote " + ", ".join(str(p) for p in written) + "\n")

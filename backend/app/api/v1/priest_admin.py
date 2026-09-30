@@ -5,9 +5,9 @@ Every route needs an ``admin`` session or the legacy ``X-Admin-Api-Key`` (see
 or an answer: the index view is counts and hashes, health is reachability only, usage
 is suppressed counts, and the report is whatever summary the eval scripts wrote.
 
-Reindex and activate are audited for a named session; the shared key names nobody, so
-it gets no row. ``audit_service.record`` commits, so it is always the last database
-call, after the change it accounts for.
+Reindex and activate are audited, by name for a session and under the label
+``admin-api-key`` for the shared key, which names nobody. ``audit_service.record``
+commits, so it is always the last database call, after the change it accounts for.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -40,9 +41,8 @@ from app.models.audit_event import AuditAction
 from app.models.user import User
 from app.priest import build_status, index_store, metrics, priest_config
 from app.priest.build_status import BuildState, BuildStatus
-from app.priest.index_store import ActiveIndex, IndexManifest
+from app.priest.index_store import IndexManifest
 from app.services import audit_service, insights_service, themes_endpoint
-from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,6 @@ _VERSION_PATTERN: Final = r"^[0-9A-Za-z][0-9A-Za-z._-]*$"
 _MAX_VERSION_CHARS: Final = 64
 
 BuilderLauncher = Callable[[], int]
-
-# One loader per index root, so the admin view reloads only when ACTIVE moves.
-_loaders: dict[Path, ActiveIndex] = {}
 
 
 # ── Response and request models ──────────────────────────────────────────
@@ -193,16 +190,31 @@ class ReportResponse(BaseModel):
 # ── Dependencies ─────────────────────────────────────────────────────────
 
 
+_MODEL_NAME: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,99}$")
+
+
+def _builder_env() -> dict[str, str]:
+    """This process's environment with the live embedding model set, if it is a safe name."""
+    env = os.environ.copy()
+    model = priest_config.embed_model()
+    if _MODEL_NAME.match(model):
+        env["PRIEST_EMBED_MODEL"] = model
+    else:
+        env.pop("PRIEST_EMBED_MODEL", None)
+    return env
+
+
 def spawn_builder() -> int:
     """Start the index builder as a detached process and return its pid.
 
     No shell and no arguments from a request; output is discarded because the builder
-    reports through its status file; the environment is a copy of this process's.
+    reports through its status file; the environment is a copy of this process's, plus
+    the embedding model the dashboard shows (the builder has no dashboard settings).
     """
     process = subprocess.Popen(
         [sys.executable, "-m", _BUILDER_MODULE],
         cwd=_BACKEND_DIR,
-        env=os.environ.copy(),
+        env=_builder_env(),
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -265,11 +277,9 @@ def _summary(manifest: IndexManifest) -> ManifestSummary:
 
 def _active_manifest(root: Path) -> IndexManifest | None:
     """The active version's manifest, or ``None`` if there is none or it is unusable."""
-    loader = _loaders.get(root)
-    if loader is None:
-        loader = _loaders[root] = ActiveIndex(root)
+    # The loader the Guide itself uses, so this view adds no second copy of the index.
     try:
-        return loader.get().manifest
+        return index_store.shared_active_index(root).get().manifest
     except PriestIndexError:
         return None
 
@@ -347,14 +357,14 @@ async def start_reindex(
     started_at = datetime.now(timezone.utc).isoformat()
     _launch(launch, root, started_at)
     response = ReindexResponse(state="running", started_at=started_at)
-    if actor is not None:
-        # Last database call: it commits, so nothing after it may fail.
-        await audit_service.record(
-            session,
-            actor=actor,
-            action=AuditAction.priest_reindex,
-            source_ip=audit_service.client_ip(request),
-        )
+    # Last database call: it commits, so nothing after it may fail.
+    await audit_service.record(
+        session,
+        actor=actor,
+        actor_label=None if actor else audit_service.ADMIN_KEY_ACTOR_LABEL,
+        action=AuditAction.priest_reindex,
+        source_ip=audit_service.client_ip(request),
+    )
     return response
 
 
@@ -387,22 +397,26 @@ async def activate_version(
     if body.version not in await asyncio.to_thread(index_store.list_versions, root):
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="version_not_found")
     try:
-        await asyncio.to_thread(index_store.activate, root, body.version)
+        await asyncio.to_thread(index_store.activate_exclusive, root, body.version)
+    except index_store.IndexBusyError as exc:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT, detail="build_in_progress"
+        ) from exc
     except PriestIndexError as exc:
         raise HTTPException(
             status.HTTP_409_CONFLICT, detail="version_not_loadable"
         ) from exc
     logger.info("priest index %s activated", body.version)
     response = ActivateResponse(active_version=body.version)
-    if actor is not None:
-        # Last database call: it commits, so nothing after it may fail.
-        await audit_service.record(
-            session,
-            actor=actor,
-            action=AuditAction.priest_activate,
-            source_ip=audit_service.client_ip(request),
-            detail=body.version,
-        )
+    # Last database call: it commits, so nothing after it may fail.
+    await audit_service.record(
+        session,
+        actor=actor,
+        actor_label=None if actor else audit_service.ADMIN_KEY_ACTOR_LABEL,
+        action=AuditAction.priest_activate,
+        source_ip=audit_service.client_ip(request),
+        detail=body.version,
+    )
     return response
 
 
@@ -454,7 +468,9 @@ async def _chat_health(
 
 def _embedder_base() -> str | None:
     """The Ollama address to probe, or ``None`` if it is malformed or a hosted API."""
-    raw = get_config("OLLAMA_BASE_URL", settings.OLLAMA_BASE_URL).strip()
+    # The environment's address, as the embedder and the index build use it; the live
+    # (dashboard) layer would make this badge describe a server nothing talks to.
+    raw = settings.OLLAMA_BASE_URL.strip()
     try:
         base, host, _ = themes_endpoint._validated_base(raw)
     except ThemesEndpointError:

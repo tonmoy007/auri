@@ -11,6 +11,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
+import threading
 from pathlib import Path
 
 import numpy as np
@@ -273,8 +274,10 @@ def titles(result: object) -> list[str]:
     ("raw", "folded"),
     [
         ("Kisā Gotamī", "kisa gotami"),
-        ("Aša", "asa"),
-        ("Činvat", "cinvat"),
+        ("Aša", "asha"),
+        ("Činvat", "chinvat"),
+        ("Ṛgveda", "rigveda"),
+        ("Śiva", "shiva"),
         ("CAFÉ", "cafe"),
         ("Straße", "strasse"),
         ("plain", "plain"),
@@ -284,6 +287,39 @@ def titles(result: object) -> list[str]:
 def test_fold_strips_marks_and_case(raw: str, folded: str) -> None:
     # Act / Assert
     assert fold(raw) == folded
+
+
+@pytest.mark.parametrize(
+    ("written", "indexed"),
+    [
+        ("Qur'an", "Quran"),
+        ("Qur\u02beān", "Quran"),
+        ("Qur\u2019an", "Qur'an"),
+        ("\u02bf\u0100\u02bfisha", "Aisha"),
+        ("Aša", "Asha"),
+        ("Činvat", "Chinvat"),
+        ("Ṛgveda", "Rigveda"),
+        ("Śiva", "Shiva"),
+        ("Zarathustra's", "Zarathustra"),
+    ],
+)
+def test_bm25_matches_transliteration_variants_either_way(
+    written: str, indexed: str
+) -> None:
+    # Arrange
+    for in_note, in_question in ((written, indexed), (indexed, written)):
+        index = Bm25Index(_chunks(f"the story of {in_note} in brief", "other words"))
+
+        # Act
+        hits = index.search(f"tell me about {in_question}", k=3)
+
+        # Assert
+        assert [row for row, _ in hits] == [0], (in_note, in_question)
+
+
+def test_fold_is_the_same_for_composed_and_decomposed_digraph_letters() -> None:
+    # Arrange: š as one code point, and as s plus a combining caron
+    assert fold("A\u0161a") == fold("As\u030ca") == "asha"
 
 
 def test_fold_handles_text_already_in_decomposed_form() -> None:
@@ -302,7 +338,13 @@ def test_fold_handles_text_already_in_decomposed_form() -> None:
         ("chapter 30.3 says", ["chapter", "30.3", "says"]),
         ("Genesis 1:1-3", ["genesis", "1:1", "3"]),
         ("in 2023. Then", ["in", "2023", "then"]),
-        ("snake_case and o'clock", ["snake", "case", "and", "o", "clock"]),
+        ("snake_case and o'clock", ["snake", "case", "and", "oclock"]),
+        ("Qur'an, Qur\u2019an and Qur\u02beān", ["quran", "quran", "and", "quran"]),
+        (
+            "Zarathustra's hymns, Aisha\u2019s story",
+            ["zarathustra", "hymns", "aisha", "story"],
+        ),
+        ("\u02bf\u0100\u02bfisha", ["aisha"]),
         ("", []),
         ("...", []),
     ],
@@ -439,6 +481,34 @@ def test_bm25_over_nothing_finds_nothing() -> None:
     assert Bm25Index(_chunks("apple")).search("apple", k=0) == []
 
 
+def test_coverage_score_sums_only_the_best_matching_terms() -> None:
+    # Arrange
+    index = Bm25Index(
+        _chunks("alpha beta gamma delta epsilon zeta", "unrelated words here")
+    )
+    query = "alpha beta gamma delta epsilon zeta"
+
+    # Act
+    everything = index.search(query, k=1)[0][1]
+    capped = index.coverage_score(query, [0, 1], max_terms=2)
+    uncapped = index.coverage_score(query, [0, 1], max_terms=10)
+
+    # Assert
+    assert uncapped == pytest.approx(everything)
+    assert 0 < capped < uncapped
+
+
+def test_coverage_score_only_looks_at_the_given_rows() -> None:
+    # Arrange
+    index = Bm25Index(_chunks("apple pear", "apple", "pear"))
+
+    # Act / Assert
+    assert index.coverage_score("apple", [2], max_terms=4) == 0.0
+    assert index.coverage_score("apple", [1], max_terms=4) > 0.0
+    assert index.coverage_score("apple", [], max_terms=4) == 0.0
+    assert index.coverage_score("how do I", [0], max_terms=4) == 0.0
+
+
 # ── Reciprocal rank fusion ──────────────────────────────────────────────
 
 
@@ -551,11 +621,13 @@ async def test_a_near_duplicate_pair_collapses_to_one(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_two_notes_with_the_same_folded_title_collapse(tmp_path: Path) -> None:
+async def test_two_notes_with_the_same_folded_title_in_one_folder_collapse(
+    tmp_path: Path,
+) -> None:
     # Arrange: different files, orthogonal vectors, titles equal once folded
     rows = [
         (chunk(0, KISA, "first telling", path="stories/a.md"), axis(1)),
-        (chunk(1, "Kisa Gotami", "second telling", path="figures/b.md"), axis(2)),
+        (chunk(1, "Kisa Gotami", "second telling", path="stories/b.md"), axis(2)),
         (chunk(2, "Unrelated", "nothing to see", path="stories/c.md"), axis(3)),
     ]
     retriever = make_retriever(build_active(tmp_path, rows))
@@ -565,6 +637,67 @@ async def test_two_notes_with_the_same_folded_title_collapse(tmp_path: Path) -> 
 
     # Assert
     assert len([t for t in titles(result) if t.startswith("Kis")]) == 1
+
+
+@pytest.mark.asyncio
+async def test_a_transliterated_title_collapses_through_the_shared_fold(
+    tmp_path: Path,
+) -> None:
+    # Arrange: Aša and Asha are the same title once folded, with unrelated vectors
+    rows = [
+        (chunk(0, "Aša", "first telling", path="concepts/a.md"), axis(1)),
+        (chunk(1, "Asha", "second telling", path="concepts/b.md"), axis(2)),
+        (chunk(2, "Unrelated", "nothing to see", path="concepts/c.md"), axis(3)),
+    ]
+    retriever = make_retriever(build_active(tmp_path, rows))
+
+    # Act
+    result = await retriever.retrieve("telling", None)
+
+    # Assert
+    assert len([t for t in titles(result) if t in {"Aša", "Asha"}]) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_titled_notes_in_different_folders_are_both_kept(
+    tmp_path: Path,
+) -> None:
+    # Arrange: a figure note and a story note that share a name, unrelated vectors
+    rows = [
+        (chunk(0, "Overview", "the person", path="figures/overview.md"), axis(1)),
+        (chunk(1, "Overview", "the tale", path="stories/overview.md"), axis(2)),
+    ]
+    retriever = make_retriever(build_active(tmp_path, rows))
+
+    # Act
+    result = await retriever.retrieve("person tale", None)
+
+    # Assert
+    assert sorted(r.chunk.note_path for r in result.chunks) == [
+        "figures/overview.md",
+        "stories/overview.md",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_same_titled_notes_in_different_folders_collapse_when_also_similar(
+    tmp_path: Path,
+) -> None:
+    # Arrange: same title, different folders, cosine 0.9 (above the title-twin bar)
+    rows = [
+        (chunk(0, "Overview", "the person", path="figures/overview.md"), axis(1)),
+        (
+            chunk(1, "Overview", "the tale", path="stories/overview.md"),
+            mix((1, 1.0), (2, 0.4)),
+        ),
+    ]
+    retriever = make_retriever(build_active(tmp_path, rows))
+
+    # Act
+    result = await retriever.retrieve("person tale", None)
+
+    # Assert
+    assert len(result.chunks) == 1
 
 
 @pytest.mark.asyncio
@@ -770,6 +903,144 @@ async def test_the_same_question_gives_the_same_answer_every_time(
     assert first == second
 
 
+# ── Coverage decision ───────────────────────────────────────────────────
+
+
+def _filler_rows(count: int, *, start: int = 20) -> list[Row]:
+    """Chunks that share no word with the coverage tests' questions."""
+    return [
+        (chunk(start + i, f"Filler {i}", f"plain filler text number {i}"), axis(i))
+        for i in range(count)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_long_rambling_question_does_not_cover_itself_by_adding_up_words(
+    tmp_path: Path,
+) -> None:
+    # Arrange: one long chunk holds six moderately common words the question
+    # happens to use; no single one is a real match
+    words = ["river", "stone", "garden", "window", "lantern", "meadow"]
+    rows = [
+        (chunk(0, "Long Chunk", " ".join(words) + " and more about the day"), axis(1)),
+        *[
+            (
+                chunk(1 + i, f"Other {i}", f"{words[i % 6]} {words[(i + 1) % 6]} text"),
+                axis(2 + i),
+            )
+            for i in range(12)
+        ],
+        *_filler_rows(20),
+    ]
+    question = (
+        "I walked by the river and a stone near the garden past a window "
+        "with a lantern across the meadow, so what should I do about my boss"
+    )
+    raw_best = Bm25Index([c for c, _ in rows]).search(question, 1)[0][1]
+    floor = raw_best * 0.9
+    retriever = make_retriever(
+        build_active(tmp_path, rows), bm25_floor=floor, dense_floor=1.1
+    )
+
+    # Act
+    result = await retriever.retrieve(question, None)
+
+    # Assert: the raw sum clears the floor, the length-robust score does not
+    assert raw_best >= floor
+    assert result.best_bm25 < floor
+    assert result.covered is False
+
+
+@pytest.mark.asyncio
+async def test_a_short_question_with_a_rare_name_is_still_covered(
+    tmp_path: Path,
+) -> None:
+    # Arrange: two rare words matching one chunk clear a floor a single common word
+    # would not
+    rows = [
+        (chunk(0, "Story", "zzqx and qqvw meet"), axis(1)),
+        *_filler_rows(20),
+    ]
+    raw_best = Bm25Index([c for c, _ in rows]).search("zzqx qqvw", 1)[0][1]
+    retriever = make_retriever(
+        build_active(tmp_path, rows), bm25_floor=raw_best * 0.95, dense_floor=1.1
+    )
+
+    # Act
+    result = await retriever.retrieve("zzqx qqvw", None)
+
+    # Assert
+    assert result.covered is True
+    assert result.best_bm25 == pytest.approx(raw_best)
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_that_drops_out_of_the_top_k_cannot_cover_the_question(
+    tmp_path: Path,
+) -> None:
+    # Arrange: row 0 alone holds the rare word, so BM25 ranks it first, but nine rows
+    # that sit in both ranked lists outrank it once the lists are fused
+    both = [
+        (
+            chunk(1 + i, f"Shared {i}", "river bank", path=f"s/{i}.md"),
+            mix((10 + i, 1.0), (60, 0.2)),
+        )
+        for i in range(9)
+    ]
+    rows = [
+        (chunk(0, "Rare Holder", "zzqx", path="s/rare.md"), axis(5)),
+        *both,
+        *_filler_rows(30),
+    ]
+    question = "zzqx river"
+    # row 0 is also pushed out of the dense top 30, so only BM25 knows it
+    embedder = FakeEmbedder({question: mix((60, 1.0), (5, -0.3))})
+    raw_best = Bm25Index([c for c, _ in rows]).search(question, 1)[0][1]
+    retriever = make_retriever(
+        build_active(tmp_path, rows),
+        embedder,
+        top_k=6,
+        bm25_floor=raw_best * 0.9,
+        dense_floor=1.1,
+    )
+
+    # Act
+    result = await retriever.retrieve(question, None)
+
+    # Assert: row 0 set the raw best BM25 but is not among the six returned chunks
+    assert "Rare Holder" not in titles(result)
+    assert len(result.chunks) == 6
+    assert result.best_bm25 < raw_best * 0.9
+    assert result.covered is False
+
+
+@pytest.mark.asyncio
+async def test_a_chunk_that_makes_the_top_k_can_cover_the_question(
+    tmp_path: Path,
+) -> None:
+    # Arrange: the same rare word, but the chunk is also the dense favourite
+    rows = [
+        (chunk(0, "Rare Holder", "zzqx", path="s/rare.md"), mix((60, 1.0))),
+        *_filler_rows(10),
+    ]
+    question = "zzqx"
+    embedder = FakeEmbedder({question: mix((60, 1.0))})
+    raw_best = Bm25Index([c for c, _ in rows]).search(question, 1)[0][1]
+    retriever = make_retriever(
+        build_active(tmp_path, rows),
+        embedder,
+        bm25_floor=raw_best * 0.9,
+        dense_floor=1.1,
+    )
+
+    # Act
+    result = await retriever.retrieve(question, None)
+
+    # Assert
+    assert titles(result)[0] == "Rare Holder"
+    assert result.covered is True
+
+
 # ── Failures ────────────────────────────────────────────────────────────
 
 
@@ -893,6 +1164,79 @@ async def test_bm25_is_built_once_per_index_version(
     assert cached == 1
     assert len(builds) == 2
     assert result.index_version == V2
+
+
+# ── One load per request ────────────────────────────────────────────────
+
+
+class _SpyActive:
+    """Wraps a real ``ActiveIndex``; records calls and which thread made them."""
+
+    def __init__(self, inner: ActiveIndex) -> None:
+        self.inner = inner
+        self.gets = 0
+        self.digest_checks = 0
+        self.threads: list[int] = []
+
+    def get(self) -> LoadedIndex:
+        self.gets += 1
+        self.threads.append(threading.get_ident())
+        return self.inner.get()
+
+    def check_digest(self, current: EmbedModelInfo) -> None:
+        self.digest_checks += 1
+        self.inner.check_digest(current)
+
+
+@pytest.mark.asyncio
+async def test_a_request_loads_the_index_once_and_checks_that_same_load(
+    tmp_path: Path,
+) -> None:
+    # Arrange
+    spy = _SpyActive(build_active(tmp_path, base_corpus()))
+    retriever = Retriever(spy, FakeEmbedder(), dense_floor=0.5, bm25_floor=2.0, top_k=6)
+
+    # Act
+    await retriever.retrieve("Kisa Gotami", None)
+
+    # Assert: one get(), and no second get() hidden inside a separate digest check
+    assert spy.gets == 1
+    assert spy.digest_checks == 0
+
+
+@pytest.mark.asyncio
+async def test_the_digest_is_checked_against_the_index_that_was_loaded(
+    tmp_path: Path,
+) -> None:
+    # Arrange: a source whose own digest check would wrongly say yes
+    inner = build_active(tmp_path, base_corpus())
+
+    class Lying(_SpyActive):
+        def check_digest(self, current: EmbedModelInfo) -> None:
+            return None
+
+    embedder = FakeEmbedder(digest="sha256:a-different-model")
+    retriever = Retriever(
+        Lying(inner), embedder, dense_floor=0.5, bm25_floor=2.0, top_k=6
+    )
+
+    # Act / Assert
+    with pytest.raises(PriestIndexError):
+        await retriever.retrieve("Kisa Gotami", None)
+    assert embedder.queries == []
+
+
+@pytest.mark.asyncio
+async def test_the_blocking_load_runs_off_the_event_loop(tmp_path: Path) -> None:
+    # Arrange
+    spy = _SpyActive(build_active(tmp_path, base_corpus()))
+    retriever = Retriever(spy, FakeEmbedder(), dense_floor=0.5, bm25_floor=2.0, top_k=6)
+
+    # Act
+    await retriever.retrieve("Kisa Gotami", None)
+
+    # Assert
+    assert spy.threads and spy.threads[0] != threading.get_ident()
 
 
 # ── Privacy ─────────────────────────────────────────────────────────────

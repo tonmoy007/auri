@@ -33,6 +33,8 @@ MAX_DETAIL_CHARS = 500
 # Who the trail names for decisions made with the bot's shared moderation key:
 # the key identifies nobody, so this says so instead of inventing a person.
 BOT_ACTOR_LABEL = "telegram-bot"
+# Likewise for the legacy shared admin key (``X-Admin-Api-Key``), which names nobody.
+ADMIN_KEY_ACTOR_LABEL = "admin-api-key"
 
 
 def client_ip(request: Request) -> str | None:

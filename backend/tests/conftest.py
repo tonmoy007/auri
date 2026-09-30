@@ -14,6 +14,7 @@ from __future__ import annotations
 import sys
 from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -23,7 +24,7 @@ from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
 from app.models.user import User, UserRole
-from app.services import login_throttle
+from app.services import login_throttle, settings_service
 from app.services.auth_tokens import create_access_token
 from app.services.user_service import create_user
 from httpx import ASGITransport, AsyncClient
@@ -141,8 +142,18 @@ def _live_settings_objects() -> list[Settings]:
 
 
 @pytest.fixture(autouse=True)
+def isolate_live_settings_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give each test its own copy of the live (dashboard) settings layer.
+
+    ``PUT /admin/config`` writes into a process-wide dict; without this, a test that
+    sets a key (the Guide's kill switch, say) would change every test that runs after.
+    """
+    monkeypatch.setattr(settings_service, "_cache", dict(settings_service._cache))
+
+
+@pytest.fixture(autouse=True)
 def isolate_optional_endpoints(
-    set_setting: SettingPatcher, request: pytest.FixtureRequest
+    set_setting: SettingPatcher, request: pytest.FixtureRequest, tmp_path: Path
 ) -> None:
     """Blank the optional remote-model settings, whatever a developer's .env holds.
 
@@ -172,6 +183,12 @@ def isolate_optional_endpoints(
         ("CRISIS_HELPLINE_NAME", ""),
         ("CRISIS_HELPLINE_NUMBER", ""),
         ("CRISIS_EAP_CONTACT", ""),
+        # The Guide's files live in this test's own folder, never a developer's real
+        # index or vault; the documented Ollama defaults, whatever .env says.
+        ("PRIEST_INDEX_DIR", str(tmp_path / "priest-index")),
+        ("PRIEST_VAULT_DIR", str(tmp_path / "priest-vault")),
+        ("OLLAMA_BASE_URL", "http://localhost:11434"),
+        ("OLLAMA_MODEL", "llama3.2:3b"),
     ):
         set_setting(name, value)
 

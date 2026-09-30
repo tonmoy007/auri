@@ -6,6 +6,9 @@ files, so they must survive a crash, a half-written file and a dead builder.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 from app.priest import build_status
@@ -59,49 +62,152 @@ def test_a_status_with_an_unknown_state_reads_as_idle(tmp_path: Path) -> None:
     assert build_status.read(tmp_path).state is BuildState.idle
 
 
-def test_the_lock_is_exclusive_while_its_owner_is_alive(tmp_path: Path) -> None:
-    # Arrange
-    alive = lambda pid: True
-
+def test_the_lock_is_exclusive_while_it_is_held(tmp_path: Path) -> None:
     # Act
-    first = build_status.acquire_lock(tmp_path, pid=111, is_alive=alive)
-    second = build_status.acquire_lock(tmp_path, pid=222, is_alive=alive)
+    first = build_status.acquire_lock(tmp_path, pid=111)
+    second = build_status.acquire_lock(tmp_path, pid=222)
 
     # Assert
     assert first is True and second is False
+    assert build_status.lock_owner(tmp_path) == 111
 
 
-def test_a_lock_left_by_a_dead_builder_is_taken_over(tmp_path: Path) -> None:
+def test_the_lock_can_be_taken_again_after_it_is_released(tmp_path: Path) -> None:
     # Arrange
-    build_status.acquire_lock(tmp_path, pid=111, is_alive=lambda pid: True)
+    build_status.acquire_lock(tmp_path, pid=111)
+    build_status.release_lock(tmp_path, pid=111)
 
     # Act
-    taken = build_status.acquire_lock(tmp_path, pid=222, is_alive=lambda pid: False)
+    again = build_status.acquire_lock(tmp_path, pid=222)
 
     # Assert
-    assert taken is True
-    assert build_status.lock_owner(tmp_path) == 222
+    assert again is True and build_status.lock_owner(tmp_path) == 222
+
+
+def test_releasing_leaves_no_lock_file_behind(tmp_path: Path) -> None:
+    # Arrange
+    build_status.acquire_lock(tmp_path, pid=111)
+
+    # Act
+    build_status.release_lock(tmp_path, pid=111)
+
+    # Assert
+    assert not (tmp_path / build_status.LOCK_FILE).exists()
+    assert build_status.lock_owner(tmp_path) is None
 
 
 def test_releasing_only_removes_the_callers_own_lock(tmp_path: Path) -> None:
     # Arrange
-    build_status.acquire_lock(tmp_path, pid=111, is_alive=lambda pid: True)
+    build_status.acquire_lock(tmp_path, pid=111)
 
     # Act
     build_status.release_lock(tmp_path, pid=999)
     still_held = build_status.lock_owner(tmp_path)
+    second = build_status.acquire_lock(tmp_path, pid=222)
     build_status.release_lock(tmp_path, pid=111)
 
     # Assert
-    assert still_held == 111 and build_status.lock_owner(tmp_path) is None
+    assert still_held == 111 and second is False
+    assert build_status.lock_owner(tmp_path) is None
 
 
-def test_a_garbage_lock_file_counts_as_stale(tmp_path: Path) -> None:
+def test_a_lock_file_left_behind_by_a_crash_does_not_block(tmp_path: Path) -> None:
+    # Arrange: what a killed builder leaves; the kernel dropped its lock with it
+    (tmp_path / build_status.LOCK_FILE).write_text(f"{os.getpid()} flock")
+
+    # Act / Assert
+    assert build_status.lock_owner(tmp_path) is None
+    assert build_status.acquire_lock(tmp_path, pid=5) is True
+
+
+def test_a_reused_pid_in_a_stale_lock_file_does_not_keep_the_lock(
+    tmp_path: Path,
+) -> None:
+    # Arrange: the recorded pid belongs to some live, unrelated process
+    (tmp_path / build_status.LOCK_FILE).write_text("1 flock")
+
+    # Act / Assert
+    assert build_status.acquire_lock(tmp_path, pid=5, is_alive=lambda pid: True)
+
+
+def test_an_empty_or_garbage_lock_file_does_not_block(tmp_path: Path) -> None:
     # Arrange
     (tmp_path / build_status.LOCK_FILE).write_text("not a pid")
 
     # Act / Assert
     assert build_status.acquire_lock(tmp_path, pid=5, is_alive=lambda pid: True) is True
+
+
+def test_a_live_builder_of_the_previous_version_still_holds_the_lock(
+    tmp_path: Path,
+) -> None:
+    # Arrange: the old builder wrote a bare pid and held no kernel lock
+    (tmp_path / build_status.LOCK_FILE).write_text("4242")
+
+    # Act
+    taken = build_status.acquire_lock(tmp_path, pid=5, is_alive=lambda pid: True)
+
+    # Assert
+    assert taken is False
+    assert build_status.lock_owner(tmp_path, is_alive=lambda pid: True) == 4242
+
+
+def test_a_dead_builder_of_the_previous_version_is_taken_over(tmp_path: Path) -> None:
+    # Arrange
+    (tmp_path / build_status.LOCK_FILE).write_text("4242")
+
+    # Act
+    taken = build_status.acquire_lock(tmp_path, pid=5, is_alive=lambda pid: False)
+
+    # Assert
+    assert taken is True and build_status.lock_owner(tmp_path) == 5
+
+
+_HOLDER = """
+import sys, time
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from app.priest import build_status
+assert build_status.acquire_lock(Path(sys.argv[2]), pid=4321)
+print("held", flush=True)
+time.sleep(60)
+"""
+
+
+def test_the_kernel_drops_the_lock_when_its_holder_is_killed(tmp_path: Path) -> None:
+    # Arrange: another process takes the lock and is then killed without releasing
+    backend = str(Path(__file__).resolve().parents[1])
+    holder = subprocess.Popen(
+        [sys.executable, "-c", _HOLDER, backend, str(tmp_path)],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        assert holder.stdout is not None
+        assert holder.stdout.readline().strip() == "held"
+
+        # Act / Assert: refused while it lives, taken the moment it dies
+        assert build_status.acquire_lock(tmp_path, pid=5) is False
+        holder.kill()
+        holder.wait(timeout=30)
+        assert build_status.acquire_lock(tmp_path, pid=5) is True
+    finally:
+        holder.kill()
+        holder.wait(timeout=30)
+        if holder.stdout is not None:
+            holder.stdout.close()
+
+
+def test_a_reader_never_sees_a_half_written_lock_as_a_free_one(tmp_path: Path) -> None:
+    # Arrange: the file exists and is empty, as between create and the pid write
+    (tmp_path / build_status.LOCK_FILE).write_text("")
+    build_status.acquire_lock(tmp_path, pid=111)
+
+    # Act: a second taker while the first holds the kernel lock
+    second = build_status.acquire_lock(tmp_path, pid=222)
+
+    # Assert
+    assert second is False
 
 
 def test_a_running_builder_whose_process_died_is_reported_as_failed(

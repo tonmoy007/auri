@@ -11,19 +11,23 @@ import dataclasses
 import hashlib
 import os
 import shutil
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 
 import pytest
 from app.priest.schemas import TraditionId
 from app.priest.vault_rules import (
+    TOO_LARGE,
     TRADITION_MAP,
     FrontmatterError,
     VaultNote,
     exclusion_reason,
     is_denied_path,
     iter_vault_notes,
+    scalar_text,
     split_frontmatter,
+    tags_of,
     traditions_for,
 )
 
@@ -389,6 +393,137 @@ def test_iterator_never_follows_symlinks(vault: Path, tmp_path: Path) -> None:
     assert "linked-dir/Secret.md" not in rel_paths
     assert "concepts/Linked.md" not in rel_paths
     assert len(rel_paths) == 8
+
+
+# -- hostile frontmatter --------------------------------------------------------
+
+
+def _alias_bomb(levels: int = 5, width: int = 9) -> str:
+    """YAML whose aliases expand to ``width ** levels`` items if anyone prints them."""
+    lines = ["a0: &a0 [" + ", ".join(["x"] * width) + "]"]
+    for n in range(1, levels):
+        refs = ", ".join([f"*a{n - 1}"] * width)
+        lines.append(f"a{n}: &a{n} [{refs}]")
+    return "\n".join(lines)
+
+
+def test_deeply_nested_frontmatter_is_refused_not_a_crash() -> None:
+    # Arrange
+    text = "---\ntitle: " + "[" * 3000 + "]" * 3000 + "\n---\nBody"
+
+    # Act / Assert
+    with pytest.raises(FrontmatterError):
+        split_frontmatter(text)
+
+
+def test_oversized_frontmatter_is_refused() -> None:
+    # Arrange
+    text = "---\ntitle: " + "x" * 200_000 + "\n---\nBody"
+
+    # Act / Assert
+    with pytest.raises(FrontmatterError):
+        split_frontmatter(text)
+
+
+def test_an_alias_bomb_in_tags_is_ignored_without_being_expanded() -> None:
+    # Arrange
+    text = "---\n" + _alias_bomb() + "\ntags: *a4\ntype: *a4\n---\nBody"
+    frontmatter, _body = split_frontmatter(text)
+
+    # Act / Assert
+    assert tags_of(frontmatter) == []
+    assert exclusion_reason(frontmatter) is None
+
+
+def test_tags_that_are_not_plain_scalars_are_dropped() -> None:
+    # Arrange
+    frontmatter = {"tags": ["islam", ["nested", "list"], {"a": "b"}, 7, "x" * 500]}
+
+    # Act / Assert
+    assert tags_of(frontmatter) == ["islam", "7"]
+
+
+@pytest.mark.parametrize(
+    ("value", "text"),
+    [
+        ("Islam", "Islam"),
+        (42, "42"),
+        (True, "True"),
+        (3.5, "3.5"),
+        (["a"], ""),
+        ({"a": 1}, ""),
+        (None, ""),
+        ("y" * 5000, ""),
+    ],
+)
+def test_scalar_text_only_stringifies_short_plain_values(
+    value: object, text: str
+) -> None:
+    # Act / Assert
+    assert scalar_text(value) == text
+
+
+# -- unusual files ---------------------------------------------------------------
+
+
+def _collect_in_thread(vault: Path) -> list[VaultNote] | None:
+    """Run the iterator off-thread, so a read that never returns fails the test."""
+    found: list[list[VaultNote]] = []
+    worker = threading.Thread(
+        target=lambda: found.append(list(iter_vault_notes(vault))), daemon=True
+    )
+    worker.start()
+    worker.join(timeout=10)
+    return found[0] if found else None
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs mkfifo")
+def test_a_fifo_named_like_a_note_is_skipped_and_never_read(vault: Path) -> None:
+    # Arrange
+    os.mkfifo(vault / "concepts" / "Pipe.md")
+
+    # Act
+    notes = _collect_in_thread(vault)
+
+    # Assert
+    assert notes is not None, "the iterator hung on a FIFO"
+    assert "concepts/Pipe.md" not in [n.rel_path for n in notes]
+    assert len(notes) == 8
+
+
+def test_a_note_over_the_size_budget_is_excluded_without_being_parsed(
+    vault: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setattr("app.priest.vault_rules.MAX_NOTE_BYTES", 20_000)
+    (vault / "concepts" / "Huge.md").write_text(
+        "---\ntype: concept\n---\n" + "word " * 5000, encoding="utf-8"
+    )
+
+    # Act
+    notes = {n.rel_path: n for n in iter_vault_notes(vault)}
+
+    # Assert
+    huge = notes["concepts/Huge.md"]
+    assert huge.exclusion_reason == TOO_LARGE == "too_large"
+    assert huge.text == ""
+    assert notes["concepts/Sample Virtue.md"].exclusion_reason is None
+
+
+def test_deeply_nested_frontmatter_in_a_note_excludes_only_that_note(
+    vault: Path,
+) -> None:
+    # Arrange
+    (vault / "concepts" / "Deep.md").write_text(
+        "---\ntitle: " + "[" * 3000 + "]" * 3000 + "\n---\nBody", encoding="utf-8"
+    )
+
+    # Act
+    notes = {n.rel_path: n for n in iter_vault_notes(vault)}
+
+    # Assert
+    assert notes["concepts/Deep.md"].exclusion_reason == "bad_frontmatter"
+    assert len(notes) == 9
 
 
 def test_vault_note_is_frozen(vault: Path) -> None:

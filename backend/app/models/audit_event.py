@@ -38,6 +38,7 @@ class AuditAction(str, enum.Enum):
     themes_read = "themes.read"
     priest_reindex = "priest.reindex"
     priest_activate = "priest.activate"
+    config_write = "config.write"
 
 
 class ContentTier(str, enum.Enum):

@@ -461,6 +461,101 @@ def test_an_unforeseen_error_becomes_the_unexpected_code(
     assert "RuntimeError" in caplog.text
 
 
+# ── Hostile notes ───────────────────────────────────────────────────────
+
+
+def test_a_note_over_the_size_budget_is_left_out_not_fatal(
+    vault: Path, index_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setattr("app.priest.vault_rules.MAX_NOTE_BYTES", 20_000)
+    (vault / "concepts" / "Huge.md").write_text(
+        "---\ntype: concept\n---\n" + "word " * 5000, encoding="utf-8"
+    )
+
+    # Act
+    status = _build(vault, index_dir, FakeOllama())
+
+    # Assert
+    assert status.state is BuildState.succeeded
+    assert dict(status.exclusions)["too_large"] == 1
+    assert status.notes_indexed == FIXTURE_NOTES
+
+
+@pytest.mark.parametrize("error", [RecursionError, MemoryError])
+def test_a_note_the_cleaner_cannot_process_is_left_out_not_fatal(
+    vault: Path,
+    index_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error: type[BaseException],
+) -> None:
+    # Arrange: the cleaner gives up on one note only
+    real = index_builder.clean_note
+
+    def picky(rel_path: str, text: str, targets: object) -> object:
+        if rel_path == VIRTUE:
+            raise error("too much")
+        return real(rel_path, text, targets)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(index_builder, "clean_note", picky)
+
+    # Act
+    status = _build(vault, index_dir, FakeOllama())
+
+    # Assert
+    assert status.state is BuildState.succeeded
+    assert dict(status.exclusions)["unprocessable"] == 1
+    assert status.notes_indexed == FIXTURE_NOTES - 1
+    assert VIRTUE not in ActiveIndex(index_dir).get().manifest.note_hashes
+
+
+def test_deeply_nested_frontmatter_leaves_out_that_note_only(
+    vault: Path, index_dir: Path
+) -> None:
+    # Arrange
+    (vault / "concepts" / "Deep.md").write_text(
+        "---\ntitle: " + "[" * 3000 + "]" * 3000 + "\n---\nBody", encoding="utf-8"
+    )
+
+    # Act
+    status = _build(vault, index_dir, FakeOllama())
+
+    # Assert
+    assert status.state is BuildState.succeeded
+    assert dict(status.exclusions)["bad_frontmatter"] == 1
+    assert status.notes_indexed == FIXTURE_NOTES
+
+
+def test_a_note_with_an_unclosed_code_fence_is_counted_in_a_manifest_warning(
+    vault: Path, index_dir: Path
+) -> None:
+    # Arrange: a stray ~~~ hides everything after it, so the build says so
+    (vault / "concepts" / "Fenced.md").write_text(
+        "---\ntype: concept\n---\nKept text.\n\n~~~\nlost " + MARKER + "\n",
+        encoding="utf-8",
+    )
+
+    # Act
+    status = _build(vault, index_dir, FakeOllama())
+
+    # Assert: a count only, never the note's name or text
+    assert status.state is BuildState.succeeded
+    manifest = ActiveIndex(index_dir).get().manifest
+    assert "unclosed_fences=1" in manifest.warnings
+    assert "Fenced" not in json.dumps(manifest.warnings)
+
+
+def test_a_vault_with_no_unclosed_fence_adds_no_such_warning(
+    vault: Path, index_dir: Path
+) -> None:
+    # Act
+    _build(vault, index_dir, FakeOllama())
+
+    # Assert
+    warnings = ActiveIndex(index_dir).get().manifest.warnings
+    assert not any(w.startswith("unclosed_fences") for w in warnings)
+
+
 # ── The lock ────────────────────────────────────────────────────────────
 
 

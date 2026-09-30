@@ -116,6 +116,22 @@ def _to_matrix(rows: object, expected: int, dim: int) -> Vectors:
     return matrix
 
 
+def _names_missing_model(response: httpx.Response) -> bool:
+    """Whether a 404 from ``/api/embed`` says the model is missing.
+
+    A server too old to have the endpoint answers 404 with no such message. Ollama
+    answers a missing model with ``model "..." not found``.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        text = response.text
+    else:
+        text = str(body.get("error", "")) if isinstance(body, dict) else ""
+    lowered = text.lower()
+    return "model" in lowered and "not found" in lowered
+
+
 class OllamaEmbedder:
     """Embeds texts through an Ollama server whose address comes from settings."""
 
@@ -207,6 +223,9 @@ class OllamaEmbedder:
             )
             if response.status_code != 404:
                 return _json_object(response).get("embeddings")
+            if _names_missing_model(response):
+                # Not an old server: the model itself is missing, perhaps just for now.
+                raise PriestIndexError("embedding model is not available")
             self._legacy = True
         rows: list[object] = []
         for prompt in inputs:

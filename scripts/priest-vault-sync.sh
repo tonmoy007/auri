@@ -18,8 +18,8 @@
 # and every other file type is excluded, and the preflight runs first and refuses to
 # continue on any finding (denied path, symlink, secret, key, email, phone, no type).
 # --prune also removes notes that no longer exist at the source, but only inside
-# PRIEST_VAULT_DIR: the exclude rules protect every non-.md file there, and
-# --delete-excluded is never used. --dry-run shows what would happen and changes nothing.
+# PRIEST_VAULT_DIR, and only when that ends in /priest/vault: the exclude rules protect
+# every non-.md file there, and --delete-excluded is never used. --dry-run shows what would happen and changes nothing.
 set -euo pipefail
 
 die() { echo "priest-vault-sync: $*" >&2; exit "${2:-2}"; }
@@ -50,6 +50,11 @@ DEST="${PRIEST_VAULT_DIR:-}"
   || die "PRIEST_VAULT_DIR must be an absolute path at least two levels deep, with only letters, digits, . _ -"
 [[ "/$DEST/" != *"/../"* ]] || die "PRIEST_VAULT_DIR must not contain .."
 DEST="${DEST%/}"
+# --delete removes every *.md at the destination that is not in the source, so it must
+# only ever point at the vault folder itself, never a parent such as a home directory.
+if [ "$PRUNE" -eq 1 ] && [[ "$DEST" != */priest/vault ]]; then
+  die "--prune needs PRIEST_VAULT_DIR to end in /priest/vault, so it can only delete inside the vault"
+fi
 
 HOST="${PRIEST_SYNC_HOST:-}"
 if [ -n "$HOST" ]; then

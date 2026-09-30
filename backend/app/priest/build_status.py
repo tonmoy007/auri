@@ -4,14 +4,20 @@ The admin API starts the builder as a subprocess and later reads these two files
 are all the two sides share. Neither holds any note text: only state, counts and an
 error code. A corrupt file reads as idle, and a build whose process has died is
 reported as failed rather than running for ever.
+
+The build lock is a kernel lock (``flock``) on the lock file, so the kernel drops it
+the moment its holder dies, however it dies: there is no stale lock to detect and no
+pid to mistake for another process. The pid in the file is for display only.
 """
 
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import json
 import os
 import tempfile
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
 from enum import Enum
@@ -117,42 +123,127 @@ def write(index_dir: Path, status: BuildStatus) -> None:
         raise
 
 
-def lock_owner(index_dir: Path) -> int | None:
-    """Return the pid holding the lock, or ``None`` if unheld or unreadable."""
+# What a holder writes after its pid. A file with only a number was written by a
+# builder of the previous version, which held no kernel lock.
+_LOCK_MARK: Final = "flock"
+# lock file path -> (open descriptor holding the kernel lock, pid recorded for it)
+_held: dict[str, tuple[int, int]] = {}
+_held_guard = threading.Lock()
+
+
+def _lock_path(index_dir: Path) -> Path:
+    return index_dir / LOCK_FILE
+
+
+def _read_lock_file(index_dir: Path) -> tuple[int, bool] | None:
+    """The pid in the lock file and whether it is a bare pid (previous version)."""
     try:
-        return int((index_dir / LOCK_FILE).read_text().strip())
-    except (OSError, ValueError):
+        parts = _lock_path(index_dir).read_text().split()
+    except OSError:
         return None
+    if not parts or not parts[0].isdigit():
+        return None
+    return int(parts[0]), len(parts) == 1
+
+
+def _kernel_lock_held(index_dir: Path) -> bool:
+    """Whether some open file description holds the kernel lock right now."""
+    try:
+        fd = os.open(_lock_path(index_dir), os.O_RDONLY)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+    return False
+
+
+def lock_owner(
+    index_dir: Path, *, is_alive: Callable[[int], bool] = _pid_alive
+) -> int | None:
+    """Return the pid of the builder holding the lock, for display; else ``None``.
+
+    The lock is held when the kernel says so. A file with only a pid in it is held
+    while that process lives (a builder of the previous version).
+    """
+    recorded = _read_lock_file(index_dir)
+    if recorded is None:
+        return None
+    pid, bare = recorded
+    if bare:
+        return pid if is_alive(pid) else None
+    return pid if _kernel_lock_held(index_dir) else None
+
+
+def _open_locked(path: Path) -> int | None:
+    """Open *path* and take the kernel lock; ``None`` if held or the file was swapped.
+
+    A release removes the file while still holding the lock, so a taker that got the
+    lock on a file that is no longer the one at *path* must start again.
+    """
+    fd = os.open(path, os.O_RDWR | os.O_CREAT, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if os.fstat(fd).st_ino != os.stat(path).st_ino:
+            raise FileNotFoundError
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except OSError:
+        os.close(fd)
+        return -1
+    return fd
 
 
 def acquire_lock(
     index_dir: Path, *, pid: int, is_alive: Callable[[int], bool] = _pid_alive
 ) -> bool:
-    """Take the build lock; a lock whose owner is dead or unreadable is taken over.
+    """Take the build lock.
+
+    Args:
+        index_dir: The index root.
+        pid: Recorded in the lock file, for display.
+        is_alive: Decides whether a bare-pid lock file, from a builder of the previous
+            version, still has a live owner.
 
     Returns:
-        ``True`` if this process now holds the lock, ``False`` if a live builder does.
+        ``True`` if this process now holds the lock, ``False`` if a builder does.
     """
     index_dir.mkdir(parents=True, exist_ok=True)
-    path = index_dir / LOCK_FILE
-    for _ in range(2):
-        try:
-            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        except FileExistsError:
-            owner = lock_owner(index_dir)
-            if owner is not None and is_alive(owner):
-                return False
-            with contextlib.suppress(OSError):
-                path.unlink()
+    path = _lock_path(index_dir)
+    legacy = _read_lock_file(index_dir)
+    if legacy is not None and legacy[1] and is_alive(legacy[0]):
+        return False
+    for _ in range(3):
+        fd = _open_locked(path)
+        if fd is None:
+            return False
+        if fd < 0:
             continue
-        with os.fdopen(fd, "w") as handle:
-            handle.write(str(pid))
+        os.ftruncate(fd, 0)
+        os.write(fd, f"{pid} {_LOCK_MARK}\n".encode())
+        with _held_guard:
+            _held[str(path)] = (fd, pid)
         return True
     return False
 
 
 def release_lock(index_dir: Path, *, pid: int) -> None:
-    """Remove the lock, but only if *pid* holds it."""
-    if lock_owner(index_dir) == pid:
-        with contextlib.suppress(OSError):
-            (index_dir / LOCK_FILE).unlink()
+    """Drop the lock and remove its file, but only if this process holds it for *pid*."""
+    key = str(_lock_path(index_dir))
+    with _held_guard:
+        entry = _held.get(key)
+        if entry is None or entry[1] != pid:
+            return
+        del _held[key]
+    fd = entry[0]
+    # Remove the file before dropping the lock: a taker that opened it meanwhile sees
+    # that it is no longer the file at the path and starts again.
+    with contextlib.suppress(OSError):
+        _lock_path(index_dir).unlink()
+    os.close(fd)

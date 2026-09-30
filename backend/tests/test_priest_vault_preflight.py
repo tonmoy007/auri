@@ -13,6 +13,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import ModuleType
 
@@ -139,6 +140,93 @@ def test_a_bare_field_name_is_not_a_secret(vault: Path) -> None:
     assert report.ok
 
 
+# Fake, synthetic values only: each is assembled from pieces so this file never holds
+# a literal the repo's secret scan flags.
+_FAKE_TAIL = "abcdefghijklmnop1234"
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "api_key: " + "sk-" + "proj-" + _FAKE_TAIL,
+        "OPENAI" + "_API_KEY=" + "sk-" + _FAKE_TAIL,
+        "to" + "ken: " + "x9" * 10,
+        "client" + "_secret = " + "Zq7" * 6,
+        "pass" + "word: " + "Zq7!" * 5,
+    ],
+)
+def test_unquoted_secret_assignments_with_a_long_value_are_flagged(
+    vault: Path, line: str
+) -> None:
+    # Arrange
+    _add_note(vault, f"Old notes.\n{line}\nMore text.\n")
+
+    # Act
+    report = preflight.run_preflight(vault)
+
+    # Assert
+    assert report.secret_literals == 1, line
+    assert not report.ok
+
+
+@pytest.mark.parametrize(
+    "token",
+    [
+        "sk-" + _FAKE_TAIL,
+        "ghp" + "_" + "A1" * 18,
+        "github" + "_pat_" + "B2" * 15,
+        "AK" + "IA" + "ABCDEFGH01234567",
+        "xo" + "xb-" + "1234567890-abcdef",
+        "xo" + "xp-" + "1234567890-abcdef",
+        "AI" + "za" + "Sy" + "C3" * 15,
+    ],
+)
+def test_known_token_prefixes_are_flagged_anywhere(vault: Path, token: str) -> None:
+    # Arrange
+    _add_note(vault, f"Pasted by mistake: {token} end.\n")
+
+    # Act
+    report = preflight.run_preflight(vault)
+
+    # Assert
+    assert report.secret_literals == 1, token
+    assert not report.ok
+
+
+def test_a_quoted_key_with_a_token_prefix_is_one_finding(vault: Path) -> None:
+    # Arrange
+    _add_note(vault, 'api_key = "' + "sk-" + _FAKE_TAIL + '"\n')
+
+    # Act
+    report = preflight.run_preflight(vault)
+
+    # Assert
+    assert report.secret_literals == 1
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The token: a short word. password: hidden. secret: none.",
+        "A token of esteem; the secret of the self; a password for the gate.",
+        "token: [[Some Long Linked Note Title]] and the sk-learn library.",
+        "Task-list: skip-this-one and ask-me-later are ordinary words.",
+    ],
+)
+def test_ordinary_prose_about_tokens_and_secrets_is_not_flagged(
+    vault: Path, text: str
+) -> None:
+    # Arrange
+    _add_note(vault, text + "\n")
+
+    # Act
+    report = preflight.run_preflight(vault)
+
+    # Assert
+    assert report.secret_literals == 0, text
+    assert report.ok
+
+
 def test_a_private_key_block_is_flagged(vault: Path) -> None:
     # Arrange
     _add_note(vault, f"{KEY_HEADER}\nMIIabc\n")
@@ -171,6 +259,9 @@ def test_email_addresses_are_flagged(vault: Path) -> None:
         "555-123-4567",
         "01712 345678",
         "+8801712345678",
+        "01712345678",
+        "8801712345678",
+        "01912-345678",
     ],
 )
 def test_phone_numbers_are_flagged(vault: Path, phone: str) -> None:
@@ -193,6 +284,9 @@ def test_phone_numbers_are_flagged(vault: Path, phone: str) -> None:
         "Born 1879-03-14, created 2026-01-02, section 1.2.3.4.",
         "Genesis 1:1-2:3 and 1234567890 as a bare id.",
         "Image File_Example_(9841650413).jpg and (10162517184) again.",
+        "ISBN 9780140449198 and ISBN-10 0134685997 and isbn: 0-13-468599-7.",
+        "Verse ids 0171234567 and 017123456789 and 2026010217123 are ids.",
+        "Sura 01712345 and page 1712345678 of the book.",
     ],
 )
 def test_verse_references_dates_and_ids_are_not_phones(vault: Path, text: str) -> None:
@@ -205,6 +299,40 @@ def test_verse_references_dates_and_ids_are_not_phones(vault: Path, text: str) -
     # Assert
     assert report.phones == 0, text
     assert report.ok
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="needs mkfifo")
+def test_a_fifo_named_like_a_note_fails_and_is_never_read(vault: Path) -> None:
+    # Arrange
+    os.mkfifo(vault / "Pipe.md")
+    found: list[object] = []
+    worker = threading.Thread(
+        target=lambda: found.append(preflight.run_preflight(vault)), daemon=True
+    )
+
+    # Act: a read of the FIFO would never return, so wait for the answer with a limit
+    worker.start()
+    worker.join(timeout=10)
+
+    # Assert
+    assert found, "the preflight hung on a FIFO"
+    report = found[0]
+    assert report.special_files == 1  # type: ignore[attr-defined]
+    assert not report.ok  # type: ignore[attr-defined]
+    assert report.notes_scanned == 8  # type: ignore[attr-defined]
+
+
+def test_a_list_valued_type_counts_as_missing_without_being_printed(
+    vault: Path,
+) -> None:
+    # Arrange
+    _add_note(vault, "Body.\n", head="---\ntype: [a, b]\n---\n\n")
+
+    # Act
+    report = preflight.run_preflight(vault)
+
+    # Assert
+    assert report.missing_type == 1
 
 
 def test_a_note_without_a_type_is_flagged(vault: Path) -> None:
@@ -505,13 +633,66 @@ def test_sync_prune_never_deletes_excluded_files(vault: Path, tmp_path: Path) ->
     path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
 
     # Act
-    done = _sync(["--prune"], vault, tmp_path / "a" / "b", PATH=path)
+    done = _sync(["--prune"], vault, tmp_path / "priest" / "vault", PATH=path)
 
     # Assert
     assert done.returncode == 0, done.stderr
     args = log.read_text(encoding="utf-8").splitlines()
     assert "--delete" in args
     assert "--delete-excluded" not in args
+
+
+@needs_rsync
+@pytest.mark.parametrize(
+    "dest", ["a/b", "home/deploy", "srv/priest/vault-old", "srv/priest/vaults"]
+)
+def test_sync_prune_refuses_a_destination_that_is_not_the_priest_vault(
+    vault: Path, tmp_path: Path, dest: str
+) -> None:
+    # Arrange: --delete on a shared directory would remove every stale *.md in it
+    bin_dir, log = _recording_rsync(tmp_path)
+    path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+
+    # Act
+    done = _sync(["--prune"], vault, tmp_path / dest, PATH=path)
+
+    # Assert: refused before rsync ran
+    assert done.returncode == 2
+    assert "--prune" in done.stderr and "/priest/vault" in done.stderr
+    assert not log.exists()
+
+
+@needs_rsync
+def test_sync_prune_accepts_a_destination_ending_in_the_priest_vault_folder(
+    vault: Path, tmp_path: Path
+) -> None:
+    # Arrange
+    bin_dir, log = _recording_rsync(tmp_path)
+    path = f"{bin_dir}{os.pathsep}{os.environ['PATH']}"
+
+    # Act
+    done = _sync(
+        ["--prune", "--dry-run"],
+        vault,
+        Path("/srv/app/priest/vault/"),
+        PATH=path,
+        PRIEST_SYNC_HOST="deploy@example.test",
+    )
+
+    # Assert
+    assert done.returncode == 0, done.stderr
+    assert "--delete" in log.read_text(encoding="utf-8").splitlines()
+
+
+@needs_rsync
+def test_sync_without_prune_still_allows_any_destination(
+    vault: Path, tmp_path: Path
+) -> None:
+    # Act
+    done = _sync([], vault, tmp_path / "a" / "b")
+
+    # Assert
+    assert done.returncode == 0, done.stderr
 
 
 @needs_rsync

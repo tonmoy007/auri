@@ -556,7 +556,17 @@ GOLD = [
         expected=[],
     ),
 ]
+
+
+def _blend(first: int, second: int) -> np.ndarray:
+    """A unit vector leaning towards axis *first*, with some of axis *second*."""
+    v = np.zeros(DIM, dtype=np.float32)
+    v[first], v[second] = 0.9, 0.4
+    return (v / np.linalg.norm(v)).astype(np.float32)
+
+
 QUERY_VECTORS = {
+    "meaning both hills and harmony": _blend(0, 1),
     "What is zorvath?": axis(0),
     "feeling far from home": axis(1),
     "verse 9:99": axis(2),
@@ -668,6 +678,122 @@ def test_cli_reports_each_mode_with_hand_checked_metrics(tmp_path: Path) -> None
     assert modes["hybrid"]["recall@6"] == 1.0
     assert modes["hybrid"]["recall@10"] == 1.0
     assert modes["hybrid"]["latency_ms"]["count"] == 5
+
+
+def _second_best_gold() -> list[dict[str, object]]:
+    """One question whose expected note is the dense runner-up, and one negative."""
+    return [
+        _question(
+            id="g01",
+            question="meaning both hills and harmony",
+            expected=[{"note_path": "stories/beta.md"}],
+        ),
+        _question(
+            id="n01",
+            question="How do I fix a tap?",
+            kind="out_of_scope",
+            expected_covered=False,
+            expected=[],
+        ),
+    ]
+
+
+def test_hybrid_is_scored_on_the_chunks_the_app_returns_not_a_deeper_list(
+    tmp_path: Path,
+) -> None:
+    # Arrange: the expected note is second in line, and the app keeps only one chunk
+    build_index(tmp_path / "index")
+    gold = _write_gold(tmp_path, _second_best_gold())
+
+    # Act
+    code = _run(tmp_path, Factory(FakeEmbedder()), gold=gold, extra=["--top-k", "1"])
+
+    # Assert: the app-level figure misses it; the labelled deep figure finds it
+    assert code == 0
+    modes = _summary(tmp_path)["indexes"][0]["modes"]  # type: ignore[index]
+    assert modes["hybrid"]["recall@6"] == 0.0
+    assert modes["hybrid_deep"]["recall@6"] == 1.0
+
+
+def test_hybrid_at_a_larger_top_k_finds_the_runner_up(tmp_path: Path) -> None:
+    # Arrange
+    build_index(tmp_path / "index")
+    gold = _write_gold(tmp_path, _second_best_gold())
+
+    # Act
+    _run(tmp_path, Factory(FakeEmbedder()), gold=gold, extra=["--top-k", "2"])
+
+    # Assert
+    modes = _summary(tmp_path)["indexes"][0]["modes"]  # type: ignore[index]
+    assert modes["hybrid"]["recall@6"] == 1.0
+
+
+def test_the_default_top_k_is_the_apps_setting(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    monkeypatch.setattr(script.settings, "PRIEST_TOP_K", 1)
+    build_index(tmp_path / "index")
+    gold = _write_gold(tmp_path, _second_best_gold())
+
+    # Act
+    _run(tmp_path, Factory(FakeEmbedder()), gold=gold)
+
+    # Assert
+    modes = _summary(tmp_path)["indexes"][0]["modes"]  # type: ignore[index]
+    assert modes["hybrid"]["recall@6"] == 0.0
+
+
+def test_the_gate_uses_the_configured_floors_not_the_fitted_ones(
+    tmp_path: Path,
+) -> None:
+    # Arrange: floors of zero say everything is covered, so no negative is caught and
+    # the configured F1 is 0, while floors fitted on these questions score perfectly
+    build_index(tmp_path / "index")
+
+    # Act
+    code = _run(
+        tmp_path,
+        Factory(FakeEmbedder()),
+        extra=["--dense-floor", "0.0", "--bm25-floor", "0.0"],
+    )
+
+    # Assert
+    assert code == 0
+    index = _summary(tmp_path)["indexes"][0]  # type: ignore[index]
+    assert index["not_covered"]["calibrated"]["f1"] == 1.0
+    assert index["not_covered"]["configured"]["f1"] < 0.85
+    text = (tmp_path / "report.md").read_text("utf-8")
+    gate = next(line for line in text.splitlines() if line.startswith("Gate [A]"))
+    assert "configured F1" in gate and gate.endswith("FAIL.")
+
+
+def test_the_gate_passes_when_the_configured_floors_do_well(tmp_path: Path) -> None:
+    # Arrange
+    build_index(tmp_path / "index")
+
+    # Act
+    _run(tmp_path, Factory(FakeEmbedder()), extra=["--bm25-floor", "1.0"])
+
+    # Assert
+    text = (tmp_path / "report.md").read_text("utf-8")
+    gate = next(line for line in text.splitlines() if line.startswith("Gate [A]"))
+    assert gate.endswith("PASS.")
+
+
+def test_the_calibrated_figures_are_labelled_in_sample(tmp_path: Path) -> None:
+    # Arrange
+    build_index(tmp_path / "index")
+
+    # Act
+    _run(tmp_path, Factory(FakeEmbedder()))
+
+    # Assert
+    index = _summary(tmp_path)["indexes"][0]  # type: ignore[index]
+    assert index["not_covered"]["calibrated"]["in_sample"] is True
+    text = (tmp_path / "report.md").read_text("utf-8")
+    assert "in-sample" in text
+    assert "hybrid deep" in text
 
 
 def test_cli_calibrates_and_scores_not_covered_detection(tmp_path: Path) -> None:

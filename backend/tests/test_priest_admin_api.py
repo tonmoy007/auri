@@ -35,6 +35,7 @@ from app.models.user import UserRole
 from app.priest import build_status, index_store, metrics
 from app.priest.build_status import BuildState, BuildStatus
 from app.priest.types import Chunk
+from app.services import settings_service
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
@@ -561,18 +562,21 @@ async def test_reindex_by_a_named_admin_is_audited_without_content(
 
 
 @pytest.mark.asyncio
-async def test_reindex_with_the_legacy_key_writes_no_audit_row(
+async def test_reindex_with_the_legacy_key_is_audited_under_its_label(
     client: AsyncClient, db_session: AsyncSession
 ) -> None:
     # Arrange
-    # (the shared key names nobody, so there is no actor to record)
+    # (the shared key names nobody, so the row says which key it was)
 
     # Act
     response = await call(client, "POST", "/reindex", None, legacy())
 
     # Assert
     assert response.status_code == 202
-    assert await audit_rows(db_session) == []
+    rows = await audit_rows(db_session)
+    assert [(r.action, r.actor_user_id, r.actor_label) for r in rows] == [
+        ("priest.reindex", None, "admin-api-key")
+    ]
 
 
 @pytest.mark.asyncio
@@ -751,7 +755,7 @@ async def test_activate_switches_the_pointer_and_audits_the_version_only(
 
 
 @pytest.mark.asyncio
-async def test_activate_with_the_legacy_key_works_without_an_audit_row(
+async def test_activate_with_the_legacy_key_is_audited_under_its_label(
     client: AsyncClient, index_dir: Path, db_session: AsyncSession
 ) -> None:
     # Arrange
@@ -764,7 +768,10 @@ async def test_activate_with_the_legacy_key_works_without_an_audit_row(
     # Assert
     assert response.status_code == 200
     assert (index_dir / "ACTIVE").read_text().strip() == VERSION_B
-    assert await audit_rows(db_session) == []
+    rows = await audit_rows(db_session)
+    assert [(r.action, r.actor_label, r.detail) for r in rows] == [
+        ("priest.activate", "admin-api-key", VERSION_B)
+    ]
 
 
 @pytest.mark.asyncio
@@ -1441,3 +1448,110 @@ def test_new_audit_actions_have_the_contracted_values() -> None:
 
     # Assert
     assert values == {"priest.reindex", "priest.activate"}
+
+
+@pytest.mark.asyncio
+async def test_health_probes_the_ollama_the_embedder_really_uses_not_the_dashboards(
+    client: AsyncClient,
+    probes: Probes,
+    set_setting: SettingPatcher,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange — an admin edit in the Config tab changes the live layer only; retrieval
+    # and the index build read the environment
+    set_setting("OLLAMA_BASE_URL", "http://localhost:11434")
+    monkeypatch.setitem(
+        settings_service._cache,
+        "OLLAMA_BASE_URL",
+        "http://dashboard-edit.invalid:11434",
+    )
+
+    # Act
+    await call(client, "GET", "/health", None, legacy())
+
+    # Assert
+    hosts = {r.url.host for r in probes.requests}
+    assert "dashboard-edit.invalid" not in hosts
+    assert "localhost" in hosts
+
+
+@pytest.mark.asyncio
+async def test_activate_while_a_build_holds_the_lock_is_refused_and_changes_nothing(
+    client: AsyncClient, index_dir: Path, db_session: AsyncSession
+) -> None:
+    # Arrange — a build moves ACTIVE and prunes versions itself
+    write_index(index_dir, VERSION_A, active=True)
+    write_index(index_dir, VERSION_B, active=False)
+    assert build_status.acquire_lock(index_dir, pid=os.getpid())
+
+    # Act
+    try:
+        response = await call(
+            client, "POST", "/activate", {"version": VERSION_B}, legacy()
+        )
+    finally:
+        build_status.release_lock(index_dir, pid=os.getpid())
+
+    # Assert
+    assert response.status_code == 409
+    assert response.json() == {"detail": "build_in_progress"}
+    assert (index_dir / "ACTIVE").read_text().strip() == VERSION_A
+    assert await audit_rows(db_session) == []
+
+
+def test_the_builder_is_started_with_the_embedding_model_the_dashboard_shows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange — the dashboard says "the next build will use X"; the builder process
+    # has no dashboard settings, so the model must travel with it
+    started: list[dict[str, Any]] = []
+
+    class FakeProcess:
+        pid = 4242
+
+        def wait(self) -> None:
+            return None
+
+    def fake_popen(argv: list[str], **kwargs: Any) -> FakeProcess:
+        started.append({"argv": argv, **kwargs})
+        return FakeProcess()
+
+    monkeypatch.setattr(priest_admin.subprocess, "Popen", fake_popen)
+    monkeypatch.setitem(
+        settings_service._cache, "PRIEST_EMBED_MODEL", "mxbai-embed-large"
+    )
+
+    # Act
+    priest_admin.spawn_builder()
+
+    # Assert
+    assert started[0]["env"]["PRIEST_EMBED_MODEL"] == "mxbai-embed-large"
+    assert started[0]["argv"][1:] == ["-m", priest_admin._BUILDER_MODULE]
+
+
+@pytest.mark.parametrize("bad", ["x; rm -rf /", "a b", "model\nname", "x" * 200])
+def test_an_odd_embedding_model_name_is_not_passed_to_the_builder(
+    bad: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange
+    started: list[dict[str, Any]] = []
+
+    class FakeProcess:
+        pid = 1
+
+        def wait(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        priest_admin.subprocess,
+        "Popen",
+        lambda argv, **kw: started.append(kw) or FakeProcess(),
+    )
+    monkeypatch.setitem(settings_service._cache, "PRIEST_EMBED_MODEL", bad)
+    monkeypatch.delenv("PRIEST_EMBED_MODEL", raising=False)
+
+    # Act
+    priest_admin.spawn_builder()
+
+    # Assert — the builder falls back to its own (environment) default
+    assert "PRIEST_EMBED_MODEL" not in started[0]["env"]

@@ -11,6 +11,11 @@ A version is written into a hidden temp directory and renamed into place, so a c
 never leaves a half-written version that looks real. ``ACTIVE`` is replaced with
 ``os.replace`` only after the named version has been loaded and validated, so it never
 points at something that cannot be served. Rolling back is activating an older version.
+After each rename the directory that holds the new name is synced, so a power cut
+cannot leave ``ACTIVE`` naming a version whose rename never reached the disk.
+
+An admin activation and a running build both move ``ACTIVE`` and delete old versions,
+so the admin path (``activate_exclusive``) takes the build lock first.
 """
 
 from __future__ import annotations
@@ -23,6 +28,7 @@ import re
 import shutil
 import tempfile
 import threading
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +38,7 @@ import numpy as np
 import numpy.typing as npt
 
 from app.exceptions import PriestIndexError
+from app.priest import build_status
 from app.priest.embedder import EmbedModelInfo
 from app.priest.types import Chunk, QuoteBlock
 
@@ -45,6 +52,12 @@ _MANIFEST: Final = "manifest.json"
 # Version names become directory names, so nothing that could leave the directory.
 _VERSION_RE: Final = re.compile(r"[0-9A-Za-z][0-9A-Za-z._-]*")
 _DEFAULT_KEEP: Final = 3
+# A version that failed to load is not parsed again for this long, unless ACTIVE moves.
+_FAILURE_RETRY_SECONDS: Final = 5.0
+
+
+class IndexBusyError(PriestIndexError):
+    """The index is being changed by a build or another activation; try again later."""
 
 
 @dataclass(frozen=True)
@@ -222,6 +235,22 @@ def _write_file(path: Path, write: Any) -> None:
         os.fsync(handle.fileno())
 
 
+def _fsync_dir(path: Path) -> None:
+    """Flush a directory's entries to disk, so a rename in it survives a power cut.
+
+    Best effort: a filesystem that refuses to sync a directory is not an error, as
+    the rename itself has already happened.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        logger.warning("could not sync an index directory")
+
+
 def _make_staging(target: Path) -> Path:
     """A fresh hidden directory beside *target*; refuses if *target* already exists."""
     try:
@@ -276,6 +305,8 @@ def write_version(
     try:
         _write_files(staging, chunks, vectors, manifest)
         os.replace(staging, target)
+        _fsync_dir(target.parent)
+        _fsync_dir(root)
     except OSError as exc:
         raise PriestIndexError("index version could not be written") from exc
     finally:
@@ -310,8 +341,30 @@ def activate(root: Path, version: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(handle.name, root / _POINTER)
+        _fsync_dir(root)
     except OSError as exc:
         raise PriestIndexError("the active index pointer could not be written") from exc
+
+
+def activate_exclusive(root: Path, version: str) -> None:
+    """``activate`` for callers that are not the builder, such as the admin rollback.
+
+    A running build moves ``ACTIVE`` and prunes versions itself, so an activation in
+    between could be overwritten or have its version deleted. This takes the build
+    lock for the duration, and refuses instead of waiting if a build holds it.
+
+    Raises:
+        IndexBusyError: If a build, or another activation, holds the build lock.
+            ``ACTIVE`` is left as it was.
+        PriestIndexError: If the version does not load, as for ``activate``.
+    """
+    pid = os.getpid()
+    if not build_status.acquire_lock(root, pid=pid):
+        raise IndexBusyError("an index build or activation is in progress")
+    try:
+        activate(root, version)
+    finally:
+        build_status.release_lock(root, pid=pid)
 
 
 def list_versions(root: Path) -> list[str]:
@@ -341,10 +394,11 @@ def prune(root: Path, keep: int = _DEFAULT_KEEP) -> list[str]:
         raise ValueError("keep must be at least 1")
     versions = list_versions(root)
     protected = set(versions[-keep:])
-    if (root / _POINTER).exists():
-        protected.add(_read_pointer(root))
+    _add_active(root, protected)
     removed = []
     for version in versions:
+        # ACTIVE can move while this runs (a rollback); look again before every delete.
+        _add_active(root, protected)
         if version in protected:
             continue
         try:
@@ -356,14 +410,45 @@ def prune(root: Path, keep: int = _DEFAULT_KEEP) -> list[str]:
     return removed
 
 
+def check_manifest_digest(manifest: IndexManifest, current: EmbedModelInfo) -> None:
+    """Refuse an index built with a different embedding model than *current*.
+
+    Args:
+        manifest: The manifest of the index that is about to be queried.
+        current: The embedding model that would embed the question.
+
+    Raises:
+        PriestIndexError: If the digest or the dimension differs.
+    """
+    if manifest.embed_digest != current.digest:
+        raise PriestIndexError(
+            "embedding model digest differs from the one the index was built with"
+        )
+    if manifest.dim != current.dim:
+        raise PriestIndexError(
+            "embedding model dimension differs from the one the index was built with"
+        )
+
+
+def _add_active(root: Path, protected: set[str]) -> None:
+    """Add the version ``ACTIVE`` names now, if there is a pointer, to *protected*."""
+    if (root / _POINTER).exists():
+        protected.add(_read_pointer(root))
+
+
 _Signature = tuple[int, int, int, int]
+_shared_loaders: dict[Path, ActiveIndex] = {}
+_shared_lock = threading.Lock()
 
 
 class ActiveIndex:
     """Serves whichever version ``ACTIVE`` names, reloading when it changes.
 
     ``get`` stats the pointer on every call. The signature includes ctime and inode,
-    so a pointer rewritten in place with the same mtime is still noticed.
+    so a pointer rewritten in place with the same mtime is still noticed. A version
+    that fails to load is remembered against that signature, so a corrupt one is not
+    parsed again on every request; it is retried when ``ACTIVE`` moves, or after a few
+    seconds so that a repair in place is picked up.
     """
 
     def __init__(self, root: Path) -> None:
@@ -371,6 +456,7 @@ class ActiveIndex:
         self._root = root
         self._lock = threading.Lock()
         self._state: tuple[_Signature, LoadedIndex] | None = None
+        self._failure: tuple[_Signature, float, str] | None = None
 
     def _signature(self) -> _Signature:
         try:
@@ -397,13 +483,30 @@ class ActiveIndex:
             state = self._state
             if state is not None and state[0] == signature:
                 return state[1]
-            version = _read_pointer(self._root)
-            if state is not None and state[1].manifest.version == version:
-                loaded = state[1]
-            else:
-                loaded = load_version(self._root, version)
+            self._raise_if_recently_failed(signature)
+            try:
+                loaded = self._load(state)
+            except PriestIndexError as exc:
+                self._failure = (signature, time.monotonic(), str(exc))
+                raise
+            self._failure = None
             self._state = (signature, loaded)
             return loaded
+
+    def _load(self, state: tuple[_Signature, LoadedIndex] | None) -> LoadedIndex:
+        """Load the version ``ACTIVE`` names, reusing *state* if it is the same one."""
+        version = _read_pointer(self._root)
+        if state is not None and state[1].manifest.version == version:
+            return state[1]
+        return load_version(self._root, version)
+
+    def _raise_if_recently_failed(self, signature: _Signature) -> None:
+        """Repeat the last failure instead of re-reading a version known to be bad."""
+        failure = self._failure
+        if failure is None or failure[0] != signature:
+            return
+        if time.monotonic() - failure[1] < _FAILURE_RETRY_SECONDS:
+            raise PriestIndexError(failure[2])
 
     def check_digest(self, current: EmbedModelInfo) -> None:
         """Refuse to serve an index built with a different embedding model.
@@ -412,12 +515,17 @@ class ActiveIndex:
             PriestIndexError: If the manifest's digest or dimension differs from
                 *current*, or there is no usable active index.
         """
-        manifest = self.get().manifest
-        if manifest.embed_digest != current.digest:
-            raise PriestIndexError(
-                "embedding model digest differs from the one the index was built with"
-            )
-        if manifest.dim != current.dim:
-            raise PriestIndexError(
-                "embedding model dimension differs from the one the index was built with"
-            )
+        check_manifest_digest(self.get().manifest, current)
+
+
+def shared_active_index(root: Path) -> ActiveIndex:
+    """The one ``ActiveIndex`` for *root* in this process.
+
+    The Guide and the admin view both read the index, and each loader holds a full copy
+    of the chunks and vectors, so they share one rather than keep two in memory.
+    """
+    with _shared_lock:
+        loader = _shared_loaders.get(root)
+        if loader is None:
+            loader = _shared_loaders[root] = ActiveIndex(root)
+        return loader

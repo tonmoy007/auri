@@ -58,6 +58,7 @@ _VERSIONS_DIR: Final = (
 )
 _STALE_PREFIXES: Final = (".tmp-", ".ACTIVE.")
 _NO_CONTENT: Final = "no_content"
+_UNPROCESSABLE: Final = "unprocessable"
 _ALREADY_RUNNING: Final = "already_running"
 # Anything a pipeline bug could plausibly raise; reported as "unexpected", by class only.
 _UNEXPECTED: Final = (
@@ -103,6 +104,7 @@ class _Corpus:
     chunks: list[Chunk]
     note_hashes: dict[str, str]
     unresolved_links: int
+    unclosed_fences: int = 0
 
 
 def _sweep_stale(index_dir: Path) -> None:
@@ -175,6 +177,7 @@ class _Build:
         self._started = now()
         self._total = 0
         self._exclusions: Counter[str] = Counter()
+        self._unclosed_fences = 0
 
     def _report(self, stage: str, done: int, total: int) -> None:
         if self._progress is not None:
@@ -252,7 +255,7 @@ class _Build:
                 hashes[note.rel_path] = note.sha256
         build_status.write(self._index, self._status(BuildState.running))
         self._report("notes", len(hashes), self._total)
-        return _Corpus(chunks, hashes, unresolved)
+        return _Corpus(chunks, hashes, unresolved, self._unclosed_fences)
 
     def _chunks_of(
         self, note: VaultNote, targets: frozenset[str]
@@ -261,8 +264,14 @@ class _Build:
         if note.exclusion_reason:
             self._exclusions[note.exclusion_reason] += 1
             return [], 0
-        cleaned = clean_note(note.rel_path, note.text, targets)
-        chunks = chunk_note(cleaned)
+        try:
+            cleaned = clean_note(note.rel_path, note.text, targets)
+            chunks = chunk_note(cleaned)
+        except (RecursionError, MemoryError):
+            # One hostile note must not take the whole build down with it.
+            self._exclusions[_UNPROCESSABLE] += 1
+            return [], 0
+        self._unclosed_fences += cleaned.unclosed_fence
         if not chunks:
             self._exclusions[_NO_CONTENT] += 1
         return chunks, cleaned.unresolved_links
@@ -313,11 +322,14 @@ class _Build:
 
     def _manifest(self, corpus: _Corpus, info: EmbedModelInfo) -> IndexManifest:
         stamp = self._now()
-        warnings = (
-            [f"unresolved_links={corpus.unresolved_links}"]
-            if corpus.unresolved_links
-            else []
-        )
+        warnings = [
+            f"{name}={count}"
+            for name, count in (
+                ("unresolved_links", corpus.unresolved_links),
+                ("unclosed_fences", corpus.unclosed_fences),
+            )
+            if count
+        ]
         return IndexManifest(
             version=_version_name(self._started, corpus.note_hashes, info.digest),
             created_at=stamp.isoformat(),

@@ -516,6 +516,76 @@ async def test_the_fallback_is_remembered_for_later_calls() -> None:
     assert fake.paths() == ["/api/embeddings"]
 
 
+_MODEL_MISSING = {"error": 'model "nomic-embed-text" not found, try pulling it first'}
+
+
+@pytest.mark.asyncio
+async def test_a_model_not_found_404_does_not_switch_to_the_legacy_endpoint() -> None:
+    # Arrange: the model is briefly missing, for example during a re-pull
+    fake = FakeOllama()
+    embedder = _make(fake)
+    fake.override = lambda request: httpx.Response(404, json=_MODEL_MISSING)
+
+    # Act
+    with pytest.raises(PriestIndexError):
+        await embedder.embed_documents(["one"])
+    fake.override = None
+    fake.calls.clear()
+    matrix = await embedder.embed_documents(["two"])
+
+    # Assert: once the model is back the new endpoint is used again
+    assert matrix.shape == (1, 768)
+    assert fake.paths() == ["/api/embed"]
+
+
+@pytest.mark.asyncio
+async def test_a_model_not_found_404_error_does_not_quote_the_server_text() -> None:
+    # Arrange
+    fake = FakeOllama()
+    embedder = _make(fake)
+    fake.override = lambda request: httpx.Response(404, json=_MODEL_MISSING)
+
+    # Act
+    with pytest.raises(PriestIndexError) as caught:
+        await embedder.embed_documents(["one"])
+
+    # Assert
+    assert "pulling" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(404, text="404 page not found"),
+        httpx.Response(404, json={"error": "nope"}),
+        httpx.Response(404),
+    ],
+)
+async def test_a_404_that_is_not_about_the_model_still_means_an_old_server(
+    response: httpx.Response,
+) -> None:
+    # Arrange
+    fake = FakeOllama()
+    embedder = _make(fake)
+    base = fake.__call__
+
+    def old_server(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/embed":
+            return response
+        fake.override = None
+        return base(request)
+
+    fake.override = old_server
+
+    # Act
+    matrix = await embedder.embed_documents(["one"])
+
+    # Assert
+    assert matrix.shape == (1, 768)
+    assert fake.bodies("/api/embeddings")
+
+
 # ── Model digest ────────────────────────────────────────────────────────
 
 

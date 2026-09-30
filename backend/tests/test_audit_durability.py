@@ -371,6 +371,22 @@ async def _department_delete(
     )
 
 
+async def _config_set(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    return await client.put(
+        "/api/v1/admin/config",
+        json={"key": "PRIEST_TOP_K", "value": "6"},
+        headers=headers,
+    )
+
+
+async def _config_reset(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    return await client.delete("/api/v1/admin/config/PRIEST_TOP_K", headers=headers)
+
+
 HR = UserRole.hr
 SCENARIOS: dict[str, Scenario] = {
     "summary-list": Scenario(HR, ("confession.list", "summary"), _summary_list),
@@ -407,13 +423,23 @@ SCENARIOS: dict[str, Scenario] = {
     "priest-activate": Scenario(
         UserRole.admin, ("priest.activate", None), _priest_activate
     ),
+    # set_config commits the setting first, then the audit row (like themes)
+    "config-set": Scenario(
+        UserRole.admin, ("config.write", None), _config_set, audit_is_first_commit=False
+    ),
+    "config-reset": Scenario(
+        UserRole.admin,
+        ("config.write", None),
+        _config_reset,
+        audit_is_first_commit=False,
+    ),
 }
 
 
 def test_every_audit_call_site_has_a_scenario() -> None:
-    # Arrange — 16 record() call sites; approve and reject share one helper per caller
-    # (staff session, bot key), so the 18 scenarios cover all of them. A new site
-    # should add a scenario here.
+    # Arrange — 17 record() call sites; approve and reject share one helper per caller
+    # (staff session, bot key), and config set and reset share one helper, so the
+    # scenarios cover all of them. A new site should add a scenario here.
     import pathlib
     import re
 
@@ -424,8 +450,8 @@ def test_every_audit_call_site_has_a_scenario() -> None:
     )
 
     # Act / Assert
-    assert sites == 16
-    assert len(SCENARIOS) >= 16
+    assert sites == 17
+    assert len(SCENARIOS) >= 17
 
 
 # ── The audit service itself ─────────────────────────────────────────────

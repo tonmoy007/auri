@@ -49,7 +49,7 @@ from app.priest.answer_validator import (
     validate_answer,
 )
 from app.priest.embedder import OllamaEmbedder
-from app.priest.index_store import ActiveIndex
+from app.priest.index_store import ActiveIndex, shared_active_index
 from app.priest.prompt_builder import BuiltPrompt, build_messages, generate_canary
 from app.priest.retriever import Retriever
 from app.priest.safety_router import SafetyDecision
@@ -768,7 +768,7 @@ def build_priest_service(
     """A service wired from config; any part can be swapped (the smoke script counts chat)."""
     return PriestService(
         retriever=retriever
-        or LiveRetriever(ActiveIndex(Path(settings.PRIEST_INDEX_DIR))),
+        or LiveRetriever(shared_active_index(Path(settings.PRIEST_INDEX_DIR))),
         chain=chain or LiveChain(),
         moderator=moderator or default_moderator(),
     )
