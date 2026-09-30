@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 from app.api.v1.admin import ALLOWED_CONFIG_KEYS
+from app.config import Settings
 from app.models.user import UserRole
 from app.priest import priest_config
 from app.services import settings_service
@@ -67,10 +68,10 @@ def test_anything_else_keeps_it_off(raw: str, monkeypatch: pytest.MonkeyPatch) -
         ("PRIEST_MAX_CONCURRENCY", "max_concurrency", "2", 2),
         ("PRIEST_MAX_CONCURRENCY", "max_concurrency", "500", 4),
         ("PRIEST_MIN_RELEVANCE_DENSE", "min_relevance_dense", "0.62", 0.62),
-        ("PRIEST_MIN_RELEVANCE_DENSE", "min_relevance_dense", "nan", 0.5),
-        ("PRIEST_MIN_RELEVANCE_DENSE", "min_relevance_dense", "1.5", 0.5),
+        ("PRIEST_MIN_RELEVANCE_DENSE", "min_relevance_dense", "nan", 0.547),
+        ("PRIEST_MIN_RELEVANCE_DENSE", "min_relevance_dense", "1.5", 0.547),
         ("PRIEST_MIN_RELEVANCE_BM25", "min_relevance_bm25", "4.25", 4.25),
-        ("PRIEST_MIN_RELEVANCE_BM25", "min_relevance_bm25", "-1", 3.0),
+        ("PRIEST_MIN_RELEVANCE_BM25", "min_relevance_bm25", "-1", 18.8),
     ],
 )
 def test_numbers_are_parsed_and_fall_back_when_unusable(
@@ -89,6 +90,28 @@ def test_numbers_are_parsed_and_fall_back_when_unusable(
 
     # Assert
     assert value == expected
+
+
+def test_the_pinned_retrieval_settings_are_the_calibrated_ones() -> None:
+    # Arrange — measured on the 50-question gold set (docs/priest-retrieval-report.md):
+    # bge-large had the best not-covered F1 and hybrid MRR. The shipped floors of 0.5 and
+    # 3.0 called every question covered (F1 0.0), so they must not come back.
+    defaults = Settings(_env_file=None)
+
+    # Assert
+    assert defaults.PRIEST_EMBED_MODEL == "bge-large"
+    assert defaults.PRIEST_MIN_RELEVANCE_DENSE == 0.547
+    assert defaults.PRIEST_MIN_RELEVANCE_BM25 == 18.8
+
+
+def test_an_unset_embed_model_falls_back_to_the_pinned_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    _override(monkeypatch, "PRIEST_EMBED_MODEL", "   ")
+
+    # Act / Assert
+    assert priest_config.embed_model() == "bge-large"
 
 
 def test_the_persona_name_is_cleaned_and_bounded(

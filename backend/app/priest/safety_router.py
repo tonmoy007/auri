@@ -233,6 +233,22 @@ def not_covered_text() -> str:
     return load_template("not_covered.md").text
 
 
+# The Bengali block. The library and the model run are English only, and the crisis
+# lexicon is English, so a question in this script cannot be safety-checked in
+# its own words: it gets a fixed notice that points to emergency help instead.
+_BENGALI = range(0x0980, 0x0A00)
+
+
+def is_unsupported_script(text: str) -> bool:
+    """Whether *text* contains Bengali script, which the Guide cannot answer yet."""
+    return any(ord(ch) in _BENGALI for ch in text)
+
+
+def english_only_text() -> str:
+    """The fixed reply for a question in a script the Guide does not support."""
+    return load_template("english_only.md").text
+
+
 def ruling_footer_text() -> str:
     """The footer appended when a question asks for a religious ruling."""
     return load_template("ruling_footer.md").text

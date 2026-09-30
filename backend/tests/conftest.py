@@ -141,12 +141,16 @@ def _live_settings_objects() -> list[Settings]:
 
 
 @pytest.fixture(autouse=True)
-def isolate_optional_endpoints(set_setting: SettingPatcher) -> None:
+def isolate_optional_endpoints(
+    set_setting: SettingPatcher, request: pytest.FixtureRequest
+) -> None:
     """Blank the optional remote-model settings, whatever a developer's .env holds.
 
     A dev machine may point the themes model at a real server with a real key;
     no test may reach it, or depend on it.
     """
+    if request.node.get_closest_marker("live_llm"):
+        return  # a deliberate live test reads the configuration it was asked to use
     for name, value in (
         ("THEMES_LLM_BASE_URL", ""),
         ("THEMES_LLM_MODEL", ""),

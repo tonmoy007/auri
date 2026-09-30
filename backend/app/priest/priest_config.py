@@ -12,9 +12,9 @@ import json
 import logging
 import math
 import unicodedata
-from typing import Final
+from typing import Any, Final
 
-from app.config import settings
+from app.config import Settings, settings
 from app.priest.schemas import TraditionId
 from app.services.settings_service import get_config
 
@@ -24,6 +24,11 @@ _TRUE: Final = frozenset({"true", "1", "yes", "on"})
 _DEFAULT_PERSONA: Final = "Guide"
 _MAX_PERSONA_CHARS: Final = 40
 _KNOWN_TRADITIONS: Final = frozenset(t.value for t in TraditionId)
+
+
+def _default(key: str) -> Any:
+    """The built-in default of a setting, so there is one place that pins it."""
+    return Settings.model_fields[key].default
 
 
 def _raw(key: str) -> str:
@@ -101,17 +106,21 @@ def max_concurrency() -> int:
 
 def min_relevance_dense() -> float:
     """Best dense cosine at or above which the library counts as covering a question."""
-    return _float("PRIEST_MIN_RELEVANCE_DENSE", 0.0, 1.0, 0.5)
+    return _float(
+        "PRIEST_MIN_RELEVANCE_DENSE", 0.0, 1.0, _default("PRIEST_MIN_RELEVANCE_DENSE")
+    )
 
 
 def min_relevance_bm25() -> float:
     """Best BM25 score at or above which the library counts as covering a question."""
-    return _float("PRIEST_MIN_RELEVANCE_BM25", 0.0, 1000.0, 3.0)
+    return _float(
+        "PRIEST_MIN_RELEVANCE_BM25", 0.0, 1000.0, _default("PRIEST_MIN_RELEVANCE_BM25")
+    )
 
 
 def llm_model() -> str:
     """The model name asked of the primary chat server."""
-    return _raw("PRIEST_LLM_MODEL").strip() or str(settings.PRIEST_LLM_MODEL)
+    return _raw("PRIEST_LLM_MODEL").strip()
 
 
 def fallback_model() -> str:
@@ -121,7 +130,7 @@ def fallback_model() -> str:
 
 def embed_model() -> str:
     """The embedding model for the next index build."""
-    return _raw("PRIEST_EMBED_MODEL").strip() or "nomic-embed-text"
+    return _raw("PRIEST_EMBED_MODEL").strip() or str(_default("PRIEST_EMBED_MODEL"))
 
 
 def fallback_base_url() -> str:

@@ -55,7 +55,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from app.config import settings
-from app.exceptions import PriestError, PriestUnavailableError
+from app.exceptions import PriestEndpointError, PriestError, PriestUnavailableError
+from app.llm.chat_endpoint import resolve_fallback, resolve_primary
 from app.priest import answer_validator
 from app.priest.answer_validator import find_references, normalise_quote
 from app.priest.index_store import ActiveIndex
@@ -1052,8 +1053,12 @@ async def live_availability() -> str | None:
         return "the priest service is not available (app.priest.priest_service)"
     if not settings.PRIEST_MODE_ENABLED:
         return "PRIEST_MODE_ENABLED is false in this environment"
-    if not (settings.PRIEST_LLM_BASE_URL.strip() or settings.PRIEST_FALLBACK_MODEL):
-        return "no chat server is configured (PRIEST_LLM_BASE_URL is empty)"
+    try:
+        has_server = resolve_primary() is not None or resolve_fallback() is not None
+    except PriestEndpointError:
+        return "the configured chat server cannot be used (see the Privacy panel)"
+    if not has_server:
+        return "no chat server is configured (set PRIEST_LLM_BASE_URL or THEMES_LLM_BASE_URL)"
     if not (Path(settings.PRIEST_INDEX_DIR) / "ACTIVE").is_file():
         return "there is no active priest index"
     return None

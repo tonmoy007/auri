@@ -304,6 +304,8 @@ class PriestService:
             return self._finish(run, self._crisis_response(run))
         if run.decision.kind == "deferral":
             return self._finish(run, self._deferral_response(run))
+        if safety_router.is_unsupported_script(run.original):
+            return self._finish(run, self._english_only_response(run))
         await self._acquire(request_id)
         try:
             return self._finish(run, await self._heavy(run))
@@ -568,6 +570,14 @@ class PriestService:
                 CrisisContactOut(label=c.label, detail=c.detail, dial=c.dial)
                 for c in reply.contacts
             ],
+        )
+
+    def _english_only_response(self, run: _Run) -> PriestAnswerResponse:
+        """A fixed notice for a script the Guide cannot answer; no retrieval, no model."""
+        return PriestAnswerResponse(
+            request_id=run.request_id,
+            kind=AnswerKind.not_covered,
+            notice=safety_router.english_only_text(),
         )
 
     def _deferral_response(self, run: _Run) -> PriestAnswerResponse:

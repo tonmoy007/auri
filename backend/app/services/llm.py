@@ -323,6 +323,7 @@ class LLMService:
                     "model": get_config("OLLAMA_MODEL", settings.OLLAMA_MODEL),
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
+                    "options": {"num_ctx": settings.OLLAMA_NUM_CTX},
                 },
                 timeout=120,
             )

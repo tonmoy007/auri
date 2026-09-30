@@ -75,18 +75,25 @@ class Settings(BaseSettings):
     # the themes endpoint and its opt-ins (THEMES_LLM_*); never to a third-party API.
     PRIEST_LLM_BASE_URL: str = ""
     PRIEST_LLM_API_KEY: str = ""
-    PRIEST_LLM_MODEL: str = "qwen3.5-9b"
+    # The model name the chat server serves (for vLLM, exactly what /v1/models lists).
+    # Empty uses THEMES_LLM_MODEL on the prototype shortcut; it is required when
+    # PRIEST_LLM_BASE_URL is set.
+    PRIEST_LLM_MODEL: str = ""
     PRIEST_LLM_ALLOW_INSECURE_HTTP: bool = False
     # Local Ollama used when the primary fails; empty derives it from OLLAMA_BASE_URL.
     PRIEST_FALLBACK_BASE_URL: str = ""
     PRIEST_FALLBACK_MODEL: str = ""
     PRIEST_LLM_TIMEOUT_SECONDS: int = Field(default=20, ge=1, le=120)
     PRIEST_TOTAL_DEADLINE_SECONDS: int = Field(default=30, ge=5, le=300)
-    PRIEST_EMBED_MODEL: str = "nomic-embed-text"
+    # Pinned from the retrieval evaluation (docs/priest-retrieval-report.md): bge-large
+    # had the best not-covered F1 and hybrid MRR of the three installed embedders. A
+    # different model needs its own index build and its own floors.
+    PRIEST_EMBED_MODEL: str = "bge-large"
     PRIEST_TOP_K: int = Field(default=6, ge=1, le=12)
-    # Relevance floors; calibrated on the retrieval gold set (13.12).
-    PRIEST_MIN_RELEVANCE_DENSE: float = 0.5
-    PRIEST_MIN_RELEVANCE_BM25: float = 3.0
+    # Relevance floors calibrated for bge-large on the 50-question gold set (13.12). The
+    # earlier 0.5 and 3.0 called every question covered.
+    PRIEST_MIN_RELEVANCE_DENSE: float = 0.547
+    PRIEST_MIN_RELEVANCE_BM25: float = 18.8
     PRIEST_RATE_LIMIT_PER_MINUTE: int = Field(default=4, ge=1)
     PRIEST_RATE_LIMIT_PER_DAY: int = Field(default=40, ge=1)
     PRIEST_MAX_CONCURRENCY: int = Field(default=4, ge=1, le=64)
@@ -121,6 +128,9 @@ class Settings(BaseSettings):
     # then OpenAI — first provider to return a non-empty response wins.
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2:3b"
+    # Context window asked of Ollama. Every prompt here is short; without a cap Ollama
+    # reserves memory for the model's whole context (a 3B model was seen holding 9.9 GB).
+    OLLAMA_NUM_CTX: int = Field(default=4096, ge=512, le=131072)
     GEMINI_API_KEY: str = ""
     GEMINI_MODEL: str = "gemini-1.5-flash"
     OPENAI_API_KEY: str = ""

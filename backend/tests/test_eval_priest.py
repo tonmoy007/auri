@@ -1891,3 +1891,57 @@ def test_default_context_uses_the_real_templates() -> None:
     # Assert
     assert ctx.crisis_text == crisis_reply().text
     assert ctx.ruling_footer == ruling_footer_text()
+
+
+# ── the live availability check ──────────────────────────────────────────
+
+
+def _ready(set_setting, tmp_path: Path) -> None:
+    (tmp_path / "ACTIVE").write_text("v1")
+    set_setting("PRIEST_MODE_ENABLED", True)
+    set_setting("PRIEST_INDEX_DIR", str(tmp_path))
+    set_setting("PRIEST_LLM_BASE_URL", "")
+    set_setting("PRIEST_FALLBACK_MODEL", "")
+
+
+@pytest.mark.asyncio
+async def test_the_themes_shortcut_counts_as_a_configured_chat_server(
+    set_setting, tmp_path: Path
+) -> None:
+    # Arrange — the prototype reuses the themes server, exactly as the service does
+    _ready(set_setting, tmp_path)
+    set_setting("THEMES_LLM_BASE_URL", "http://10.0.0.5:8000/v1")
+    set_setting("THEMES_LLM_MODEL", "served-model")
+
+    # Act / Assert
+    assert await script.live_availability() is None
+
+
+@pytest.mark.asyncio
+async def test_with_no_chat_server_at_all_the_run_is_skipped_with_a_reason(
+    set_setting, tmp_path: Path
+) -> None:
+    # Arrange
+    _ready(set_setting, tmp_path)
+
+    # Act
+    reason = await script.live_availability()
+
+    # Assert
+    assert reason is not None and "no chat server" in reason
+
+
+@pytest.mark.asyncio
+async def test_a_refused_chat_server_is_reported_not_treated_as_missing(
+    set_setting, tmp_path: Path
+) -> None:
+    # Arrange — a hosted provider address must not be mistaken for "nothing configured"
+    _ready(set_setting, tmp_path)
+    set_setting("PRIEST_LLM_BASE_URL", "https://api.openai.com")
+    set_setting("PRIEST_LLM_MODEL", "m")
+
+    # Act
+    reason = await script.live_availability()
+
+    # Assert
+    assert reason is not None and "cannot be used" in reason

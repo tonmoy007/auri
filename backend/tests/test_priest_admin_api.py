@@ -334,7 +334,7 @@ async def test_index_with_nothing_built_is_empty(client: AsyncClient) -> None:
         "active_version": None,
         "manifest": None,
         "versions": [],
-        "configured_embed_model": "nomic-embed-text",
+        "configured_embed_model": "bge-large",
     }
 
 
@@ -991,7 +991,7 @@ async def test_health_with_nothing_configured_probes_only_the_embedder(
     }
     assert body["primary"] == unconfigured
     assert body["fallback"] == unconfigured
-    assert body["embedder"] == {"reachable": True, "model": "nomic-embed-text"}
+    assert body["embedder"] == {"reachable": True, "model": "bge-large"}
     assert [str(r.url) for r in probes.requests] == ["http://localhost:11434/api/tags"]
 
 
@@ -1001,6 +1001,7 @@ async def test_health_probes_each_server_without_a_body_and_keeps_the_key_home(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://vllm.internal:8000")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     set_setting("PRIEST_LLM_API_KEY", PRIMARY_KEY)
     set_setting("PRIEST_FALLBACK_MODEL", "qwen-small")
 
@@ -1066,6 +1067,7 @@ async def test_health_sends_no_key_when_none_is_configured(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://vllm.internal:8000")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
 
     # Act
     await call(client, "GET", "/health", None, legacy())
@@ -1084,6 +1086,7 @@ async def test_health_reports_unreachable_for_every_kind_of_failure(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://vllm.internal:8000")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     target = "vllm.internal/v1/models"
     if outcome == "connect_error":
         probes.down.add(target)
@@ -1115,7 +1118,7 @@ async def test_health_reports_an_embedder_that_is_down(
     body = (await call(client, "GET", "/health", None, legacy())).json()
 
     # Assert
-    assert body["embedder"] == {"reachable": False, "model": "nomic-embed-text"}
+    assert body["embedder"] == {"reachable": False, "model": "bge-large"}
 
 
 @pytest.mark.asyncio
@@ -1124,6 +1127,7 @@ async def test_health_never_echoes_what_a_server_answers(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://vllm.internal:8000")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     probes.body = b'{"data": [{"id": "SERVER-REPLY-CANARY"}]}'
 
     # Act
@@ -1139,6 +1143,7 @@ async def test_health_refuses_to_probe_a_hosted_provider(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://api.openai.com")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     set_setting("PRIEST_LLM_API_KEY", PRIMARY_KEY)
 
     # Act
@@ -1173,7 +1178,7 @@ async def test_health_does_not_probe_an_unusable_embedder_address(
     body = (await call(client, "GET", "/health", None, legacy())).json()
 
     # Assert
-    assert body["embedder"] == {"reachable": None, "model": "nomic-embed-text"}
+    assert body["embedder"] == {"reachable": None, "model": "bge-large"}
     assert probes.requests == []
 
 

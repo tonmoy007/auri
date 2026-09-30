@@ -985,6 +985,7 @@ async def _limit_ids_and_statements(
 
 def _guide(set_setting: SettingPatcher, **values: object) -> None:
     set_setting("PRIEST_MODE_ENABLED", True)
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     for key, value in values.items():
         set_setting(key, value)
 

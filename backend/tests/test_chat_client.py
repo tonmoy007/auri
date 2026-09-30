@@ -759,3 +759,44 @@ async def test_only_the_configured_servers_are_ever_contacted() -> None:
     hosts = {r.url.host for r in [*first_seen, *second_seen]}
     assert hosts == {"vllm.test", "ollama.test"}
     assert not hosts & set(THIRD_PARTY_HOSTS)
+
+
+def test_the_themes_shortcut_uses_the_themes_model_when_no_priest_model_is_named(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange — the prototype reuses the themes server, which already names its model
+    set_setting("THEMES_LLM_BASE_URL", "http://10.0.0.5:8000/v1")
+    set_setting("THEMES_LLM_MODEL", "RedHatAI/Qwen3.5-9B-FP8-dynamic")
+    set_setting("PRIEST_LLM_MODEL", "")
+
+    # Act
+    endpoint = resolve_primary()
+
+    # Assert
+    assert endpoint is not None
+    assert endpoint.model == "RedHatAI/Qwen3.5-9B-FP8-dynamic"
+
+
+def test_a_named_priest_model_wins_over_the_themes_model(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("THEMES_LLM_BASE_URL", "http://10.0.0.5:8000/v1")
+    set_setting("THEMES_LLM_MODEL", "themes-model")
+    set_setting("PRIEST_LLM_MODEL", "priest-model")
+
+    # Act
+    endpoint = resolve_primary()
+
+    # Assert
+    assert endpoint is not None and endpoint.model == "priest-model"
+
+
+def test_its_own_server_needs_its_own_model_name(set_setting: SettingPatcher) -> None:
+    # Arrange — guessing a model name would send every request to a server that has none
+    set_setting("PRIEST_LLM_BASE_URL", "https://llm.example.test")
+    set_setting("PRIEST_LLM_MODEL", "")
+
+    # Act / Assert
+    with pytest.raises(PriestEndpointError, match="PRIEST_LLM_MODEL"):
+        resolve_primary()

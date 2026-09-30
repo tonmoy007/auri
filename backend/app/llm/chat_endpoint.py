@@ -103,7 +103,7 @@ def _from_themes() -> ChatEndpoint | None:
     refuse_third_party_host(themes.host)
     return ChatEndpoint(
         base_url=themes.base_url,
-        model=priest_config.llm_model(),
+        model=priest_config.llm_model() or themes.model,
         api_key=themes.api_key,
         timeout_seconds=priest_config.llm_timeout_seconds(),
         host=themes.host.lower(),
@@ -126,9 +126,14 @@ def resolve_primary() -> ChatEndpoint | None:
     if not raw:
         return _from_themes()
     base, host = _checked_base(raw, "PRIEST_LLM_BASE_URL")
+    model = priest_config.llm_model()
+    if not model:
+        raise PriestEndpointError(
+            "PRIEST_LLM_MODEL must be set when PRIEST_LLM_BASE_URL is"
+        )
     return ChatEndpoint(
         base_url=base,
-        model=priest_config.llm_model(),
+        model=model,
         api_key=settings.PRIEST_LLM_API_KEY,
         timeout_seconds=priest_config.llm_timeout_seconds(),
         host=host,

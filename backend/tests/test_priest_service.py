@@ -1065,6 +1065,7 @@ async def test_the_live_chain_only_talks_to_the_resolved_priest_servers(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "http://127.0.0.1:8000")
+    set_setting("PRIEST_LLM_MODEL", "served-model")
     set_setting("PRIEST_FALLBACK_MODEL", "llama3.2:3b")
     set_setting("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
     hosts: list[str] = []
@@ -1183,3 +1184,21 @@ async def test_the_default_service_reports_a_missing_index_as_unavailable(
     # Assert
     priest_service.reset_priest_service()
     assert raised.value.code == "priest_index_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_a_bengali_question_gets_the_english_only_notice_and_no_model_work() -> (
+    None
+):
+    # Arrange
+    retriever, chain = FakeRetriever(), FakeChain([answer_json()])
+    service = make_service(retriever=retriever, chain=chain)
+
+    # Act
+    response = await ask(service, "আমার খুব মন খারাপ, আমি কীভাবে শান্তি পাব?")
+
+    # Assert
+    assert response.kind is AnswerKind.not_covered
+    assert response.notice == safety_router.english_only_text()
+    assert retriever.calls == [] and chain.calls == []
+    assert response.points == [] and response.citations == []

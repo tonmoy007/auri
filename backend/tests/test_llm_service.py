@@ -282,6 +282,38 @@ def test_call_ollama_parses_reply_text_from_chat_message_response() -> None:
     assert result == "local reply"
 
 
+def test_call_ollama_caps_the_context_window_so_the_model_stays_small() -> None:
+    # Arrange — without a cap Ollama reserves memory for the model's whole context: a
+    # 3B model was seen holding 9.9 GB, enough to starve the machine it ran on
+    service = LLMService(provider="ollama")
+    mock_response = Mock()
+    mock_response.json.return_value = {"message": {"content": "ok"}}
+
+    # Act
+    with patch("httpx.post", return_value=mock_response) as post:
+        service._call_ollama("a prompt")
+
+    # Assert
+    assert post.call_args.kwargs["json"]["options"]["num_ctx"] == 4096
+
+
+def test_the_context_cap_can_be_changed_from_the_config() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    mock_response = Mock()
+    mock_response.json.return_value = {"message": {"content": "ok"}}
+
+    # Act
+    with (
+        patch("app.services.llm.settings.OLLAMA_NUM_CTX", 2048),
+        patch("httpx.post", return_value=mock_response) as post,
+    ):
+        service._call_ollama("a prompt")
+
+    # Assert
+    assert post.call_args.kwargs["json"]["options"]["num_ctx"] == 2048
+
+
 def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
     # Arrange
     instruction = "Assign exactly one category to the confession"

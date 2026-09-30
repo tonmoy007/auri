@@ -1,4 +1,4 @@
-# version: 1
+# version: 2
 # Crisis phrases for priest mode: self-harm, suicide and intent to harm others.
 # Matched against the question after normalisation (casefolded, NFKC, punctuation
 # removed, apostrophes dropped so "don't" is "dont", digits in words read as letters
@@ -65,6 +65,20 @@ wish i had never been born
 wish i was never born
 re:wish i (had|was|were|would)? ?(never|not) (been |be )?(born|alive|here)
 re:(want|wish) (it|everything) (to )?(all )?(stop|end|be over)
+
+# passive ideation (added after a live evaluation showed these reached the model)
+re:\b(want|wanna|wish|hope|hoping|need) (to |i could |i would )?(just )?(disappear|vanish)( forever| for good)?\b
+re:\b(want|wanna|wish|hope|hoping|just) (to )?(never|not) wake( up)?\b
+re:\b(go to sleep|fall asleep|sleep) and (never|not) wake( up)?\b
+re:\b(i dont|i do not|i wont) wake up (tomorrow|again)\b
+re:\b(easier|better) (if|when) (i|we) (was|were|am) (not|no longer|never) (alive|here|around|born)\b
+re:\b(i|im) (was|were|am|be) no longer (alive|here|around)\b
+re:\b(wish|want|hope) (i|to) (was|were|be)? ?(not|never|no longer) (alive|here|around|exist)\b
+re:\b(end|ending) (it all|my life|things for good)\b
+re:\b(thoughts?|thinking|thought) (of|about) (not being|no longer being) (here|alive|around)\b
+re:\bnot being (here|alive|around) anymore\b
+re:\b(dont|do not|cant|cannot) see the point (of|in) (being alive|living|going on|carrying on|life)\b
+re:\bno longer want to be (alive|here|around)\b
 
 # intent to harm others
 re:\b(i|im|ill|id)( am| will| just| really| might| may| could)* (want|wanna|going|gonna|plan|planning|intend|mean|thinking of|thinking about|about)( to)? (kill|murder|shoot|stab|strangle|poison|hurt|harm|attack|beat up) (him|her|them|someone|somebody|everyone|people|my (boss|manager|coworker|co worker|colleague|supervisor|wife|husband|partner|ex|brother|sister|mother|father|mom|dad|parents?|son|daughter|children|kids?|teacher|neighbou?r|family|friend|employer|roommate))
