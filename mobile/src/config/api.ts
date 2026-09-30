@@ -87,6 +87,10 @@ export const ENDPOINTS = {
   tts: '/api/v1/tts',
   /** List configured recipient departments for the Forward flow */
   departments: '/api/v1/departments',
+  /** Whether the Guide is on, and what the app needs to draw its entry point */
+  priestStatus: '/api/v1/priest/status',
+  /** Ask the Guide a question */
+  priestAsk: '/api/v1/priest/ask',
 } as const;
 
 /**
