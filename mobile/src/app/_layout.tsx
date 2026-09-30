@@ -5,6 +5,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '../theme/colors';
 import { loadBackendUrlOverride } from '../config/api';
+import { purgeRecordingCache } from '../lib/recordingFiles';
 
 /**
  * Root layout for the Expo Router app.
@@ -21,6 +22,13 @@ export default function RootLayout(): React.JSX.Element | null {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Recordings the screens did not get to delete (a force-closed app, a back
+  // gesture out of review) would otherwise stay in the cache for ever. Nothing
+  // is in flight at a cold start, so whatever is found is leftover.
+  useEffect(() => {
+    void purgeRecordingCache();
   }, []);
 
   // Every screen fetches via config/api.ts's getApiBaseUrl()/getWsUrl(),

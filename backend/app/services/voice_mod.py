@@ -106,6 +106,11 @@ class VoiceModulator:
                 "ffmpeg is not installed. Install it with: brew install ffmpeg "
                 "or: apt-get install ffmpeg"
             ) from exc
+        except BaseException:
+            # A timeout, or anything else: the half-converted copy of the
+            # confessor's voice must not stay in the temp directory.
+            tmp_path.unlink(missing_ok=True)
+            raise
 
         if result.returncode != 0:
             tmp_path.unlink(missing_ok=True)
@@ -145,27 +150,46 @@ class VoiceModulator:
         cmd = ["sox", str(src), str(dst)] + effects
         logger.info("Running SoX: %s", " ".join(cmd))
 
+        # SoX creates its output file before it has processed any audio, so every
+        # way this can fail leaves a truncated recording of the confessor's voice
+        # in the output directory. Nothing else would ever delete it.
+        succeeded = False
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=120,
-                check=False,
-            )
-        except FileNotFoundError as exc:
-            raise RuntimeError(
-                "SoX (sox) is not installed. Install it with: brew install sox "
-                "or: apt-get install sox"
-            ) from exc
-        finally:
-            if transcoded is not None:
-                transcoded.unlink(missing_ok=True)
+            try:
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
+                    check=False,
+                )
+            except FileNotFoundError as exc:
+                raise RuntimeError(
+                    "SoX (sox) is not installed. Install it with: brew install sox "
+                    "or: apt-get install sox"
+                ) from exc
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"SoX processing failed (exit {result.returncode}): "
-                f"{result.stderr.strip()}"
-            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    f"SoX processing failed (exit {result.returncode}): "
+                    f"{result.stderr.strip()}"
+                )
+            succeeded = True
+        finally:
+            # Tidying is best effort and must neither skip the other cleanup nor
+            # turn a good mask into a failure: the caller never learns the output
+            # path of a call that raised, so raising after success would orphan it.
+            if transcoded is not None:
+                try:
+                    transcoded.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning(
+                        "Could not remove temporary transcode %s", transcoded
+                    )
+            if not succeeded:
+                try:
+                    dst.unlink(missing_ok=True)
+                except OSError:
+                    logger.warning("Could not remove failed mask output %s", dst)
 
         return str(dst.resolve())

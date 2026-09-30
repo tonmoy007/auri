@@ -16,9 +16,11 @@ import pytest_asyncio
 from app.config import Settings
 from app.models.base import Base
 from app.models.confession import Confession, ConfessionStatus
+from app.models.user import AnonymousUser
 from app.services.retention import (
     RetentionResult,
     purge_stale_confessions,
+    purge_stale_devices,
     run_retention,
 )
 from pydantic import ValidationError
@@ -525,3 +527,99 @@ def test_zero_reply_retention_is_refused_even_when_confession_retention_is_zero(
     # Act / Assert
     with pytest.raises(ValidationError):
         Settings(_env_file=None, RETENTION_HOURS=0, REPLY_RETENTION_DAYS=0)
+
+
+RATE_LIMIT_SECONDS = 300
+
+
+def _device(device_hash: str, last_confession_at: datetime) -> AnonymousUser:
+    return AnonymousUser(
+        device_token_hash=device_hash,
+        last_confession_at=last_confession_at,
+        confession_count=3,
+    )
+
+
+async def _device_hashes(session: AsyncSession) -> list[str]:
+    rows = await session.execute(select(AnonymousUser.device_token_hash))
+    return sorted(rows.scalars().all())
+
+
+@pytest.mark.asyncio
+async def test_device_records_past_the_rate_limit_window_are_deleted(
+    session: AsyncSession,
+) -> None:
+    # Arrange — the record exists only to rate-limit, so once the window has
+    # passed it does nothing except link a device to when it last spoke
+    window = timedelta(seconds=RATE_LIMIT_SECONDS)
+    session.add_all(
+        [
+            _device("expired", NOW - window - timedelta(seconds=1)),
+            _device("edge", NOW - window),
+            _device("active", NOW - window + timedelta(seconds=1)),
+        ]
+    )
+    await session.commit()
+
+    # Act
+    removed = await purge_stale_devices(session, NOW, RATE_LIMIT_SECONDS)
+    await session.commit()
+
+    # Assert — only the one strictly past the window goes
+    assert removed == 1
+    assert await _device_hashes(session) == ["active", "edge"]
+
+
+@pytest.mark.asyncio
+async def test_a_device_still_inside_its_window_is_still_rate_limited_after_a_run(
+    session: AsyncSession,
+) -> None:
+    # Arrange — purging must never forget a device that is still being limited
+    session.add(_device("limited", NOW - timedelta(seconds=10)))
+    await session.commit()
+
+    # Act
+    await run_retention(
+        session, NOW, RETENTION_HOURS, 30, device_window_seconds=RATE_LIMIT_SECONDS
+    )
+    await session.commit()
+
+    # Assert
+    assert await _device_hashes(session) == ["limited"]
+
+
+@pytest.mark.asyncio
+async def test_a_run_counts_the_device_records_it_removed(
+    session: AsyncSession,
+) -> None:
+    # Arrange
+    old = NOW - timedelta(days=2)
+    session.add_all([_device("one", old), _device("two", old)])
+    await session.commit()
+
+    # Act
+    result = await run_retention(
+        session, NOW, RETENTION_HOURS, 30, device_window_seconds=RATE_LIMIT_SECONDS
+    )
+    await session.commit()
+
+    # Assert
+    assert result.expired_devices == 2
+    assert await _device_hashes(session) == []
+
+
+@pytest.mark.asyncio
+async def test_device_records_are_left_alone_unless_a_window_is_given(
+    session: AsyncSession,
+) -> None:
+    # Arrange — a caller that does not know the rate limit must not guess one
+    session.add(_device("old", NOW - timedelta(days=2)))
+    await session.commit()
+
+    # Act
+    result = await run_retention(session, NOW, RETENTION_HOURS, 30)
+    await session.commit()
+
+    # Assert
+    assert result.expired_devices == 0
+    assert await _device_hashes(session) == ["old"]

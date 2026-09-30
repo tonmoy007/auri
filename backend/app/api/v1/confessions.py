@@ -6,11 +6,11 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Final
+from typing import Final, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -311,21 +311,33 @@ def _safe_moderate(llm_service: LLMService, text: str) -> ModerationSeverity:
         return ModerationSeverity.policy
 
 
-def _upsert_anonymous_user(
-    session: AsyncSession,
-    user: AnonymousUser | None,
-    device_token_hash: str,
-    now: datetime,
+async def _record_submission(
+    session: AsyncSession, device_token_hash: str, now: datetime
 ) -> None:
-    """Create or refresh the anonymous-user usage record for a device.
+    """Note that a device has just submitted, for the rate limit.
+
+    One UPDATE, creating the row only if none matched, rather than changing the
+    row this request read at its start. That read was followed by several
+    seconds of model calls, and the retention job deletes exactly the records a
+    returning confessor has (their last confession is older than the window), so
+    the row may be gone by now. Changing the stale object would fail the whole
+    request, losing the confession for the sake of a record about it.
 
     Args:
         session: Active database session (mutations flushed by the caller).
-        user: Existing record for this device, or ``None`` to create one.
         device_token_hash: SHA-256 hash identifying the device.
         now: Current time, from the injected clock.
     """
-    if user is None:
+    result = await session.execute(
+        update(AnonymousUser)
+        .where(AnonymousUser.device_token_hash == device_token_hash)
+        .values(
+            last_confession_at=now,
+            confession_count=AnonymousUser.confession_count + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if cast(CursorResult, result).rowcount == 0:
         session.add(
             AnonymousUser(
                 device_token_hash=device_token_hash,
@@ -333,10 +345,6 @@ def _upsert_anonymous_user(
                 confession_count=1,
             )
         )
-        return
-
-    user.last_confession_at = now
-    user.confession_count += 1
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -404,7 +412,7 @@ async def create_confession(
         counselor_response=counselor_response,
     )
     session.add(confession)
-    _upsert_anonymous_user(session, user, body.device_token_hash, now)
+    await _record_submission(session, body.device_token_hash, now)
 
     await session.flush()
     await session.refresh(confession)

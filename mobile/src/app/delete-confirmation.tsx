@@ -12,6 +12,7 @@ import { ThreeCanvas } from '../components/ThreeCanvas';
 import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { deleteRecordingFile } from '../lib/recordingFiles';
 
 const EXTINGUISH_DURATION_MS = 1400;
 
@@ -48,6 +49,7 @@ const UUID_PATTERN =
 export default function DeleteConfirmationScreen(): React.JSX.Element {
   const rawParams = useLocalSearchParams();
   const id = readStringParam(rawParams, 'id') ?? '';
+  const audioUri = readStringParam(rawParams, 'audioUri');
   const [stage, setStage] = useState<Stage>('confirming');
   const [extinguishProgress, setExtinguishProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +113,8 @@ export default function DeleteConfirmationScreen(): React.JSX.Element {
     runExtinguishAnimation(() => {
       void deletePromise.then((succeeded) => {
         if (succeeded) {
+          // Deleting the confession also deletes the phone's copy of the recording.
+          void deleteRecordingFile(audioUri);
           router.dismissAll();
           router.replace('/');
           return;
@@ -122,7 +126,7 @@ export default function DeleteConfirmationScreen(): React.JSX.Element {
         setStage('confirming');
       });
     });
-  }, [id, haptics, runExtinguishAnimation]);
+  }, [id, audioUri, haptics, runExtinguishAnimation]);
 
   const handleCancel = useCallback(() => {
     router.back();

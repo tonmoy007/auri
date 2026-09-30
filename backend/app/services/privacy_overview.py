@@ -74,6 +74,7 @@ class RunSummary:
     deleted: Bucket
     emptied_to_shell: Bucket
     expired_replies: Bucket
+    expired_devices: Bucket
 
 
 @dataclass(frozen=True)
@@ -310,9 +311,13 @@ def _ai_limits(snapshot: PrivacySnapshot) -> list[Fact]:
         Fact("speech", speech),
         Fact(
             "phone_copy",
-            "The app on the confessor's phone keeps a copy of the voice-masked "
-            "recording in its cache, and anyone who can open the app can see "
-            "the confession history and HR's replies.",
+            "The app on the confessor's phone keeps the voice-masked recording "
+            "in its cache while a confession is prepared, and deletes it when "
+            "the confession is sent or deleted, when the confessor records "
+            "again, and at the next start of the app if it was left behind. "
+            "If voice masking fails, the unmasked recording is kept on the "
+            "phone until then. Anyone who can open the app can see the "
+            "confession history and HR's replies.",
         ),
     ]
     if not snapshot.themes.encrypted:
@@ -356,7 +361,9 @@ def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
             "transcript without being recorded in the audit trail, can see "
             "which confessions came from the same phone (though not whose), "
             "and could use that phone's code to read, forward or withdraw "
-            "them. Database backups are outside this system's control.",
+            "them. A separate record of when a phone last sent a confession is "
+            "cleared by the scheduled job once the rate limit no longer needs "
+            "it. Database backups are outside this system's control.",
         ),
         Fact(
             "audit_kept",
@@ -466,6 +473,7 @@ def _summarise_run(run: RetentionRun, threshold: int) -> RunSummary:
         deleted=suppress("deleted", run.deleted, threshold),
         emptied_to_shell=suppress("emptied_to_shell", run.emptied_to_shell, threshold),
         expired_replies=suppress("expired_replies", run.expired_replies, threshold),
+        expired_devices=suppress("expired_devices", run.expired_devices, threshold),
     )
 
 

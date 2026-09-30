@@ -137,10 +137,11 @@
         "11.17": "completed",
         "11.18": "completed",
         "11.20": "pending",
-        "11.21": "pending",
+        "11.21": "completed",
         "11.19": "completed",
         "11.22": "completed",
-        "11.23": "completed"
+        "11.23": "completed",
+        "11.24": "pending"
       }
     },
     "12": {
@@ -162,5 +163,5 @@
     }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-09-30T13:45:00+06:00"
+  "updated_at": "2026-09-30T21:10:00+06:00"
 }

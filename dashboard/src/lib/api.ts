@@ -225,6 +225,7 @@ export interface RetentionRun {
   deleted: Bucket
   emptied_to_shell: Bucket
   expired_replies: Bucket
+  expired_devices: Bucket
 }
 
 export interface RetentionOverview {

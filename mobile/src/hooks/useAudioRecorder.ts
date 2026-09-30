@@ -14,6 +14,7 @@ import {
   getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { deleteRecordingFile } from '../lib/recordingFiles';
 
 /** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
 const METERING_FLOOR_DB = -60;
@@ -145,6 +146,14 @@ export function useAudioRecorder() {
   });
 
   const recordingRef = useRef<Audio.Recording | null>(null);
+  // The files this hook has made, so a new recording or leaving the booth can
+  // delete them. Only the most recent of each is ever on disk.
+  const recordingFileRef = useRef<string | null>(null);
+  const maskedFileRef = useRef<string | null>(null);
+  // False once the hook is gone. An upload or a masking request still in flight
+  // when the user leaves the booth finishes after the clean-up below has run, so
+  // whatever it writes then has to be deleted on the spot.
+  const isMountedRef = useRef(true);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   /**
@@ -152,6 +161,7 @@ export function useAudioRecorder() {
    * Also configures the audio mode for recording.
    */
   useEffect(() => {
+    isMountedRef.current = true;
     const setupAudio = async () => {
       try {
         const { granted } = await Audio.requestPermissionsAsync();
@@ -171,16 +181,42 @@ export function useAudioRecorder() {
 
     void setupAudio();
 
-    // Cleanup: stop recording if component unmounts
+    // Cleanup: stop recording if component unmounts, and delete the files it
+    // made. The review screen sits on top of the booth in the stack, so the
+    // booth only unmounts once that flow is over.
     return () => {
+      isMountedRef.current = false;
       if (recordingRef.current) {
         void recordingRef.current.stopAndUnloadAsync();
         recordingRef.current = null;
       }
+      void deleteRecordingFile(recordingFileRef.current);
+      void deleteRecordingFile(maskedFileRef.current);
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
     };
+  }, []);
+
+  /**
+   * Throw away a recording that was started for a booth the user has already
+   * left: stop the recorder (releasing the microphone), delete its file, and
+   * forget it. Used when leaving the booth overtakes the start.
+   */
+  const discardAbandonedRecording = useCallback(async (recording: Audio.Recording) => {
+    try {
+      await recording.stopAndUnloadAsync();
+    } catch {
+      // Never started, or already unloaded: nothing left to stop.
+    }
+    await deleteRecordingFile(recording.getURI());
+    if (recordingRef.current === recording) {
+      recordingRef.current = null;
+    }
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
   }, []);
 
   /**
@@ -205,6 +241,11 @@ export function useAudioRecorder() {
       if (recordingRef.current) {
         await recordingRef.current.stopAndUnloadAsync();
       }
+      // Recording again replaces the last take: its files are no longer needed.
+      await deleteRecordingFile(recordingFileRef.current);
+      await deleteRecordingFile(maskedFileRef.current);
+      recordingFileRef.current = null;
+      maskedFileRef.current = null;
 
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
@@ -234,7 +275,16 @@ export function useAudioRecorder() {
         },
       });
 
+      if (!isMountedRef.current) {
+        // The booth was left while the recorder was being prepared.
+        await discardAbandonedRecording(recording);
+        return;
+      }
+
       recordingRef.current = recording;
+      // The file exists from here on, so track it now: leaving the booth while
+      // recording, or a failure while stopping, must still be able to delete it.
+      recordingFileRef.current = recording.getURI();
 
       // Live mic amplitude, for the voice-responsive ring visualization.
       recording.setProgressUpdateInterval(METERING_UPDATE_INTERVAL_MS);
@@ -248,6 +298,9 @@ export function useAudioRecorder() {
 
       // Track duration
       const startTime = Date.now();
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+      }
       durationIntervalRef.current = setInterval(() => {
         const elapsed = Date.now() - startTime;
         setState((prev) => ({ ...prev, durationMs: elapsed }));
@@ -259,6 +312,10 @@ export function useAudioRecorder() {
       }, 100);
 
       await recording.startAsync();
+      if (!isMountedRef.current) {
+        await discardAbandonedRecording(recording);
+        return;
+      }
       setState((prev) => ({
         ...prev,
         isRecording: true,
@@ -274,7 +331,7 @@ export function useAudioRecorder() {
         error: 'Failed to start recording',
       }));
     }
-  }, [state.hasPermission]);
+  }, [state.hasPermission, discardAbandonedRecording]);
 
   /**
    * Stop recording and return the audio file URI.
@@ -313,6 +370,12 @@ export function useAudioRecorder() {
         throw new Error('Recording file was not saved');
       }
 
+      recordingFileRef.current = uri;
+      if (!isMountedRef.current) {
+        // The booth was left while this was being stopped; nobody will use it.
+        void deleteRecordingFile(uri);
+        return null;
+      }
       setState((prev) => ({
         ...prev,
         isRecording: false,
@@ -406,7 +469,7 @@ export function useAudioRecorder() {
 
         // `fetch` carries no timeout of its own, so without this the masking
         // request could hang indefinitely and leave the booth stuck on
-        // "Anonymizing…" with no way forward.
+        // "Processing…" with no way forward.
         const abort = new AbortController();
         const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
         let response: Response;
@@ -426,9 +489,15 @@ export function useAudioRecorder() {
         const body = (await response.json()) as { audio_base64: string };
 
         const maskedUri = `${FileSystem.cacheDirectory}masked_${Date.now()}.wav`;
+        // Tracked before the write, so a write that fails part-way is still cleaned up.
+        maskedFileRef.current = maskedUri;
         await FileSystem.writeAsStringAsync(maskedUri, body.audio_base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        if (!isMountedRef.current) {
+          void deleteRecordingFile(maskedUri);
+          return null;
+        }
         return maskedUri;
       } catch (_error: unknown) {
         return null;

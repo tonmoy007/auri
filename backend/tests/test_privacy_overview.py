@@ -818,3 +818,55 @@ async def test_latest_run_is_none_before_any_run(db_session: AsyncSession) -> No
 
     # Assert
     assert found is None
+
+
+@pytest.mark.asyncio
+async def test_the_last_run_reports_device_records_removed_under_the_same_rule(
+    api_client: AsyncClient, db_session: AsyncSession, make_staff: StaffFactory
+) -> None:
+    # Arrange — cohort is 3: 5 device records removed is shown, 2 is withheld
+    await record_run(
+        db_session,
+        NOW - timedelta(hours=1),
+        RetentionResult(0, 0, 0, expired_devices=5),
+        24,
+        30,
+    )
+    await record_run(
+        db_session,
+        NOW - timedelta(minutes=30),
+        RetentionResult(0, 0, 0, expired_devices=2),
+        24,
+        30,
+    )
+    await db_session.commit()
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    run = (await _overview(api_client, headers))["retention"]["last_run"]
+
+    # Assert — the latest run is the one with 2, which is below the cohort
+    assert run["expired_devices"]["suppressed"] is True
+    assert run["expired_devices"]["count"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_phone_and_device_statements_match_what_the_code_now_does(
+    api_client: AsyncClient, make_staff: StaffFactory
+) -> None:
+    # Arrange
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    limits = {
+        fact["id"]: fact["statement"]
+        for fact in (await _overview(api_client, headers))["limits"]
+    }
+
+    # Assert — the phone deletes its copies (and says when it cannot), and the
+    # record of when a phone last sent something is cleared by the job
+    phone = limits["phone_copy"]
+    assert "deletes" in phone
+    assert "unmasked" in phone
+    assert "keeps a copy" not in phone
+    assert "rate limit" in limits["db_access"]

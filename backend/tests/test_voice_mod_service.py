@@ -251,3 +251,168 @@ def test_robotic_mask_produces_audio_rather_than_failing(tmp_path: Path) -> None
     # Assert
     assert masked.exists()
     assert masked.stat().st_size > 0
+
+
+def _sox_that_writes_output_then(outcome: Exception | int):
+    """Fake ``sox`` that leaves a partial output file, then fails as *outcome*.
+
+    Real SoX opens (and so creates) its output before it processes any audio, so a
+    failure part-way leaves a truncated file behind.
+    """
+
+    def fake_run(cmd: list[str], *_args: object, **_kwargs: object) -> MagicMock:
+        Path(cmd[2]).write_bytes(b"partial output of a voice that was not masked")
+        if isinstance(outcome, Exception):
+            raise outcome
+        result = MagicMock()
+        result.returncode = outcome
+        result.stderr = "sox FAIL formats: can't open input"
+        return result
+
+    return fake_run
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_error"),
+    [
+        (2, RuntimeError),
+        (subprocess.TimeoutExpired(cmd="sox", timeout=120), subprocess.TimeoutExpired),
+        (FileNotFoundError("sox"), RuntimeError),
+    ],
+    ids=["non-zero exit", "timeout", "sox missing"],
+)
+def test_a_failed_mask_leaves_no_output_file_behind(
+    modulator: VoiceModulator,
+    tmp_path: Path,
+    outcome: Exception | int,
+    expected_error: type[Exception],
+) -> None:
+    # Arrange — the output is a half-written recording of a confessor's voice
+    src = tmp_path / "recording.wav"
+    src.write_bytes(b"fake wav bytes")
+
+    # Act
+    with (
+        patch(
+            "app.services.voice_mod.subprocess.run",
+            side_effect=_sox_that_writes_output_then(outcome),
+        ),
+        pytest.raises(expected_error),
+    ):
+        modulator.modulate(src, "warm")
+
+    # Assert
+    assert list((tmp_path / "modulated").iterdir()) == []
+
+
+def test_a_successful_mask_still_returns_its_output_file(
+    modulator: VoiceModulator, tmp_path: Path
+) -> None:
+    # Arrange
+    src = tmp_path / "recording.wav"
+    src.write_bytes(b"fake wav bytes")
+
+    # Act
+    with patch(
+        "app.services.voice_mod.subprocess.run",
+        side_effect=_sox_that_writes_output_then(0),
+    ):
+        produced = Path(modulator.modulate(src, "warm"))
+
+    # Assert — the caller owns this file and deletes it after use
+    assert produced.exists()
+
+
+def test_a_failed_transcode_timeout_leaves_no_temp_file_behind(
+    modulator: VoiceModulator, tmp_path: Path, monkeypatch
+) -> None:
+    # Arrange — ffmpeg creates the half-converted copy of the confessor's voice
+    # before it runs; a timeout must not leave it in the temp directory
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    monkeypatch.setattr("tempfile.tempdir", str(temp_dir))
+    src = tmp_path / "confession.aac"
+    src.write_bytes(b"fake aac bytes")
+
+    # Act
+    with (
+        patch(
+            "app.services.voice_mod.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(cmd="ffmpeg", timeout=60),
+        ),
+        pytest.raises(subprocess.TimeoutExpired),
+    ):
+        modulator.modulate(src, "warm")
+
+    # Assert
+    assert list(temp_dir.iterdir()) == []
+
+
+def _refuse_to_unlink_temp_sources(monkeypatch) -> None:
+    """Make removing the transcoded temp file fail, as a permissions error would."""
+    real_unlink = Path.unlink
+
+    def unlink_refusing_temp_sources(self: Path, missing_ok: bool = False) -> None:
+        if self.name.startswith("auri_mask_src_"):
+            raise PermissionError("cannot remove temp file")
+        real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", unlink_refusing_temp_sources)
+
+
+def _ffmpeg_ok_sox_writes_output_then(returncode: int):
+    def fake_run(cmd: list[str], *_args: object, **_kwargs: object) -> MagicMock:
+        if cmd[0] == "sox":
+            Path(cmd[2]).write_bytes(b"masked output")
+            result = MagicMock()
+            result.returncode = returncode
+            result.stderr = "sox FAIL" if returncode else ""
+            return result
+        return _ok_result()
+
+    return fake_run
+
+
+def test_a_failing_temp_file_cleanup_does_not_keep_a_failed_output_file(
+    modulator: VoiceModulator, tmp_path: Path, monkeypatch
+) -> None:
+    # Arrange — SoX fails, and removing the transcoded temp file fails too; the
+    # truncated masked output must still be removed
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    src = tmp_path / "confession.aac"
+    src.write_bytes(b"fake aac bytes")
+    _refuse_to_unlink_temp_sources(monkeypatch)
+
+    # Act
+    with (
+        patch(
+            "app.services.voice_mod.subprocess.run",
+            side_effect=_ffmpeg_ok_sox_writes_output_then(2),
+        ),
+        pytest.raises(RuntimeError, match="SoX processing failed"),
+    ):
+        modulator.modulate(src, "warm")
+
+    # Assert
+    assert list((tmp_path / "modulated").iterdir()) == []
+
+
+def test_a_failing_temp_file_cleanup_does_not_fail_a_successful_mask(
+    modulator: VoiceModulator, tmp_path: Path, monkeypatch
+) -> None:
+    # Arrange — the mask worked; only tidying the temp copy failed. Raising here
+    # would orphan the masked output, since the caller never learns its path.
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    src = tmp_path / "confession.aac"
+    src.write_bytes(b"fake aac bytes")
+    _refuse_to_unlink_temp_sources(monkeypatch)
+
+    # Act
+    with patch(
+        "app.services.voice_mod.subprocess.run",
+        side_effect=_ffmpeg_ok_sox_writes_output_then(0),
+    ):
+        produced = Path(modulator.modulate(src, "warm"))
+
+    # Assert
+    assert produced.exists()

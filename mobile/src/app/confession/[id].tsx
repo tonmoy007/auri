@@ -1,7 +1,7 @@
 // Auri — Confession booth screen
 // 3D scene with record button, voice mask selector, and status display
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useSettings } from '../../hooks/useSettings';
+import { deleteRecordingFile } from '../../lib/recordingFiles';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
 /** Delay before the door starts swinging open on entry, ms — lets the fade-in overlay clear first. */
@@ -56,6 +57,15 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [isExiting, setIsExiting] = useState(false);
   const recorder = useAudioRecorder();
   const haptics = useHaptics();
+  // Leaving the booth does not cancel a masking request already in flight, so the
+  // handler below checks this before moving on to a review of files that are gone.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Swing the door open shortly after mounting — the entry animation.
   useEffect(() => {
@@ -104,15 +114,25 @@ export default function ConfessionScreen(): React.JSX.Element {
         recorder.transcribeRecording(audioUri, durationMs),
         recorder.maskRecording(audioUri, voiceMask, durationMs),
       ]);
+      if (!isMountedRef.current) return;
+      // The unmasked recording has done its job once a masked copy exists; keep
+      // it only when masking failed, because review then plays it as the fallback.
+      if (maskedAudioUri) {
+        void deleteRecordingFile(audioUri);
+      }
       setStatus('done');
       // Swing the door shut before leaving the booth — the exit animation.
       setDoorOpen(false);
       await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
+      // Review labels the recording by whether it is the masked one; when masking
+      // failed it is the confessor's own voice and must not be called anonymized.
+      const masked = maskedAudioUri ? '1' : '0';
+      if (!isMountedRef.current) return;
       router.push({
         pathname: '/review',
         params: transcript
-          ? { id, audioUri: maskedAudioUri ?? audioUri, voiceMask, transcript }
-          : { id, audioUri: maskedAudioUri ?? audioUri, voiceMask },
+          ? { id, audioUri: maskedAudioUri ?? audioUri, masked, voiceMask, transcript }
+          : { id, audioUri: maskedAudioUri ?? audioUri, masked, voiceMask },
       });
     } catch (_error: unknown) {
       setStatus('idle');
@@ -166,7 +186,7 @@ export default function ConfessionScreen(): React.JSX.Element {
   const statusMessages: Record<ConfessionStatus, string> = {
     idle: 'Speak freely',
     recording: 'Recording…',
-    processing: 'Anonymizing…',
+    processing: 'Processing…',
     done: 'Ready for review',
   };
 
@@ -214,7 +234,7 @@ export default function ConfessionScreen(): React.JSX.Element {
         {status === 'processing' ? (
           <ShimmerText style={styles.statusText}>
             {recorder.isUploading
-              ? `Anonymizing… ${Math.round(recorder.uploadProgress * 100)}%`
+              ? `Processing… ${Math.round(recorder.uploadProgress * 100)}%`
               : statusMessages[status]}
           </ShimmerText>
         ) : (

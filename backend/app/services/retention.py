@@ -50,6 +50,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
+from app.models.user import AnonymousUser
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,7 @@ class RetentionResult:
     deleted: int
     emptied_to_shell: int
     expired_replies: int
+    expired_devices: int = 0
 
 
 @dataclass(frozen=True)
@@ -270,11 +272,38 @@ async def expire_old_replies(
     return expired
 
 
+async def purge_stale_devices(
+    session: AsyncSession, now: datetime, window_seconds: int
+) -> int:
+    """Delete device records whose rate-limit window has passed.
+
+    ``anonymous_users`` exists for one reason: to refuse a second confession
+    from the same device inside ``CONFESSION_RATE_LIMIT_SECONDS``. Once that
+    window has passed a record does nothing except tie a device code to when it
+    last spoke, and to how often, for ever. A deleted record behaves exactly
+    like a device that has never submitted, which is what a device past its
+    window already is.
+
+    Args:
+        session: Active database session (caller commits).
+        now: Current time, injected.
+        window_seconds: The rate-limit window (``CONFESSION_RATE_LIMIT_SECONDS``).
+
+    Returns:
+        How many records were deleted.
+    """
+    cutoff = now - timedelta(seconds=window_seconds)
+    return await _execute_bulk(
+        session, delete(AnonymousUser).where(AnonymousUser.last_confession_at < cutoff)
+    )
+
+
 async def run_retention(
     session: AsyncSession,
     now: datetime,
     retention_hours: int,
     reply_retention_days: int,
+    device_window_seconds: int | None = None,
 ) -> RetentionResult:
     """Run every retention step, in an order that never loses a live reply.
 
@@ -287,6 +316,9 @@ async def run_retention(
         now: Current time, injected.
         retention_hours: How long a confession lives after its last change.
         reply_retention_days: How long a reply lives after it was written.
+        device_window_seconds: The confession rate-limit window. Device records
+            older than it are deleted; ``None`` leaves them alone, because a
+            caller that does not know the window must not guess one.
 
     Returns:
         What the run did, by kind.
@@ -296,8 +328,16 @@ async def run_retention(
     )
     deleted = await purge_stale_confessions(session, now, retention_hours)
     emptied = await empty_replied_confessions(session, now, retention_hours)
+    devices = (
+        await purge_stale_devices(session, now, device_window_seconds)
+        if device_window_seconds is not None
+        else 0
+    )
     return RetentionResult(
-        deleted=deleted, emptied_to_shell=emptied, expired_replies=expired
+        deleted=deleted,
+        emptied_to_shell=emptied,
+        expired_replies=expired,
+        expired_devices=devices,
     )
 
 
@@ -312,7 +352,11 @@ async def _main() -> None:
     now = datetime.now(timezone.utc)
     async with async_session_factory() as session:
         result = await run_retention(
-            session, now, settings.RETENTION_HOURS, settings.REPLY_RETENTION_DAYS
+            session,
+            now,
+            settings.RETENTION_HOURS,
+            settings.REPLY_RETENTION_DAYS,
+            device_window_seconds=settings.CONFESSION_RATE_LIMIT_SECONDS,
         )
         await record_run(
             session,
@@ -324,10 +368,12 @@ async def _main() -> None:
         await session.commit()
 
     logger.info(
-        "retention: run complete, %d deleted, %d emptied to shells, %d replies expired",
+        "retention: run complete, %d deleted, %d emptied to shells, "
+        "%d replies expired, %d device records removed",
         result.deleted,
         result.emptied_to_shell,
         result.expired_replies,
+        result.expired_devices,
     )
 
 

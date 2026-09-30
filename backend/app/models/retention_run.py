@@ -51,3 +51,10 @@ class RetentionRun(Base):
         nullable=False,
         comment="Replied confessions deleted for an expired reply",
     )
+    expired_devices: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Device rate-limit records deleted after their window passed",
+    )

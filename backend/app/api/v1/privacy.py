@@ -43,6 +43,7 @@ class RetentionRunResponse(BaseModel):
     deleted: BucketResponse
     emptied_to_shell: BucketResponse
     expired_replies: BucketResponse
+    expired_devices: BucketResponse
 
     model_config = {"from_attributes": True}
 

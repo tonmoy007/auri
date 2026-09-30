@@ -24,6 +24,10 @@ export function PrivacyLastRun({ run, minCohort }: PrivacyLastRunProps) {
           Replies past their retention deleted:{' '}
           <PrivacyDueCell bucket={run.expired_replies} minCohort={minCohort} />
         </li>
+        <li>
+          Device records past their rate-limit window removed:{' '}
+          <PrivacyDueCell bucket={run.expired_devices} minCohort={minCohort} />
+        </li>
       </ul>
     </div>
   )
