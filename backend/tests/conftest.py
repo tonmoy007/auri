@@ -93,6 +93,16 @@ def isolate_optional_endpoints(set_setting: SettingPatcher) -> None:
         # otherwise change what every device-scoped test stores.
         ("DEVICE_HASH_PEPPER", ""),
         ("DELIVERY_TRANSCRIPT_CHARS", 1000),
+        # Priest mode and the crisis contacts: no test may reach a real chat server,
+        # and none may depend on what a developer has set.
+        ("PRIEST_MODE_ENABLED", False),
+        ("PRIEST_LLM_BASE_URL", ""),
+        ("PRIEST_LLM_API_KEY", ""),
+        ("PRIEST_FALLBACK_BASE_URL", ""),
+        ("PRIEST_FALLBACK_MODEL", ""),
+        ("CRISIS_HELPLINE_NAME", ""),
+        ("CRISIS_HELPLINE_NUMBER", ""),
+        ("CRISIS_EAP_CONTACT", ""),
     ):
         set_setting(name, value)
 

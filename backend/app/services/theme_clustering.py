@@ -20,6 +20,7 @@ from enum import Enum
 from typing import Any, Final
 
 from app.exceptions import ThemeClusteringError
+from app.llm.fencing import FENCE_RUN
 
 MAX_SUMMARIES_PER_WINDOW: Final = 60
 MAX_SUMMARY_CHARS: Final = 240
@@ -40,9 +41,6 @@ CLUSTERING_INSTRUCTION: Final = (
 )
 
 _WHITESPACE = re.compile(r"\s+")
-# The prompt fences untrusted text with <<<...>>> markers; a summary that
-# contains one could close the fence and start giving instructions.
-_FENCE_RUN = re.compile(r"<{3,}|>{3,}")
 # Labels that carry an identifier rather than a topic.
 _IDENTIFIER_PATTERN = re.compile(r"\d|@|://|www\.", re.IGNORECASE)
 
@@ -74,7 +72,7 @@ class ThemeGroup:
 
 def _one_line(text: str) -> str:
     """Make one summary one prompt line: no fence markers, one space, capped."""
-    unfenced = _FENCE_RUN.sub(" ", text)
+    unfenced = FENCE_RUN.sub(" ", text)
     return _WHITESPACE.sub(" ", unfenced).strip()[:MAX_SUMMARY_CHARS]
 
 

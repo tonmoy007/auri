@@ -47,6 +47,25 @@ class CounselingError(ProcessingError):
     """Raised when LLM counseling-response generation fails to produce a usable reply."""
 
 
+class PriestError(AuriError):
+    """Base class for priest-mode (study-library guide) failures."""
+
+
+class PriestIndexError(PriestError):
+    """Raised when the knowledge index is missing, corrupt or inconsistent."""
+
+
+class PriestEndpointError(PriestError):
+    """Raised when the configured chat server address must not be used.
+
+    Its message is safe to show: it never contains a key or the address itself.
+    """
+
+
+class PriestLLMError(PriestError):
+    """Raised when no configured chat server returned a usable reply."""
+
+
 class DatabaseError(AuriError):
     """Raised for database-layer failures."""
 
@@ -101,6 +120,19 @@ class ValidationError(AuriError):
 
 class EmptyConfessionError(ValidationError):
     """Raised when a confession transcript is empty after trimming."""
+
+
+class PriestUnavailableError(ServiceError):
+    """Raised when priest mode cannot serve a request right now.
+
+    ``code`` is one of ``priest_mode_disabled``, ``priest_busy`` or
+    ``priest_index_unavailable``; it is what the client sees, never a detail.
+    """
+
+    def __init__(self, code: str, retry_after: int | None = None) -> None:
+        super().__init__(code)
+        self.code = code
+        self.retry_after = retry_after
 
 
 class RateLimitError(ValidationError):

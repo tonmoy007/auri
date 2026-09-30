@@ -153,7 +153,7 @@
         "12.4": "pending",
         "12.5": "pending",
         "12.6": "pending",
-        "12.7": "pending",
+        "12.7": "completed",
         "12.8": "pending",
         "12.9": "pending",
         "12.10": "pending",
@@ -162,11 +162,11 @@
       }
     },
     "13": {
-      "status": "pending",
+      "status": "in_progress",
       "tasks": {
         "13.1": "pending",
-        "13.2": "pending",
-        "13.3": "pending",
+        "13.2": "in_progress",
+        "13.3": "completed",
         "13.4": "pending",
         "13.5": "pending",
         "13.6": "pending",
@@ -196,5 +196,5 @@
     }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-09-30T22:07:01+06:00"
+  "updated_at": "2026-09-30T22:26:48+06:00"
 }

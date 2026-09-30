@@ -22,7 +22,7 @@ from app.models.confession import (
     ModerationSeverity,
 )
 from app.models.user import AnonymousUser
-from app.services import department_service, device_identity
+from app.services import crisis_response, department_service, device_identity
 from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
@@ -399,7 +399,13 @@ async def create_confession(
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
     severity = _safe_moderate(llm_service, body.transcript)
-    counselor_response = _safe_counsel(llm_service, deidentified_transcript)
+    # A crisis reply is a fixed template with configured contacts, never generated:
+    # a model that invents a helpline number is worse than no helpline (12.7).
+    counselor_response = (
+        crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE).text
+        if severity is ModerationSeverity.crisis
+        else _safe_counsel(llm_service, deidentified_transcript)
+    )
 
     confession = Confession(
         device_token_hash=stored_device_code,

@@ -53,8 +53,39 @@ _VOICE_MASK_KEYS: tuple[str, ...] = tuple(
 # machine's default `java`. Empty means "inherit the backend process's own
 # JAVA_HOME".
 _BUILD_KEYS: tuple[str, ...] = ("ANDROID_JAVA_HOME",)
+# Contacts in the fixed crisis reply (12.7).
+_CRISIS_KEYS: tuple[str, ...] = (
+    "CRISIS_HELPLINE_NAME",
+    "CRISIS_HELPLINE_NUMBER",
+    "CRISIS_EAP_CONTACT",
+)
+# Priest mode. The chat server address, its key and the vault/index paths are
+# environment only on purpose: a dashboard edit must not be able to redirect where
+# people's questions go.
+_PRIEST_KEYS: tuple[str, ...] = (
+    "PRIEST_MODE_ENABLED",
+    "PRIEST_PERSONA_NAME",
+    "PRIEST_LLM_MODEL",
+    "PRIEST_FALLBACK_MODEL",
+    "PRIEST_LLM_TIMEOUT_SECONDS",
+    "PRIEST_TOTAL_DEADLINE_SECONDS",
+    "PRIEST_EMBED_MODEL",
+    "PRIEST_TOP_K",
+    "PRIEST_MIN_RELEVANCE_DENSE",
+    "PRIEST_MIN_RELEVANCE_BM25",
+    "PRIEST_RATE_LIMIT_PER_MINUTE",
+    "PRIEST_RATE_LIMIT_PER_DAY",
+    "PRIEST_MAX_CONCURRENCY",
+    "PRIEST_TRADITIONS_ENABLED",
+)
 ALLOWED_CONFIG_KEYS = frozenset(
-    _LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUILD_KEYS + _ANALYTICS_KEYS
+    _LLM_KEYS
+    + _STT_KEYS
+    + _VOICE_MASK_KEYS
+    + _BUILD_KEYS
+    + _ANALYTICS_KEYS
+    + _CRISIS_KEYS
+    + _PRIEST_KEYS
 )
 
 # repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
@@ -136,6 +167,8 @@ class ConfigResponse(BaseModel):
     voice_masks: list[ConfigEntry]
     build: list[ConfigEntry]
     analytics: list[ConfigEntry]
+    crisis: list[ConfigEntry]
+    priest: list[ConfigEntry]
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -184,6 +217,8 @@ async def get_config_all() -> ConfigResponse:
         voice_masks=_entries(_VOICE_MASK_KEYS),
         build=_entries(_BUILD_KEYS),
         analytics=_entries(_ANALYTICS_KEYS),
+        crisis=_entries(_CRISIS_KEYS),
+        priest=_entries(_PRIEST_KEYS),
     )
 
 
