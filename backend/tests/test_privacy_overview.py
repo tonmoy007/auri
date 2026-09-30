@@ -975,3 +975,107 @@ async def test_the_audited_statement_says_what_the_bot_path_does_and_does_not_re
         "Reading through the bot, and who reads the Telegram chats, are not recorded"
         in statement
     )
+
+
+async def _limit_ids_and_statements(
+    api_client: AsyncClient, make_staff: StaffFactory
+) -> dict[str, str]:
+    return await _facts(api_client, make_staff, "limits")
+
+
+def _guide(set_setting: SettingPatcher, **values: object) -> None:
+    set_setting("PRIEST_MODE_ENABLED", True)
+    for key, value in values.items():
+        set_setting(key, value)
+
+
+@pytest.mark.asyncio
+async def test_the_panel_says_nothing_about_the_guide_while_it_is_off(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("PRIEST_MODE_ENABLED", False)
+
+    # Act
+    limits = await _limit_ids_and_statements(api_client, make_staff)
+
+    # Assert
+    assert "priest_guide" not in limits
+
+
+@pytest.mark.asyncio
+async def test_with_no_server_configured_the_guide_is_described_as_local(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(set_setting, PRIEST_LLM_BASE_URL="")
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert — what is kept, who can see it, and what happens in a crisis
+    assert "not stored" in statement
+    assert "not visible to staff" in statement
+    assert "pattern matching" in statement
+    assert "nobody at the company is told" in statement
+    assert "on this organisation's own infrastructure" in statement
+
+
+@pytest.mark.asyncio
+async def test_a_public_plain_http_server_is_named_and_flagged_unencrypted(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(
+        set_setting,
+        PRIEST_LLM_BASE_URL="http://203.0.113.9:8000",
+        PRIEST_LLM_ALLOW_INSECURE_HTTP=True,
+        PRIEST_LLM_API_KEY="sk-guide-secret",
+    )
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert
+    assert "203.0.113.9" in statement
+    assert "without encryption" in statement
+    assert "where it runs is not verified" in statement
+    assert "sk-guide-secret" not in statement
+
+
+@pytest.mark.asyncio
+async def test_an_https_server_is_not_called_unencrypted(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(set_setting, PRIEST_LLM_BASE_URL="https://llm.example.test")
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert
+    assert "llm.example.test" in statement
+    assert "without encryption" not in statement
+
+
+@pytest.mark.asyncio
+async def test_a_refused_server_is_reported_without_its_address(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange — a hosted provider must never receive Guide questions
+    _guide(set_setting, PRIEST_LLM_BASE_URL="https://api.openai.com")
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert
+    assert "cannot be used" in statement
+    assert "api.openai.com" not in statement

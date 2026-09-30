@@ -119,3 +119,32 @@ The first draft of the panel made eight guarantees; six overstated what the syst
 ## What the Privacy panel does about it
 
 `GET /api/v1/privacy/overview` builds its guarantees and its *limits* from the live configuration — including provider keys and the model address set in the Config tab — so a sentence cannot outlive the setting that made it true. Findings 8, 10, 12–16 above appear on it as limits, in the same plain language as the guarantees. When tasks 11.20 and 11.21 land, the corresponding limits must be edited or removed in `backend/app/services/privacy_overview.py`; the tests pin the wording to the configuration but cannot know that the code has changed underneath them.
+
+## Addendum: priest mode (the "Guide"), 2026-10-01
+
+An AI that answers questions from a study library. Design: `docs/adr/priest-mode.md`. It is off by default.
+
+### Data flow
+
+| Step | What happens | Kept? |
+|---|---|---|
+| Phone to API | The question (at most 1,000 characters), an optional tradition (the preference lives only on the phone), the language, and the device header. No confession id or text is accepted (the request forbids extra fields). | Nothing is stored. |
+| API | Recognised details are removed by pattern matching only (no model step, to save seconds). The question is checked against fixed lexicons, then a local moderation model in parallel. | In memory only: a per-device request count keyed by an HMAC, pruned after 24 hours. |
+| API to model server | The question with recognised details removed, the retrieved notes, and a random request id. No device code, no address, no confession data. Never to Gemini, OpenAI or Anthropic. | The model server's operator can see it while it is answered. |
+| Logs and metrics | Request id, outcome kind, stage timings, index and prompt versions, validator codes, source count. Never the question, answer, snippets, tradition or device code. Metric labels come from fixed sets. | Metadata only. |
+| Staff | No endpoint returns Guide content. Admins see index status, reports and usage counts, with small counts suppressed. | |
+
+### Findings
+
+| # | Finding | Status |
+|---|---|---|
+| 19 | Questions travel to the model server, at present over plain HTTP on a public address with an API key; its operator can read them while processing, and its logging is unverified | **Open, accepted for the prototype.** Harden before any pilot: `docs/runbooks/priest-llm-server.md`. The Privacy panel states the live route and says when it is unencrypted |
+| 20 | De-identification of a question is pattern matching only; names and rare details can reach the model server | **Decided** (D11), documented |
+| 21 | A crisis question gets a fixed message with contacts, and **nobody at the company is told**, because nothing is kept. This differs from confessions, which are held for a named person | **Decided** (D10). The wording was written for review and needs clinical and HR sign-off |
+| 22 | **Voice input** reuses the speech-to-text route. If local transcription fails and `OPENAI_API_KEY` is set, the audio of the question is sent to OpenAI, which breaks the rule that Guide text never reaches a third party | **Open.** A separate speech route for the Guide that never falls back to a hosted provider is needed, or voice input stays off until then |
+| 23 | The rate limiter is in memory and per process, and can be flooded to evict a real device's window | Accepted (ADR) |
+| 24 | Religious belief is special-category personal data: the tradition filter never leaves the phone except as a per-request field that is not stored or logged | Designed in; a test pins it |
+| 25 | The study vault looks bulk-authored, so its quotations and verse references are unverified; a quote check proves only that it is in the vault | Disclosed in the interface ("quoted in the note", never "scripture says") |
+| 26 | Copyright: the vault's own prose is low risk, its quotations' translations are unnamed, and the sibling `scriptures/` folder (non-commercial and unverified licences) is excluded | **Deferred** by decision |
+| 27 | The crisis, medical, legal, abuse and judge-a-person lexicons and their deferral texts are first drafts | **Open:** need clinical and HR review before a pilot. Three indirect crisis phrasings are not in the lexicon and rely on the model-based check |
+

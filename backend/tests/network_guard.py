@@ -60,10 +60,10 @@ def block_network(violations: list[str]) -> Iterator[None]:
         violations.append(target)
         raise NetworkBlockedError(target)
 
-    socket.socket.connect = guarded_connect
-    socket.socket.connect_ex = guarded_connect_ex
+    socket.socket.connect = guarded_connect  # type: ignore[method-assign,assignment]
+    socket.socket.connect_ex = guarded_connect_ex  # type: ignore[method-assign,assignment]
     try:
         yield
     finally:
-        socket.socket.connect = real_connect
-        socket.socket.connect_ex = real_connect_ex
+        socket.socket.connect = real_connect  # type: ignore[method-assign,assignment]
+        socket.socket.connect_ex = real_connect_ex  # type: ignore[method-assign,assignment]

@@ -24,9 +24,11 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.exceptions import ThemesEndpointError
+from app.exceptions import PriestEndpointError, ThemesEndpointError
+from app.llm.chat_endpoint import resolve_primary
 from app.models.retention_run import RetentionRun
 from app.models.user import User, UserRole
+from app.priest import priest_config
 from app.services import device_identity, insights_service, retention, retention_status
 from app.services.confession_access import MIN_JUSTIFICATION_LENGTH
 from app.services.insights_service import Bucket
@@ -49,6 +51,32 @@ class Fact:
 
 
 @dataclass(frozen=True)
+class PriestRoute:
+    """Where Guide questions go while the Guide is on, from the live configuration."""
+
+    kind: str  # "local", "configured" or "refused"
+    host: str = ""
+    encrypted: bool = True
+
+
+def priest_route() -> PriestRoute | None:
+    """Describe where Guide questions go, or ``None`` while the Guide is off."""
+    if not priest_config.enabled():
+        return None
+    try:
+        endpoint = resolve_primary()
+    except PriestEndpointError:
+        return PriestRoute(kind="refused")
+    if endpoint is None:
+        return PriestRoute(kind="local")
+    return PriestRoute(
+        kind="configured",
+        host=endpoint.host,
+        encrypted=endpoint.base_url.lower().startswith("https://"),
+    )
+
+
+@dataclass(frozen=True)
 class PrivacySnapshot:
     """The live configuration the statements are built from."""
 
@@ -63,6 +91,7 @@ class PrivacySnapshot:
     sql_echo: bool
     device_codes_hashed: bool
     delivery_transcript_chars: int
+    priest: PriestRoute | None = None
 
 
 @dataclass(frozen=True)
@@ -205,6 +234,7 @@ def build_snapshot() -> PrivacySnapshot:
         sql_echo=settings.SQL_ECHO,
         device_codes_hashed=device_identity.is_hardened(),
         delivery_transcript_chars=settings.DELIVERY_TRANSCRIPT_CHARS,
+        priest=priest_route(),
     )
 
 
@@ -381,9 +411,38 @@ def _telegram_statement(snapshot: PrivacySnapshot) -> str:
     )
 
 
+def _priest_statement(route: PriestRoute) -> str:
+    """Say where Guide questions go, what is kept and what happens in a crisis."""
+    if route.kind == "refused":
+        where = (
+            "The configured model server cannot be used (it is malformed or is a "
+            "hosted AI provider), so the Guide cannot answer until that is fixed."
+        )
+    elif route.kind == "configured":
+        where = (
+            f"Questions go to a model server configured by this organisation "
+            f"({route.host}); where it runs is not verified, and its operator can "
+            "see a question while it is answered."
+        )
+        if not route.encrypted:
+            where += " They cross the network without encryption."
+    else:
+        where = (
+            "Questions are answered by a model on this organisation's own "
+            "infrastructure."
+        )
+    return (
+        "The Guide answers questions from a study library. "
+        f"{where} Questions are cleaned of recognised details by pattern matching "
+        "only, are not stored and are not visible to staff. If a question suggests "
+        "someone is in danger the Guide shows a fixed message with contacts; "
+        "nobody at the company is told, because nothing is kept."
+    )
+
+
 def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
     """Limits about who can see content, and where copies live."""
-    return [
+    facts = [
         Fact(
             "queue_transcripts",
             "Moderators and HR see the full transcript of every item held for "
@@ -412,6 +471,9 @@ def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
             "a rare event, a named place. The clean-up is automatic and can miss things.",
         ),
     ]
+    if snapshot.priest is not None:
+        facts.append(Fact("priest_guide", _priest_statement(snapshot.priest)))
+    return facts
 
 
 def _keeping_limits(snapshot: PrivacySnapshot) -> list[Fact]:
