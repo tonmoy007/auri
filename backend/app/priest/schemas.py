@@ -8,6 +8,7 @@ model must return; it is validated, never trusted (see ``answer_validator``).
 from __future__ import annotations
 
 import re
+import unicodedata
 from enum import Enum
 from typing import Final, Literal
 
@@ -64,9 +65,25 @@ TRADITION_LABELS: Final[dict[str, str]] = {
 }
 
 
+# Bidirectional overrides and isolates, which can make text read differently from how
+# it is stored; the joiners used in emoji and some scripts are allowed.
+_BIDI_CONTROLS = frozenset(
+    chr(c) for c in (*range(0x202A, 0x202F), *range(0x2066, 0x206A))
+)
+
+
 def _has_control_character(text: str) -> bool:
-    """Whether *text* holds a control character other than a line break or tab."""
-    return any(ord(ch) < 32 and ch not in "\n\r\t" or ord(ch) == 127 for ch in text)
+    """Whether *text* holds a control character other than a line break or tab.
+
+    Covers C0 and C1 controls, DEL, line and paragraph separators and bidirectional
+    overrides.
+    """
+    return any(
+        (unicodedata.category(ch) == "Cc" and ch not in "\n\r\t")
+        or ch in "\u2028\u2029"
+        or ch in _BIDI_CONTROLS
+        for ch in text
+    )
 
 
 class PriestAskRequest(BaseModel):
@@ -157,6 +174,9 @@ class PriestStatusResponse(BaseModel):
     traditions: list[TraditionOption]
     disclaimer_version: str = DISCLAIMER_VERSION
     max_question_chars: int = MAX_QUESTION_CHARS
+    # The organisation's configured help contacts, so the app can show them before any
+    # question is asked. They are public configuration, not about a person.
+    crisis_contacts: list[CrisisContactOut] = Field(default_factory=list)
 
 
 # ── What the model must return (validated by answer_validator) ───────────
@@ -167,6 +187,13 @@ class DraftPoint(BaseModel):
 
     text: str = Field(max_length=300)
     sources: list[str] = Field(min_length=1, max_length=3)
+
+    @field_validator("text")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("a point needs text")
+        return value
 
     @field_validator("sources")
     @classmethod

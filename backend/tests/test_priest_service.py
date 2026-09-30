@@ -675,7 +675,7 @@ async def test_the_chat_timeout_never_exceeds_the_time_left() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_deadline_during_retrieval_is_an_index_problem_not_excerpts() -> None:
+async def test_a_deadline_during_retrieval_is_busy_not_excerpts() -> None:
     # Arrange
     service = make_service(retriever=FakeRetriever(hang=True), deadline_seconds=0.1)
 
@@ -684,7 +684,7 @@ async def test_a_deadline_during_retrieval_is_an_index_problem_not_excerpts() ->
         await asyncio.wait_for(ask(service), timeout=3)
 
     # Assert
-    assert raised.value.code == "priest_index_unavailable"
+    assert raised.value.code == "priest_busy"
 
 
 # ── Capacity and the index ──────────────────────────────────────────────
@@ -1109,28 +1109,17 @@ async def test_with_no_chat_server_configured_the_answer_is_excerpts() -> None:
     assert response.kind is AnswerKind.library_excerpts
 
 
-@pytest.mark.asyncio
-async def test_the_moderator_defaults_to_local_ollama_only(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_the_default_moderator_is_the_priest_ollama_moderator_never_a_hosted_one() -> (
+    None
+):
     # Arrange
-    providers: list[str] = []
-
-    class Spy:
-        def __init__(self, provider: str = "auto") -> None:
-            providers.append(provider)
-
-        def moderate(self, text: str) -> ModerationSeverity:
-            return ModerationSeverity.none
-
-    monkeypatch.setattr(priest_service, "LLMService", Spy)
+    from app.priest.moderation import PriestModerator
 
     # Act
-    moderate = priest_service.default_moderator()
+    moderator = PriestModerator(1.0)
 
-    # Assert
-    assert moderate("hello") is ModerationSeverity.none
-    assert providers == ["ollama"]
+    # Assert — pinned to Ollama, so it cannot fall through to a hosted provider
+    assert moderator._provider == "ollama"
 
 
 # ── The shared instance ─────────────────────────────────────────────────
@@ -1202,3 +1191,87 @@ async def test_a_bengali_question_gets_the_english_only_notice_and_no_model_work
     assert response.notice == safety_router.english_only_text()
     assert retriever.calls == [] and chain.calls == []
     assert response.points == [] and response.citations == []
+
+
+# ── review fixes: moderation isolation and unexpected errors ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_moderation_runs_on_its_own_threads_not_the_shared_pool() -> None:
+    # Arrange — a stuck moderation must not starve every other to_thread caller
+    names: list[str] = []
+
+    def moderate(text: str) -> ModerationSeverity:
+        names.append(threading.current_thread().name)
+        return ModerationSeverity.none
+
+    service = make_service(moderator=moderate)
+
+    # Act
+    await ask(service)
+
+    # Assert
+    assert names and all(name.startswith("priest-moderation") for name in names)
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pipeline_error_cannot_drop_a_moderation_crisis() -> None:
+    # Arrange — retrieval blows up with something nobody planned for
+    moderator, _ = moderator_returning(ModerationSeverity.crisis)
+    service = make_service(
+        retriever=FakeRetriever(error=KeyError("surprise")), moderator=moderator
+    )
+
+    # Act
+    response = await ask(service)
+
+    # Assert — the verdict is consulted before any error goes out
+    assert response.kind is AnswerKind.crisis
+
+
+@pytest.mark.asyncio
+async def test_an_unexpected_pipeline_error_is_a_clean_refusal_not_a_crash() -> None:
+    # Arrange
+    service = make_service(retriever=FakeRetriever(error=KeyError("QUESTIONMARK")))
+
+    # Act / Assert — a typed 503, and the message text is not carried along
+    with pytest.raises(PriestUnavailableError) as excinfo:
+        await ask(service)
+    assert "QUESTIONMARK" not in str(excinfo.value)
+    assert excinfo.value.__cause__ is None
+
+
+def test_the_default_moderator_is_bounded_by_the_service_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange
+    from app.priest import moderation, priest_service
+
+    seen: list[float] = []
+
+    def fake(text: str, *, timeout: float) -> ModerationSeverity:
+        seen.append(timeout)
+        return ModerationSeverity.none
+
+    monkeypatch.setattr(moderation, "moderate", fake)
+
+    # Act
+    priest_service.default_moderator()("a question")
+
+    # Assert
+    assert seen == [priest_service.MODERATION_CAP_SECONDS]
+
+
+@pytest.mark.asyncio
+async def test_a_natural_reply_that_echoes_a_worked_example_is_not_a_leak() -> None:
+    # Arrange — eight words from the prompt's grief example, in a real reflection
+    reflection = "Grief can feel very heavy when carried alone, and friends help."
+    chain = FakeChain([answer_json(reflection=reflection)])
+    service = make_service(chain=chain)
+
+    # Act
+    response = await ask(service)
+
+    # Assert
+    assert response.kind is AnswerKind.answer
+    assert response.reflection == reflection

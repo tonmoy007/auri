@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -44,6 +46,8 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
+
+PRIEST_PATH_PREFIX = "/api/v1/priest"
 
 
 class RootHealthResponse(BaseModel):
@@ -179,6 +183,21 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=503, content={"detail": exc.code}, headers=headers
         )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Report only where and what for a Guide request; other routes keep FastAPI's.
+
+        FastAPI echoes the rejected value under ``input``. For the Guide that value is
+        a person's question, and a gateway or APM that records response bodies would
+        keep it.
+        """
+        if not request.url.path.startswith(PRIEST_PATH_PREFIX):
+            return await request_validation_exception_handler(request, exc)
+        detail = [{"loc": e["loc"], "type": e["type"]} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": detail})
 
     @app.exception_handler(AuthConfigurationError)
     async def auth_configuration_error_handler(

@@ -883,9 +883,9 @@ async def test_usage_lists_every_outcome_and_stage_even_at_zero(
     body = (await call(client, "GET", "/usage", None, legacy())).json()
 
     # Assert
-    assert [o["kind"] for o in body["outcomes"]] == list(metrics.OUTCOMES)
+    assert [o["kind"] for o in body["outcomes"]] == [*metrics.OUTCOMES, "other"]
     assert all(o == {**o, "count": None, "suppressed": True} for o in body["outcomes"])
-    assert [row["stage"] for row in body["latency"]] == list(metrics.STAGES)
+    assert [row["stage"] for row in body["latency"]] == [*metrics.STAGES, "other"]
     assert all(row["p50"] is None and row["p95"] is None for row in body["latency"])
     assert datetime.fromisoformat(body["since"])
 
@@ -938,20 +938,29 @@ async def test_usage_counts_up_to_the_cohort_boundary_are_suppressed_exactly(
 
 
 @pytest.mark.asyncio
-async def test_usage_latency_is_not_suppressed(client: AsyncClient) -> None:
-    # Arrange
+async def test_usage_latency_is_withheld_until_the_total_reaches_the_cohort(
+    client: AsyncClient, set_setting: SettingPatcher
+) -> None:
+    # Arrange — a timing shown beside hidden counts would say one question happened
+    set_setting("ANALYTICS_MIN_COHORT", 3)
     metrics.record_latency("total", 0.25)
+    metrics.record_outcome("answer")
+    metrics.record_outcome("answer")
 
     # Act
-    body = (await call(client, "GET", "/usage", None, legacy())).json()
+    before = (await call(client, "GET", "/usage", None, legacy())).json()
+    metrics.record_outcome("answer")
+    after = (await call(client, "GET", "/usage", None, legacy())).json()
 
     # Assert
-    total = next(row for row in body["latency"] if row["stage"] == "total")
+    total = next(row for row in before["latency"] if row["stage"] == "total")
+    assert total == {"stage": "total", "p50": None, "p95": None}
+    total = next(row for row in after["latency"] if row["stage"] == "total")
     assert total == {"stage": "total", "p50": 0.25, "p95": 0.25}
 
 
 @pytest.mark.asyncio
-async def test_usage_reports_an_unknown_outcome_under_other_and_only_then(
+async def test_usage_always_lists_other_so_zero_and_hidden_look_the_same(
     client: AsyncClient, set_setting: SettingPatcher
 ) -> None:
     # Arrange
@@ -964,7 +973,8 @@ async def test_usage_reports_an_unknown_outcome_under_other_and_only_then(
     after = (await call(client, "GET", "/usage", None, legacy())).json()
 
     # Assert
-    assert "other" not in [o["kind"] for o in before["outcomes"]]
+    hidden = next(o for o in before["outcomes"] if o["kind"] == "other")
+    assert hidden == {"kind": "other", "count": None, "suppressed": True}
     other = next(o for o in after["outcomes"] if o["kind"] == "other")
     assert other == {"kind": "other", "count": 2, "suppressed": False}
 

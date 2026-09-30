@@ -485,7 +485,8 @@ async def test_busy_gives_503_with_retry_after(env: Env) -> None:
     assert response.status_code == 503
     assert response.json() == {"detail": "priest_busy"}
     assert response.headers["Retry-After"] == "3"
-    assert _outcomes() == {"busy": 1}
+    # the service already counted it; the route must not count it a second time
+    assert _outcomes() == {}
 
 
 @pytest.mark.asyncio
@@ -512,7 +513,7 @@ async def test_index_unavailable_from_the_service_passes_through(env: Env) -> No
     # Assert
     assert response.status_code == 503
     assert response.json() == {"detail": "priest_index_unavailable"}
-    assert _outcomes() == {"error": 1}
+    assert _outcomes() == {}
 
 
 @pytest.mark.asyncio
@@ -751,3 +752,127 @@ async def test_status_uses_the_configured_persona_name(
 
     # Assert
     assert body["persona_name"] == "Sage"
+
+
+# ── POST /ask: fixed replies are never rate-limited ──────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_crisis_message_is_answered_after_the_limit_is_used_up(
+    env: Env,
+) -> None:
+    # Arrange — a distressed person who rephrased four times and hit the limit
+    for _ in range(4):
+        assert (await env.ask()).status_code == 200
+    assert (await env.ask()).status_code == 429
+
+    # Act
+    response = await env.ask({"question": "I want to kill myself"})
+
+    # Assert — routed before the limiter, so help is never a 429
+    assert response.status_code == 200
+    assert env.service.calls[-1][0] == "I want to kill myself"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I want to kill myself",
+        "my manager harassed me",
+        "नमस्ते",
+    ],
+)
+async def test_fixed_replies_do_not_use_up_the_limit(env: Env, question: str) -> None:
+    # Arrange
+    for _ in range(10):
+        assert (await env.ask({"question": question})).status_code == 200
+
+    # Act
+    response = await env.ask()
+
+    # Assert
+    assert response.status_code == 200
+    assert _outcomes().get("rate_limited", 0) == 0
+
+
+# ── review fixes: status contacts and validation errors ──────────────────────
+
+
+@pytest.mark.asyncio
+async def test_status_carries_the_configured_crisis_contacts(
+    env: Env, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NAME", "Lifeline")
+    set_setting("CRISIS_HELPLINE_NUMBER", "+880 1234-567890")
+
+    # Act
+    body = (await env.client.get(STATUS)).json()
+
+    # Assert — the intro shows help before any question is asked
+    assert body["crisis_contacts"] == [
+        {"label": "Lifeline", "detail": "+880 1234-567890", "dial": "+8801234567890"}
+    ]
+
+
+@pytest.mark.asyncio
+async def test_status_has_an_empty_contact_list_when_none_are_configured(
+    env: Env, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NAME", "")
+    set_setting("CRISIS_HELPLINE_NUMBER", "")
+    set_setting("CRISIS_EAP_CONTACT", "")
+
+    # Act
+    body = (await env.client.get(STATUS)).json()
+
+    # Assert
+    assert body["crisis_contacts"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("body", "headers"),
+    [
+        ({"question": "VALIDATIONMARKER " * 100}, DEVICE_HEADER),
+        ({"question": "VALIDATIONMARKER\x00bad"}, DEVICE_HEADER),
+        (
+            {"question": QUESTION, "extra": "VALIDATIONMARKER"},
+            DEVICE_HEADER,
+        ),
+        ({"question": QUESTION}, {"X-Device-Token-Hash": "SHORTMARKER"}),
+    ],
+)
+async def test_a_validation_error_never_echoes_the_question_or_the_header(
+    env: Env, body: dict[str, Any], headers: dict[str, str]
+) -> None:
+    # Act
+    response = await env.ask(body, headers)
+
+    # Assert — only where and what kind, never the value (a gateway may log bodies)
+    assert response.status_code == 422
+    assert "VALIDATIONMARKER" not in response.text
+    assert "SHORTMARKER" not in response.text
+    for item in response.json()["detail"]:
+        assert set(item) == {"loc", "type"}
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_by_the_real_service_is_counted_once_not_twice(
+    env: Env,
+) -> None:
+    # Arrange — the fake service above records nothing, which hid a double count
+    from tests.test_priest_service import FakeRetriever, make_service
+
+    real = make_service(retriever=FakeRetriever(error=PriestIndexError("x")))
+    env.app.dependency_overrides[get_priest_service] = lambda: real
+    metrics.reset()
+
+    # Act
+    response = await env.ask()
+
+    # Assert
+    assert response.status_code == 503
+    assert _outcomes() == {"error": 1}

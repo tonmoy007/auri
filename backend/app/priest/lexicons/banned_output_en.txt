@@ -1,4 +1,4 @@
-# version: 1
+# version: 2
 # Patterns the Guide's own words (points and reflection) must never contain (V6).
 # Verdicts on people, proselytising, medical or legal directives, minimising
 # distress, and agreement next to judgement. Matched against the normalised text
@@ -8,6 +8,10 @@
 # verdicts on people
 re:\b(you|he|she|they|your \w+|my \w+|someone|anyone|people who \w+) (is|are|was|were|seem|seems|must be) (a |an |such a )?(sinners?|sinful|evil|wicked|damned|doomed|bad (person|muslim|christian|jew|hindu|buddhist|sikh|believer))
 re:\b(you|he|she|they|him|her|your \w+|my \w+|(anyone|someone|everyone) who \w+( \w+)?) (will|would|shall|is going to|are going to|going to) (surely |certainly )?(go to|burn in|end up in|rot in|suffer in) hell
+# contracted forms: apostrophes are dropped, so "youll" and "hell" (he'll) stand for them
+re:\b(youll|hell|shell|theyll|youd|hed|shed|theyd) (surely |certainly )?(go to|burn in|end up in|rot in|suffer in) hell
+re:\b(youre|hes|shes|theyre) (a |an |such a |truly |really )?(sinners?|sinful|evil|wicked|damned|doomed|bad (person|muslim|christian|jew|hindu|buddhist|sikh|believer))
+re:\b(your|my) [\w ]{1,20}? (is|are|was|were) (a |an |such a )?(sinners?|sinful|evil|wicked|damned|doomed)
 re:\bdeserv(e|es) (to )?(suffer|burn|die|rot|be punished|punishment|hell)
 re:\b(god|allah) (will|is going to) punish (you|him|her|them)
 # proselytising

@@ -21,6 +21,7 @@ import logging
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Final, Protocol
@@ -40,7 +41,7 @@ from app.llm.chat_endpoint import ChatEndpoint, resolve_fallback, resolve_primar
 from app.llm.fencing import strip_fence_runs
 from app.llm.prompt_loader import PromptError
 from app.models.confession import ModerationSeverity
-from app.priest import metrics, priest_config, safety_router
+from app.priest import metrics, moderation, priest_config, safety_router
 from app.priest.answer_validator import (
     CORRECTION_LINES,
     SourceChunk,
@@ -67,7 +68,6 @@ from app.priest.schemas import (
 )
 from app.priest.types import Chunk, RetrievalResult
 from app.services.deidentify import strip_pii_regex
-from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +86,11 @@ _MAX_ATTEMPTS: Final = 2
 _MIN_CHAT_SECONDS: Final = 0.1
 # Asks the server for structured output (guided decoding on vLLM, JSON mode on Ollama).
 _DRAFT_SCHEMA: Final = PriestDraft.model_json_schema()
+# Moderation gets its own small pool. The shared default pool also serves every other
+# ``to_thread`` caller, and a stuck Ollama must not be able to starve them (or itself).
+_MODERATION_POOL: Final = ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="priest-moderation"
+)
 # What a moderation call may raise; any of them counts as "policy", never "crisis".
 _MODERATION_ERRORS: Final = (
     AuriError,
@@ -138,6 +143,7 @@ class _Run:
     traditions: frozenset[str] | None = None
     label: str | None = None
     retrieval: RetrievalResult | None = None
+    timed_out: bool = False
     prompt_version: str | None = None
     model: str = "none"
     codes: list[str] = field(default_factory=list)
@@ -173,6 +179,18 @@ def _decide(original: str, cleaned: str) -> SafetyDecision:
             if decision.kind == kind:
                 return decision
     return SafetyDecision("pass", None, first.ruling_footer or second.ruling_footer)
+
+
+def is_fixed_reply(question: str) -> bool:
+    """Whether a question gets fixed text without retrieval or a model.
+
+    True for a crisis, a deferral or a script the Guide cannot read. The route asks
+    before it meters a device: help and referrals cost nothing, so they are never
+    refused for asking too often.
+    """
+    original = " ".join(strip_fence_runs(question).split())[:MAX_QUESTION_CHARS]
+    decision = _decide(original, _clean(question))
+    return decision.kind != "pass" or safety_router.is_unsupported_script(original)
 
 
 def _tradition_scope(
@@ -361,15 +379,20 @@ class PriestService:
         crisis = severity is ModerationSeverity.crisis
         if crisis:
             return self._crisis_response(run)
+        if outcome is None and run.timed_out:
+            # Too slow, not broken: the index is fine, so say "busy", not "unavailable".
+            raise PriestUnavailableError("priest_busy", BUSY_RETRY_AFTER)
         if outcome is None:
             raise PriestUnavailableError("priest_index_unavailable")
         return outcome
 
     async def _moderate(self, text: str) -> ModerationSeverity:
         """Moderate on local Ollama in a thread; a failure or timeout is policy."""
+        loop = asyncio.get_running_loop()
         try:
             return await asyncio.wait_for(
-                asyncio.to_thread(self._moderator, text), timeout=self._moderation_cap
+                loop.run_in_executor(_MODERATION_POOL, self._moderator, text),
+                timeout=self._moderation_cap,
             )
         except TimeoutError:
             logger.warning("priest moderation timed out; counting it as policy")
@@ -387,6 +410,7 @@ class PriestService:
                 self._pipeline(run), timeout=self._remaining(run)
             )
         except TimeoutError:
+            run.timed_out = True
             logger.warning("priest deadline passed request_id=%s", run.request_id)
             return (
                 self._excerpts(run) if run.retrieval and run.retrieval.chunks else None
@@ -394,6 +418,13 @@ class PriestService:
         except PriestIndexError as exc:
             logger.warning(
                 "priest index unavailable (%s) request_id=%s",
+                type(exc).__name__,
+                run.request_id,
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001 — whatever the pipeline raised, moderation is consulted before an error goes out, or a crisis verdict would be lost; the class name is logged, never the message, which can echo the question
+            logger.error(
+                "priest pipeline failed (%s) request_id=%s",
                 type(exc).__name__,
                 run.request_id,
             )
@@ -485,7 +516,7 @@ class PriestService:
             reply,
             sources,
             canary=built.canary,
-            instruction_text=built.messages[0]["content"],
+            instruction_text=built.rules_text or built.messages[0]["content"],
         )
         run.add_stage("validate", self._clock() - began)
         if outcome.ok:
@@ -720,8 +751,12 @@ class LiveRetriever:
 
 
 def default_moderator() -> ModeratorFn:
-    """Moderation on local Ollama only; it never reaches a hosted provider."""
-    return LLMService(provider="ollama").moderate
+    """Moderation on the environment's Ollama only (see ``app.priest.moderation``)."""
+
+    def moderate(text: str) -> ModerationSeverity:
+        return moderation.moderate(text, timeout=MODERATION_CAP_SECONDS)
+
+    return moderate
 
 
 def build_priest_service(

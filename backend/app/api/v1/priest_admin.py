@@ -492,9 +492,9 @@ def _suppressed(kind: str, count: int, cohort: int) -> OutcomeCount:
     return OutcomeCount(kind=kind, count=count, suppressed=False)
 
 
-def _kinds(fixed: tuple[str, ...], seen: dict[str, Any]) -> list[str]:
-    """Every fixed kind, plus ``other`` once something fell outside them."""
-    return [*fixed, metrics.OTHER] if metrics.OTHER in seen else list(fixed)
+def _kinds(fixed: tuple[str, ...]) -> list[str]:
+    """Every fixed kind, plus ``other`` always, so a zero and a hidden count look alike."""
+    return [*fixed, metrics.OTHER]
 
 
 @router.get("/usage", response_model=UsageResponse, summary="Usage since start")
@@ -502,20 +502,22 @@ async def get_usage() -> UsageResponse:
     """Return outcome counts (small ones hidden) and p50/p95 latency per stage."""
     snap = metrics.snapshot()
     cohort = insights_service.min_cohort()
+    # A timing beside counts that are all hidden would show that one question happened.
+    show_latency = sum(snap.outcomes.values()) >= cohort
     return UsageResponse(
         since=snap.since.isoformat(),
         min_cohort=cohort,
         outcomes=[
             _suppressed(kind, snap.outcomes.get(kind, 0), cohort)
-            for kind in _kinds(metrics.OUTCOMES, snap.outcomes)
+            for kind in _kinds(metrics.OUTCOMES)
         ],
         latency=[
             StageLatency(
                 stage=stage,
-                p50=snap.latency_p50.get(stage),
-                p95=snap.latency_p95.get(stage),
+                p50=snap.latency_p50.get(stage) if show_latency else None,
+                p95=snap.latency_p95.get(stage) if show_latency else None,
             )
-            for stage in _kinds(metrics.STAGES, snap.latency_p50)
+            for stage in _kinds(metrics.STAGES)
         ],
     )
 

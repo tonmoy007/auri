@@ -9,14 +9,25 @@ early and start giving instructions, so such runs are replaced by a space first.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Final
 
-FENCE_RUN: Final = re.compile(r"<{3,}|>{3,}")
+# Runs of three or more opening or closing angle marks, in ASCII and in the look-alike
+# forms (full-width, single and double guillemets, mathematical and CJK brackets).
+FENCE_RUN: Final = re.compile(
+    "[<\u2039\u00ab\uff1c\ufe64\u226a\u27e8\u3008\u276e\u276c]{3,}"
+    "|[>\u203a\u00bb\uff1e\ufe65\u226b\u27e9\u3009\u276f\u276d]{3,}"
+)
 
 
 def strip_fence_runs(text: str) -> str:
-    """Return *text* with every run of three or more ``<`` or ``>`` replaced by a space."""
-    return FENCE_RUN.sub(" ", text)
+    """Return *text* with every run of three or more angle marks replaced by a space.
+
+    Invisible format characters are removed first, so a run cannot be broken up by a
+    zero-width character, and look-alike angle marks count as the real ones.
+    """
+    visible = "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    return FENCE_RUN.sub(" ", visible)
 
 
 def fence(name: str, text: str) -> str:

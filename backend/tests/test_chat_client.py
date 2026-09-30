@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import Callable
 
 import httpx
@@ -299,6 +300,52 @@ def test_the_denylist_also_covers_a_subdomain_of_a_provider(
 ) -> None:
     # Arrange
     set_setting("PRIEST_LLM_BASE_URL", "https://eu.api.openai.com")
+
+    # Act / Assert
+    with pytest.raises(PriestEndpointError):
+        resolve_primary()
+
+
+@pytest.mark.parametrize(
+    "address",
+    [
+        "https://api\u3002openai\u3002com/v1",  # ideographic full stops
+        "https://openrouter.ai/api/v1",
+        "https://myorg.openai.azure.com",
+        "https://us-central1-aiplatform.googleapis.com",
+        "https://api.groq.com/openai/v1",
+        "https://api.together.xyz/v1",
+        "https://gateway.ai.cloudflare.com/v1/acct/gw/openai",
+    ],
+)
+def test_other_hosted_model_hosts_and_look_alike_spellings_are_refused(
+    address: str, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("PRIEST_LLM_BASE_URL", address)
+
+    # Act / Assert
+    with pytest.raises(PriestEndpointError):
+        resolve_primary()
+
+
+def test_a_cloud_hosted_ollama_model_is_refused_for_the_fallback(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange — Ollama runs a "-cloud" model on a third party's servers
+    set_setting("PRIEST_FALLBACK_MODEL", "gpt-oss:120b-cloud")
+
+    # Act / Assert
+    with pytest.raises(PriestEndpointError):
+        resolve_fallback()
+
+
+def test_a_cloud_hosted_model_is_refused_for_the_primary(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("PRIEST_LLM_BASE_URL", "http://localhost:8000")
+    set_setting("PRIEST_LLM_MODEL", "some-model-cloud")
 
     # Act / Assert
     with pytest.raises(PriestEndpointError):
@@ -800,3 +847,59 @@ def test_its_own_server_needs_its_own_model_name(set_setting: SettingPatcher) ->
     # Act / Assert
     with pytest.raises(PriestEndpointError, match="PRIEST_LLM_MODEL"):
         resolve_primary()
+
+
+# ── review fixes: timeouts, decoding errors, compression ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_black_holed_server_is_given_up_on_at_a_short_connect_timeout() -> None:
+    # Arrange — a dropped SYN must not use the whole deadline before the fallback runs
+    client, seen = _client(_reply())
+
+    # Act
+    await _ask(client, timeout=20)
+
+    # Assert
+    timeout = seen[0].extensions["timeout"]
+    assert timeout["read"] == 20
+    assert timeout["connect"] <= 3.0
+
+
+@pytest.mark.asyncio
+async def test_the_fallback_gets_only_the_time_the_primary_left() -> None:
+    # Arrange
+    def slow_failure(request: httpx.Request) -> httpx.Response:
+        time.sleep(0.3)
+        raise httpx.ConnectTimeout("no route")
+
+    chain, _, fallback_seen = _chain(slow_failure, _reply("from ollama"))
+
+    # Act
+    result = await chain.complete(MESSAGES, request_id="r", timeout=2.0)
+
+    # Assert — one overall budget, not a fresh one per server
+    assert result.text == "from ollama"
+    assert fallback_seen[0].extensions["timeout"]["read"] < 1.8
+
+
+@pytest.mark.asyncio
+async def test_a_bad_content_encoding_is_a_fixed_failure_not_a_crash() -> None:
+    # Arrange
+    client, _ = _client(_raising(httpx.DecodingError("bad gzip")))
+
+    # Act / Assert
+    with pytest.raises(PriestLLMError):
+        await _ask(client)
+
+
+@pytest.mark.asyncio
+async def test_compression_is_not_requested() -> None:
+    # Arrange — the size cap applies to bytes read, so the reply must not expand
+    client, seen = _client(_reply())
+
+    # Act
+    await _ask(client)
+
+    # Assert
+    assert seen[0].headers["Accept-Encoding"] == "identity"

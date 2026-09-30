@@ -193,7 +193,7 @@ def test_the_crisis_reply_is_the_fixed_template_byte_for_byte() -> None:
 
     # Assert
     assert reply.text.startswith(template)
-    assert "not seen by anyone at the company" in reply.text
+    assert "no one at the company has been alerted" in reply.text
     assert "booth" in reply.text
     assert reply.text == crisis_reply().text
     assert reply.text.encode() == crisis_reply().text.encode()
@@ -554,3 +554,220 @@ def test_the_english_only_notice_says_so_and_points_to_emergency_help() -> None:
     # Assert — a person writing in distress in another language is not left with nothing
     assert "English" in text
     assert "emergency number" in text
+
+
+# ── review fixes: phrasings that used to reach retrieval and the model ────────
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I want to take my life",
+        "would God forgive me if I killed myself",
+        "what does islam say about people who take their own life",
+        "I don't deserve to live",
+        "I want to end it",
+        "I'm going to end it tonight",
+        "thinking of ending it",
+        "I want to kms",
+        "i want to unalive",
+        "I want to end myself",
+        "slit my wrists",
+        "I have been cutting again",
+        "I'm going to jump",
+        "I have pills saved up",
+        "I'm a burden to everyone",
+        "everything is pointless and I want out",
+        "I pray every night that God takes me",
+        "I want God to take me away",
+        "I want to be with my mother in heaven now, I am ready to go",
+    ],
+)
+def test_common_self_harm_phrasings_route_to_crisis(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "crisis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I will kill him",
+        "I am going to shoot up my office",
+        "I want to hurt the man who did this",
+        "I'll kill that person",
+    ],
+)
+def test_common_intent_to_harm_others_routes_to_crisis(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "crisis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "s u i c i d e",
+        "k.i.l.l myself",
+        "sui-cide",
+        "$uicide",
+        "kіll myself",  # Cyrillic i
+        "kіll mуself",  # Cyrillic i and y
+    ],
+)
+def test_deliberate_obfuscation_still_routes_to_crisis(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "crisis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "ami morte chai",
+        "amar bachte ichha kore na",
+        "ami atmohotya korbo",
+    ],
+)
+def test_romanised_bangla_crisis_phrases_route_to_crisis(question: str) -> None:
+    # Act / Assert — the lines in crisis_en.txt still need a native-speaker review
+    assert _decision(question).kind == "crisis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I'll take the life of Buddha as my example",
+        "I want to end the meeting early",
+        "What does the Quran say about the burden of debt",
+        "I'm going to jump rope with the kids",
+        "Please kill the process that is stuck",
+        "I'm going to attack the problem tomorrow",
+        "We will jump at the chance to visit",
+        "I have pills in my bag for the trip",
+    ],
+)
+def test_the_wider_crisis_lexicon_keeps_ordinary_sentences_passing(
+    question: str,
+) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "pass"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "my manager harassed me",
+        "my uncle abused me as a child",
+        "I was sexually abused",
+        "I was abused",
+        "my coworker touched me inappropriately",
+        "he slapped me",
+        "my husband threatened me",
+        "my boss keeps sending me sexual messages",
+    ],
+)
+def test_past_tense_abuse_disclosures_route_to_the_abuse_deferral(
+    question: str,
+) -> None:
+    # Act
+    decision = _decision(question)
+
+    # Assert
+    assert decision.kind == "deferral"
+    assert decision.category == "abuse"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "what are the prescribed prayers in Islam",
+        "Is fasting prescribed for Muslims",
+        "my friend Sue asked about karma",
+        "can I fire me up for prayer",
+        "Is Judas a sinner",
+        "was Cain wicked",
+    ],
+)
+def test_common_study_phrasings_are_not_deferred(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "pass"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "she prescribed me pills",
+        "my doctor prescribed antidepressants",
+        "I want to sue my employer",
+        "can they fire me for praying at work",
+    ],
+)
+def test_real_medical_and_legal_questions_are_still_deferred(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "deferral"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "नमस्ते",  # Devanagari
+        "مرحبا",  # Arabic
+        "привет",  # Cyrillic
+        "你好",  # Chinese
+        "สวัสดี",  # Thai
+    ],
+)
+def test_any_non_latin_script_gets_the_english_only_notice(text: str) -> None:
+    # Act / Assert
+    assert safety_router.is_unsupported_script(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "What does the Quran say about mercy?",
+        "Kisā Gotamī, Činvat and Ṛgveda",
+        "café naïve résumé",
+        "I pray 5 times a day — is that enough?",
+        "Hello \U0001f642",
+    ],
+)
+def test_latin_text_with_accents_punctuation_and_emoji_is_supported(text: str) -> None:
+    # Act / Assert
+    assert safety_router.is_unsupported_script(text) is False
+
+
+def test_the_fixed_texts_make_no_claim_the_company_cannot_see_the_conversation() -> (
+    None
+):
+    # Arrange — the model server's operator can see a question, so "not seen by anyone"
+    # would be false
+    crisis = crisis_reply().text.lower()
+
+    # Assert
+    assert "not seen by anyone" not in crisis
+    assert "no one at the company has been alerted" in crisis
+
+
+def test_the_booth_lines_do_not_imply_the_booth_is_anonymous() -> None:
+    # Act
+    abuse, _ = render_deferral("abuse")
+    legal, _ = render_deferral("legal")
+
+    # Assert — department and time can point to the sender (the privacy panel says so)
+    for text in (abuse, legal):
+        assert "can still point to you" in text
+        assert "without giving your name" not in text
+
+
+def test_the_abuse_deferral_points_to_the_emergency_number_even_with_no_contacts(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NUMBER", "")
+    set_setting("CRISIS_EAP_CONTACT", "")
+
+    # Act
+    text, contacts = render_deferral("abuse")
+
+    # Assert
+    assert contacts == []
+    assert "local emergency number" in text

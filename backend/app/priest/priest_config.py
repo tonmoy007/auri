@@ -71,6 +71,10 @@ def persona_name() -> str:
     name = " ".join(cleaned.split())
     if not name or len(name) > _MAX_PERSONA_CHARS:
         return _DEFAULT_PERSONA
+    # Letters, spaces, apostrophes and hyphens only: the name goes into the prompt, so
+    # it must not be able to carry a sentence of instructions.
+    if not all(ch.isalpha() or ch in " '-" for ch in name):
+        return _DEFAULT_PERSONA
     return name
 
 
@@ -134,11 +138,16 @@ def embed_model() -> str:
 
 
 def fallback_base_url() -> str:
-    """The fallback chat server: the configured one, else Ollama's ``/v1``."""
+    """The fallback chat server: the configured one, else Ollama's ``/v1``.
+
+    Both come from the environment. ``OLLAMA_BASE_URL`` is editable from the dashboard
+    for confession moderation, but a question must never follow a dashboard edit, so
+    the live layer is not read here.
+    """
     explicit = settings.PRIEST_FALLBACK_BASE_URL.strip().rstrip("/")
     if explicit:
         return explicit
-    return f"{_raw('OLLAMA_BASE_URL').strip().rstrip('/')}/v1"
+    return f"{settings.OLLAMA_BASE_URL.strip().rstrip('/')}/v1"
 
 
 def enabled_traditions() -> frozenset[str] | None:

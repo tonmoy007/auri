@@ -32,6 +32,11 @@ OUTCOMES: Final = (
 STAGES: Final = ("safety", "embed", "retrieve", "generate", "validate", "total")
 OTHER: Final = "other"
 LATENCY_WINDOW: Final = 1000
+# Crisis and deferral replies share one scrape label. The scrape is timestamped and
+# joins to the access log, so an exact crisis count would say who sent one; the
+# in-process snapshot (with the admin view's small-count suppression) keeps them apart.
+FIXED_REPLY_LABEL: Final = "fixed_reply"
+_FOLDED_FOR_SCRAPE: Final = frozenset({"crisis", "deferral"})
 
 ANSWERS = Counter(
     "auri_priest_answers_total", "Priest-mode questions by outcome", ["outcome"]
@@ -69,7 +74,9 @@ def reset() -> None:
 def record_outcome(kind: str) -> None:
     """Count one answered (or refused) question under a fixed outcome label."""
     label = kind if kind in OUTCOMES else OTHER
-    ANSWERS.labels(outcome=label).inc()
+    ANSWERS.labels(
+        outcome=FIXED_REPLY_LABEL if label in _FOLDED_FOR_SCRAPE else label
+    ).inc()
     with _lock:
         _outcomes[label] += 1
 

@@ -31,6 +31,10 @@ from app.services.openai_compatible import strip_reasoning
 logger = logging.getLogger(__name__)
 
 MAX_RESPONSE_BYTES: Final = 256 * 1024
+# A server that does not answer a connection within this is treated as down, so the
+# fallback still has time left.
+_CONNECT_SECONDS: Final = 3.0
+_MIN_SERVER_SECONDS: Final = 0.1
 _SCHEMA_NAME: Final = "priest_answer"
 _RETRYABLE_ELSEWHERE: Final = frozenset({408, 429})
 # Reasons whose fixed messages are safe to show; nothing else ever reaches a message.
@@ -247,7 +251,7 @@ class ChatClient:
             raise ChatFailure("timeout") from None
         except httpx.ConnectError:
             raise ChatFailure("connect") from None
-        except httpx.TransportError:
+        except httpx.HTTPError:
             raise ChatFailure("network") from None
         finally:
             if owned:
@@ -261,7 +265,8 @@ class ChatClient:
         deadline: float,
     ) -> str:
         """Send the request and read at most ``MAX_RESPONSE_BYTES`` of the reply."""
-        headers = {"X-Request-ID": request_id}
+        # No compression: the size cap counts bytes read, so a reply must not expand.
+        headers = {"X-Request-ID": request_id, "Accept-Encoding": "identity"}
         if self._endpoint.api_key:
             headers["Authorization"] = f"Bearer {self._endpoint.api_key}"
         async with client.stream(
@@ -269,7 +274,7 @@ class ChatClient:
             f"{self._endpoint.base_url}/v1/chat/completions",
             json=body,
             headers=headers,
-            timeout=deadline,
+            timeout=httpx.Timeout(deadline, connect=min(_CONNECT_SECONDS, deadline)),
             follow_redirects=False,
         ) as response:
             if response.status_code != 200:
@@ -311,7 +316,14 @@ class PriestLLMChain:
         servers = [c for c in (self._primary, self._fallback) if c is not None]
         if not servers:
             raise PriestLLMError("no chat server is configured")
+        clock = asyncio.get_running_loop().time
+        overall_end = None if timeout is None else clock() + timeout
         for index, server in enumerate(servers):
+            left = (
+                None
+                if overall_end is None
+                else max(_MIN_SERVER_SECONDS, overall_end - clock())
+            )
             try:
                 result = await server.complete(
                     messages,
@@ -320,7 +332,7 @@ class PriestLLMChain:
                     temperature=temperature,
                     seed=seed,
                     json_schema=json_schema,
-                    timeout=timeout,
+                    timeout=left,
                 )
             except ChatFailure as failure:
                 logger.warning(

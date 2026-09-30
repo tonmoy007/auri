@@ -16,7 +16,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Response
 
 from app.exceptions import PriestError, PriestUnavailableError
 from app.priest import metrics, priest_config
-from app.priest.priest_service import PriestService, get_priest_service
+from app.priest.priest_service import (
+    PriestService,
+    get_priest_service,
+    is_fixed_reply,
+)
 from app.priest.rate_limiter import (
     PriestRateLimiter,
     PriestRateLimitError,
@@ -24,12 +28,14 @@ from app.priest.rate_limiter import (
 )
 from app.priest.schemas import (
     TRADITION_LABELS,
+    CrisisContactOut,
     PriestAnswerResponse,
     PriestAskRequest,
     PriestStatusResponse,
     TraditionId,
     TraditionOption,
 )
+from app.services import crisis_response
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +74,10 @@ async def priest_status(response: Response) -> PriestStatusResponse:
             for t in TraditionId
             if allowed is None or t.value in allowed
         ],
+        crisis_contacts=[
+            CrisisContactOut(label=c.label, detail=c.detail, dial=c.dial)
+            for c in crisis_response.contacts()
+        ],
     )
 
 
@@ -93,13 +103,17 @@ async def ask_priest(
     """
     # Random on purpose: not derived from the device, the question or the time.
     request_id = str(uuid.uuid4())
-    _check_rate_limit(limiter, x_device_token_hash)
+    # Crisis, deferral and unsupported-script replies are fixed text that costs nothing,
+    # so they are never refused: a person in distress must not get a 429 instead of help.
+    if not is_fixed_reply(body.question):
+        _check_rate_limit(limiter, x_device_token_hash)
     try:
         return await service.answer(
             body.question, body.tradition, request_id=request_id
         )
     except PriestUnavailableError as exc:
-        metrics.record_outcome("busy" if exc.code == "priest_busy" else "error")
+        # The service counted this refusal already; counting it here too overstated
+        # busy and error in the usage view.
         _log_failure(exc, request_id)
         raise _unavailable(exc) from None
     except PriestError as exc:

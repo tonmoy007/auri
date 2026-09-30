@@ -23,7 +23,10 @@ PROMPT_NAME: Final = "priest_answer"
 _USER_MARKER: Final = "<!-- user-message -->"
 _MAX_TITLE_CHARS: Final = 120
 _MAX_LABEL_CHARS: Final = 60
-_MAX_CORRECTION_CHARS: Final = 300
+# Room for every correction line (V1 to V9) at once; a shorter cap cut the later ones.
+_MAX_CORRECTION_CHARS: Final = 900
+# Where the worked examples start in the system half of the template.
+_EXAMPLES_MARKER: Final = "Example 1"
 _CANARY_BYTES: Final = 8
 _NO_SOURCES: Final = "(no source notes were found)"
 
@@ -41,6 +44,9 @@ class BuiltPrompt:
     source_ids: tuple[str, ...]
     canary: str
     prompt_version: str
+    # The instructions without the worked examples, for the leak check: a natural reply
+    # can share a few words with an example without leaking anything.
+    rules_text: str = ""
 
 
 def generate_canary() -> str:
@@ -134,4 +140,5 @@ def build_messages(
             ).strip(),
         },
     ]
-    return BuiltPrompt(messages, ids, canary, prompt.version)
+    rules = messages[0]["content"].split(_EXAMPLES_MARKER, 1)[0]
+    return BuiltPrompt(messages, ids, canary, prompt.version, rules)

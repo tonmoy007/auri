@@ -149,3 +149,18 @@ def test_unknown_keys_in_a_draft_are_ignored_not_trusted() -> None:
 
     # Assert
     assert draft.kind == "not_covered" and not hasattr(draft, "system_prompt")
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["c1\x85control", "bidi\u202eflip", "isolate\u2066here", "sep\u2028here", "sep\u2029here"],
+)
+def test_c1_controls_bidi_overrides_and_line_separators_are_refused(bad: str) -> None:
+    # Act / Assert
+    with pytest.raises(ValidationError):
+        PriestAskRequest(question=bad)
+
+
+def test_the_joiner_used_in_emoji_is_allowed() -> None:
+    # Act / Assert
+    assert PriestAskRequest(question="family \U0001f468‍\U0001f469 prayer").question

@@ -112,3 +112,43 @@ def test_the_snapshot_is_a_copy() -> None:
 
     # Assert
     assert snap.outcomes["answer"] == 1
+
+
+def test_crisis_and_deferral_replies_share_one_prometheus_label() -> None:
+    # Arrange — an exact crisis count, scraped with timestamps and joined to the access
+    # log, would say who sent one
+    from prometheus_client import REGISTRY
+
+    def sample(label: str) -> float:
+        return (
+            REGISTRY.get_sample_value("auri_priest_answers_total", {"outcome": label})
+            or 0.0
+        )
+
+    before = sample("fixed_reply")
+
+    # Act
+    metrics.record_outcome("crisis")
+    metrics.record_outcome("deferral")
+
+    # Assert
+    assert sample("fixed_reply") == before + 2
+    assert (
+        REGISTRY.get_sample_value("auri_priest_answers_total", {"outcome": "crisis"})
+        is None
+    )
+    assert (
+        REGISTRY.get_sample_value("auri_priest_answers_total", {"outcome": "deferral"})
+        is None
+    )
+
+
+def test_the_in_process_snapshot_still_counts_crisis_separately() -> None:
+    # Arrange
+    metrics.reset()
+
+    # Act
+    metrics.record_outcome("crisis")
+
+    # Assert — the admin view applies its own small-count suppression to this
+    assert metrics.snapshot().outcomes["crisis"] == 1

@@ -16,6 +16,7 @@ statements that had overclaimed.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from urllib.parse import urlparse
@@ -25,7 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.exceptions import PriestEndpointError, ThemesEndpointError
-from app.llm.chat_endpoint import resolve_primary
+from app.llm.chat_endpoint import (
+    ChatEndpoint,
+    checked_base,
+    refuse_cloud_model,
+    resolve_fallback,
+    resolve_primary,
+)
 from app.models.retention_run import RetentionRun
 from app.models.user import User, UserRole
 from app.priest import priest_config
@@ -51,28 +58,67 @@ class Fact:
 
 
 @dataclass(frozen=True)
-class PriestRoute:
-    """Where Guide questions go while the Guide is on, from the live configuration."""
+class ServerRoute:
+    """One server a Guide question can reach, from the live configuration."""
 
-    kind: str  # "local", "configured" or "refused"
+    kind: str  # "none", "configured" or "refused"
     host: str = ""
     encrypted: bool = True
+
+
+@dataclass(frozen=True)
+class PriestRoute:
+    """Every server a Guide question reaches while the Guide is on."""
+
+    primary: ServerRoute
+    fallback: ServerRoute
+    moderation: ServerRoute
+
+
+_NO_SERVER = ServerRoute(kind="none")
+_REFUSED_SERVER = ServerRoute(kind="refused")
+
+
+def _is_encrypted(base_url: str, host: str) -> bool:
+    """Whether traffic to *base_url* is encrypted, or never leaves this machine."""
+    if base_url.lower().startswith("https://"):
+        return True
+    return host == "localhost" or host.startswith("127.") or host == "::1"
+
+
+def _chat_route(resolve: Callable[[], ChatEndpoint | None]) -> ServerRoute:
+    """Describe one chat server; a refused address is reported without being quoted."""
+    try:
+        endpoint = resolve()
+    except PriestEndpointError:
+        return _REFUSED_SERVER
+    if endpoint is None:
+        return _NO_SERVER
+    return ServerRoute(
+        kind="configured",
+        host=endpoint.host,
+        encrypted=_is_encrypted(endpoint.base_url, endpoint.host),
+    )
+
+
+def _moderation_route() -> ServerRoute:
+    """The Ollama the safety check reads questions on: the environment's, never the dashboard's."""
+    try:
+        base, host = checked_base(settings.OLLAMA_BASE_URL, "OLLAMA_BASE_URL")
+        refuse_cloud_model(settings.OLLAMA_MODEL)
+    except PriestEndpointError:
+        return _REFUSED_SERVER
+    return ServerRoute("configured", host, _is_encrypted(base, host))
 
 
 def priest_route() -> PriestRoute | None:
     """Describe where Guide questions go, or ``None`` while the Guide is off."""
     if not priest_config.enabled():
         return None
-    try:
-        endpoint = resolve_primary()
-    except PriestEndpointError:
-        return PriestRoute(kind="refused")
-    if endpoint is None:
-        return PriestRoute(kind="local")
     return PriestRoute(
-        kind="configured",
-        host=endpoint.host,
-        encrypted=endpoint.base_url.lower().startswith("https://"),
+        primary=_chat_route(resolve_primary),
+        fallback=_chat_route(resolve_fallback),
+        moderation=_moderation_route(),
     )
 
 
@@ -411,32 +457,51 @@ def _telegram_statement(snapshot: PrivacySnapshot) -> str:
     )
 
 
+def _server_clause(role: str, route: ServerRoute) -> str:
+    """One sentence about one server, or ``""`` when there is none."""
+    if route.kind == "none":
+        return ""
+    if route.kind == "refused":
+        return (
+            f"The {role} server cannot be used (it is malformed, a hosted AI "
+            "provider or a cloud-hosted model)."
+        )
+    clause = (
+        f"The {role} server is configured by this organisation ({route.host}); "
+        "where it runs is not verified, and its operator can see a question "
+        "while it is handled."
+    )
+    if not route.encrypted:
+        clause += " Questions cross the network to it without encryption."
+    return clause
+
+
 def _priest_statement(route: PriestRoute) -> str:
     """Say where Guide questions go, what is kept and what happens in a crisis."""
-    if route.kind == "refused":
-        where = (
-            "The configured model server cannot be used (it is malformed or is a "
-            "hosted AI provider), so the Guide cannot answer until that is fixed."
-        )
-    elif route.kind == "configured":
-        where = (
-            f"Questions go to a model server configured by this organisation "
-            f"({route.host}); where it runs is not verified, and its operator can "
-            "see a question while it is answered."
-        )
-        if not route.encrypted:
-            where += " They cross the network without encryption."
-    else:
-        where = (
-            "Questions are answered by a model on this organisation's own "
-            "infrastructure."
-        )
+    servers = [
+        _server_clause("answer", route.primary),
+        _server_clause("backup answer", route.fallback),
+    ]
+    if route.primary.kind == "none" and route.fallback.kind == "none":
+        servers = [
+            (
+                "No model server is configured, so the Guide can only show passages "
+                "from the library."
+            )
+        ]
+    check = _server_clause("safety-check", route.moderation).replace(
+        "a question while it is handled", "a question as typed"
+    )
     return (
         "The Guide answers questions from a study library. "
-        f"{where} Questions are cleaned of recognised details by pattern matching "
-        "only, are not stored and are not visible to staff. If a question suggests "
-        "someone is in danger the Guide shows a fixed message with contacts; "
-        "nobody at the company is told, because nothing is kept."
+        f"{' '.join(part for part in servers if part)} "
+        "Before a question reaches the model that writes the answer, recognised "
+        "details are removed by pattern matching only. The safety check reads the "
+        f"question as typed, before that clean-up. {check} "
+        "Questions are not stored by Auri and are not visible to staff, though "
+        "the time of each request appears in the servers' access logs. If a "
+        "question suggests someone is in danger the Guide shows a fixed message "
+        "with contacts; nobody at the company is told, because Auri keeps nothing."
     )
 
 

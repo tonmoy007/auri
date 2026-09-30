@@ -1,7 +1,7 @@
-# version: 1
+# version: 2
 # Legal and workplace-legal questions the Guide must not answer.
 # Normalised text; "re:" lines are regular expressions.
-sue
+re:\b(sue|suing|sued) (my|the|our|him|her|them|this|that|a|an|his|their|for)\b
 lawsuit
 lawyer
 attorney
@@ -12,7 +12,8 @@ press charges
 unfair dismissal
 wrongful termination
 wrongfully terminated
-fire me
+re:\b(they|he|she|boss|employer|manager|company|supervisor|school) (can |could |will |would |might |may |did |do |does )?(fire|sack|dismiss) me\b
+re:\b(can|could|will|would|might|may) (they|he|she|my \w+|the \w+|our \w+) (fire|sack|dismiss) me\b
 fired for
 get fired
 lose my job for

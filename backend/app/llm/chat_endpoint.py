@@ -1,9 +1,11 @@
 """Where priest mode sends its questions, and whether that address may be used.
 
 Priest text (a person's question and passages from the study vault) only ever goes to
-a server the operator runs: vLLM as the primary, local Ollama as the fallback. A
-hosted provider is refused outright, whatever the configuration says, because this
-text must not reach a third party.
+a server the operator runs: vLLM as the primary, local Ollama as the fallback. The
+well-known hosted model providers are refused outright, whatever the configuration
+says, and so is an Ollama ``-cloud`` model (Ollama forwards those to a third party).
+The list of providers is not exhaustive: the operator's own address is the safeguard,
+and it comes from the environment, never from the dashboard.
 
 The primary is ``PRIEST_LLM_BASE_URL``. While that is unset the prototype reuses the
 themes endpoint exactly as ``themes_endpoint`` resolves it (same validation, same
@@ -16,6 +18,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Final, Literal
 
+import httpx
+
 from app.config import settings
 from app.exceptions import PriestEndpointError, ThemesEndpointError
 from app.priest import priest_config
@@ -23,10 +27,28 @@ from app.services import themes_endpoint
 
 EndpointKind = Literal["vllm", "ollama"]
 
-# Hosted model APIs; priest text must never be sent to any of them.
+# Hosted model APIs; priest text must never be sent to any of them. A subdomain of a
+# listed name is refused too.
 THIRD_PARTY_HOSTS: Final = frozenset(
-    {"api.openai.com", "generativelanguage.googleapis.com", "api.anthropic.com"}
+    {
+        "api.openai.com",
+        "openai.com",
+        "openai.azure.com",
+        "generativelanguage.googleapis.com",
+        "googleapis.com",
+        "api.anthropic.com",
+        "anthropic.com",
+        "openrouter.ai",
+        "api.groq.com",
+        "api.together.xyz",
+        "api.mistral.ai",
+        "api.cohere.com",
+        "api.deepseek.com",
+        "api.x.ai",
+        "gateway.ai.cloudflare.com",
+    }
 )
+CLOUD_MODEL_SUFFIX: Final = "-cloud"
 _THEMES_PREFIX: Final = "THEMES_LLM_"
 _PRIEST_PREFIX: Final = "PRIEST_LLM_"
 
@@ -46,11 +68,28 @@ class ChatEndpoint:
     kind: EndpointKind
 
 
+def _host_forms(host: str) -> set[str]:
+    """The spellings of *host* a client could resolve: as written and as parsed.
+
+    ``httpx`` folds look-alike dots (U+3002) and other IDNA forms into the real name,
+    so the denylist is checked against both.
+    """
+    written = host.strip().lower().rstrip(".")
+    forms = {written}
+    try:
+        parsed = httpx.URL(f"https://{host.strip()}").host
+    except httpx.InvalidURL:
+        return forms
+    forms.add(parsed.lower().rstrip("."))
+    return forms
+
+
 def is_third_party_host(host: str) -> bool:
     """Whether *host* is a hosted model provider (or a subdomain of one)."""
-    name = host.strip().lower().rstrip(".")
     return any(
-        name == banned or name.endswith(f".{banned}") for banned in THIRD_PARTY_HOSTS
+        name == banned or name.endswith(f".{banned}")
+        for name in _host_forms(host)
+        for banned in THIRD_PARTY_HOSTS
     )
 
 
@@ -67,12 +106,27 @@ def refuse_third_party_host(host: str) -> None:
         )
 
 
-def _checked_base(raw: str, name: str) -> tuple[str, str]:
+def refuse_cloud_model(model: str) -> None:
+    """Raise for an Ollama ``-cloud`` model, which Ollama runs on a third party's servers.
+
+    Raises:
+        PriestEndpointError: If the model name ends in ``-cloud``. The message never
+            quotes the name.
+    """
+    if model.strip().lower().endswith(CLOUD_MODEL_SUFFIX):
+        raise PriestEndpointError(
+            "the chat model runs on a third party's servers; priest text must "
+            "stay on servers the operator runs"
+        )
+
+
+def checked_base(raw: str, name: str) -> tuple[str, str]:
     """Return ``(base_url, host)`` for *raw*, or raise ``PriestEndpointError``.
 
     Validation is ``themes_endpoint``'s (http(s) only, no credentials, no query or
     fragment, fixed messages); its setting name is swapped for *name* so the operator
-    is pointed at the right key.
+    is pointed at the right key. A hosted provider, and plain http to a public address
+    without ``PRIEST_LLM_ALLOW_INSECURE_HTTP``, are refused.
     """
     try:
         base, host, scheme = themes_endpoint._validated_base(raw)
@@ -101,9 +155,11 @@ def _from_themes() -> ChatEndpoint | None:
     if themes is None:
         return None
     refuse_third_party_host(themes.host)
+    model = priest_config.llm_model() or themes.model
+    refuse_cloud_model(model)
     return ChatEndpoint(
         base_url=themes.base_url,
-        model=priest_config.llm_model() or themes.model,
+        model=model,
         api_key=themes.api_key,
         timeout_seconds=priest_config.llm_timeout_seconds(),
         host=themes.host.lower(),
@@ -125,12 +181,13 @@ def resolve_primary() -> ChatEndpoint | None:
     raw = settings.PRIEST_LLM_BASE_URL.strip()
     if not raw:
         return _from_themes()
-    base, host = _checked_base(raw, "PRIEST_LLM_BASE_URL")
+    base, host = checked_base(raw, "PRIEST_LLM_BASE_URL")
     model = priest_config.llm_model()
     if not model:
         raise PriestEndpointError(
             "PRIEST_LLM_MODEL must be set when PRIEST_LLM_BASE_URL is"
         )
+    refuse_cloud_model(model)
     return ChatEndpoint(
         base_url=base,
         model=model,
@@ -152,7 +209,8 @@ def resolve_fallback() -> ChatEndpoint | None:
     model = priest_config.fallback_model()
     if not model:
         return None
-    base, host = _checked_base(
+    refuse_cloud_model(model)
+    base, host = checked_base(
         priest_config.fallback_base_url(), "PRIEST_FALLBACK_BASE_URL"
     )
     return ChatEndpoint(

@@ -1,4 +1,4 @@
-# version: 1
+# version: 2
 # Medical questions the Guide must not answer: medication, treatment, diagnosis.
 # Normalised text; "re:" lines are regular expressions.
 antidepressant
@@ -10,7 +10,8 @@ medications
 my meds
 my pills
 prescription
-prescribed
+re:\bprescribed (me|to me|us|medication|medicine|pills|drugs|antidepressants?|antipsychotics?)\b
+re:\b(i|was|been|am|im) prescribed\b
 dosage
 diagnosis
 diagnosed

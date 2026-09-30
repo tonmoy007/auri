@@ -58,6 +58,10 @@ _TEMPLATE_VERSION: Final = re.compile(r"^<!--\s*version:\s*(\d+)\s*-->$")
 _REGEX_PREFIX: Final = "re:"
 _APOSTROPHES: Final = dict.fromkeys(map(ord, "'’‘`´ʼ"))
 _LEET: Final = str.maketrans("013457", "oieast")
+# Cyrillic and Greek letters that look like Latin ones, so "kіll" (Cyrillic і) still
+# reads as "kill". Lexicon matching only; the script check runs on the raw text.
+_CONFUSABLES: Final = str.maketrans("аеорсхуіјѕкмтнвοιανε", "aeopcxyijskmthboiave")
+_JOINERS: Final = re.compile(r"(?<=\w)[-._*·](?=\w)")
 
 
 @dataclass(frozen=True)
@@ -96,13 +100,15 @@ def _read_leet(word: str) -> str:
     return word.translate(_LEET) if any(ch.isalpha() for ch in word) else word
 
 
-def normalise_text(text: str, *, leet: bool = True) -> str:
+def normalise_text(text: str, *, leet: bool = True, squeeze: bool = False) -> str:
     """Reduce *text* to lower-case words so lexicon entries match regardless of styling.
 
     NFKC, invisible format characters and combining marks removed, casefolded,
-    apostrophes dropped ("don't" is "dont"), other punctuation turned into a space,
-    whitespace collapsed, and (when *leet*) digits and ``@ $`` inside words read as
-    letters.
+    look-alike Cyrillic and Greek letters read as Latin, apostrophes dropped ("don't"
+    is "dont"), other punctuation turned into a space, whitespace collapsed, and (when
+    *leet*) digits and ``@ $`` inside words read as letters. With *squeeze*, separators
+    inside a word ("sui-cide", "k.i.l.l") and spaces between single letters
+    ("s u i c i d e") are removed too, to read deliberately broken-up words.
     """
     folded = "".join(
         ch
@@ -111,12 +117,36 @@ def normalise_text(text: str, *, leet: bool = True) -> str:
     )
     decomposed = unicodedata.normalize("NFD", folded.casefold())
     bare = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
+    bare = bare.translate(_CONFUSABLES)
     if leet:
         bare = re.sub(r"(?<=\w)@(?=\w)", "a", bare)
+        bare = re.sub(r"\$(?=[a-z])", "s", bare)
         bare = re.sub(r"(?<=\w)\$(?=\w)", "s", bare)
-    spaced = "".join(ch if ch.isalnum() else " " for ch in bare.translate(_APOSTROPHES))
+    bare = bare.translate(_APOSTROPHES)
+    if squeeze:
+        bare = _JOINERS.sub("", bare)
+    spaced = "".join(ch if ch.isalnum() else " " for ch in bare)
     words = spaced.split()
+    if squeeze:
+        words = _join_single_letters(words)
     return " ".join(_read_leet(w) for w in words) if leet else " ".join(words)
+
+
+def _join_single_letters(words: list[str]) -> list[str]:
+    """Join runs of single-letter words ("s u i c i d e" becomes "suicide")."""
+    joined: list[str] = []
+    run = ""
+    for word in words:
+        if len(word) == 1 and word.isalpha():
+            run += word
+            continue
+        if run:
+            joined.append(run)
+            run = ""
+        joined.append(word)
+    if run:
+        joined.append(run)
+    return joined
 
 
 def _compile_entry(line: str, name: str, number: int) -> re.Pattern[str] | None:
@@ -200,7 +230,8 @@ def route(question: str) -> SafetyDecision:
         otherwise ``pass``, with ``ruling_footer`` set if it asks for a ruling.
     """
     normalised = normalise_text(question)
-    if _hit("crisis", normalised):
+    squeezed = normalise_text(question, squeeze=True)
+    if _hit("crisis", normalised) or _hit("crisis", squeezed):
         return SafetyDecision("crisis", "crisis", False)
     for category in _DEFERRAL_ORDER:
         if _hit(category, normalised):
@@ -233,15 +264,20 @@ def not_covered_text() -> str:
     return load_template("not_covered.md").text
 
 
-# The Bengali block. The library and the model run are English only, and the crisis
-# lexicon is English, so a question in this script cannot be safety-checked in
-# its own words: it gets a fixed notice that points to emergency help instead.
-_BENGALI = range(0x0980, 0x0A00)
+# The library and the model run are English only, and the crisis lexicon is English, so
+# a question in another script cannot be safety-checked in its own words: it gets a
+# fixed notice that points to emergency help instead. Modifier letters (the marks in
+# "Qurʾān" transliterations) are not a script of their own.
 
 
 def is_unsupported_script(text: str) -> bool:
-    """Whether *text* contains Bengali script, which the Guide cannot answer yet."""
-    return any(ord(ch) in _BENGALI for ch in text)
+    """Whether *text* has a letter outside the Latin script (Bengali, Arabic, ...)."""
+    return any(
+        ch.isalpha()
+        and unicodedata.category(ch) != "Lm"
+        and not unicodedata.name(ch, "").startswith("LATIN")
+        for ch in unicodedata.normalize("NFKC", text)
+    )
 
 
 def english_only_text() -> str:

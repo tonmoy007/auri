@@ -667,3 +667,206 @@ def test_v4_a_dotted_reference_to_an_unlisted_text_is_caught() -> None:
 
     # Assert
     assert "V4" in outcome.codes
+
+
+# ── review fixes ─────────────────────────────────────────────────────────────
+
+VEDA = _chunk(
+    "c3",
+    "Synthetic Veda",
+    "concept",
+    "Synthetic Veda › Hymn\nThe creation hymn is given here as Rig Veda 10.129.1 "
+    "and a second passage as Chandogya 6.8.7 in this note.",
+)
+WITH_VEDA = [*SOURCES, SourceChunk("S3", VEDA)]
+
+
+def _check_with(sources: list[SourceChunk], raw: object, **kwargs: object):
+    text = raw if isinstance(raw, str) else json.dumps(raw)
+    params: dict[str, object] = {"canary": CANARY, "instruction_text": INSTRUCTIONS}
+    params.update(kwargs)
+    return validate_answer(text, sources, **params)  # type: ignore[arg-type]
+
+
+def _point(text: str, source: str = "S1") -> dict[str, object]:
+    return _draft(points=[{"text": text, "sources": [source]}])  # type: ignore[return-value]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        'The teacher says "you have a right to your actions but never to their fruits" here.',
+        "The teacher says 'you have a right to your actions but never to their fruits' here.",
+        "The teacher says „you have a right to your actions but never to their fruits“ here.",
+        "The teacher says 「you have a right to your actions but never to their fruits」 here.",
+        "The teacher says «you have a right to your actions but never to their fruits» here.",
+    ],
+)
+def test_a_quotation_inside_a_point_must_be_in_the_cited_source(text: str) -> None:
+    # Act
+    outcome = _check(_point(text))
+
+    # Assert — the quotes field is not the only place the model can quote
+    assert outcome.ok is False
+    assert "V3" in outcome.codes
+
+
+def test_a_verbatim_quotation_inside_a_point_passes() -> None:
+    # Arrange
+    text = f'The teacher says "{STORY_QUOTE}" in the retelling.'
+
+    # Act
+    outcome = _check(_point(text))
+
+    # Assert
+    assert outcome.ok is True
+
+
+def test_short_quoted_terms_and_apostrophes_in_a_point_are_not_quotations() -> None:
+    # Arrange
+    text = (
+        "The story's teacher doesn't say 'no' but asks for a \"mustard seed\" instead."
+    )
+
+    # Act
+    outcome = _check(_point(text))
+
+    # Assert
+    assert outcome.ok is True
+
+
+@pytest.mark.parametrize(
+    "reflection",
+    [
+        "It is said 'you have a right to your actions but never to their fruits' and that helps.",
+        "It is said „you have a right to your actions but never to their fruits“ and that helps.",
+        "It is said 「you have a right to your actions but never to their fruits」 and that helps.",
+    ],
+)
+def test_a_long_quotation_in_the_reflection_fails_in_every_quote_style(
+    reflection: str,
+) -> None:
+    # Act
+    outcome = _check(_draft(reflection=reflection))
+
+    # Assert
+    assert "V5" in outcome.codes
+
+
+def test_a_made_up_third_level_verse_number_is_caught() -> None:
+    # Act
+    bad_rig = _check_with(
+        WITH_VEDA, _point("Rig Veda 10.129.7 describes creation.", "S3")
+    )
+    bad_chan = _check_with(WITH_VEDA, _point("See Chandogya 6.8.9 for this.", "S3"))
+    good = _check_with(WITH_VEDA, _point("Rig Veda 10.129.1 describes creation.", "S3"))
+
+    # Assert
+    assert "V4" in bad_rig.codes
+    assert "V4" in bad_chan.codes
+    assert good.ok is True
+
+
+def test_a_true_reference_after_a_capitalised_word_is_not_rejected() -> None:
+    # Act
+    outcome = _check(_point("In Yasna 30.3 two spirits are described.", "S2"))
+    opening = _check(_point("As Yasna 30.3 says, there are two spirits.", "S2"))
+
+    # Assert — the leading word is not part of the reference
+    assert outcome.ok is True
+    assert opening.ok is True
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "You'll go to hell for this.",
+        "He'll go to hell.",
+        "She's a sinner.",
+        "They're sinners.",
+        "You're sinful.",
+        "Your mother-in-law is a sinner.",
+    ],
+)
+def test_verdicts_on_people_are_caught_in_contracted_and_longer_forms(
+    claim: str,
+) -> None:
+    # Act
+    outcome = _check(_draft(reflection=claim))
+
+    # Assert
+    assert "V6" in outcome.codes
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Contact https://spiritual-help.example for more.",
+        "Write to help@spiritual.example about this.",
+        "Call +1-555-010-0199 for guidance.",
+        "Ring 0171 234 5678 today.",
+        "See www.spiritual-help.example instead.",
+    ],
+)
+def test_no_web_address_email_or_phone_number_can_appear_in_the_guides_words(
+    claim: str,
+) -> None:
+    # Act
+    in_point = _check(_point(claim))
+    in_reflection = _check(_draft(reflection=claim))
+
+    # Assert — contacts only ever come from the configured templates
+    assert "V6" in in_point.codes
+    assert "V6" in in_reflection.codes
+
+
+def test_verse_references_and_dates_are_not_mistaken_for_phone_numbers() -> None:
+    # Act
+    outcome = _check_with(
+        WITH_VEDA, _point("Rig Veda 10.129.1 is older than 2026-10-01 by far.", "S3")
+    )
+
+    # Assert
+    assert "V6" not in outcome.codes
+
+
+def test_a_canary_hidden_behind_json_escapes_is_still_a_leak() -> None:
+    # Arrange — the app decodes the escapes, so the canary would be shown
+    escaped_canary = "\\u007a" + CANARY[1:]
+    raw = json.dumps(_draft()).replace(
+        "Grief is heavy", f"Grief is heavy {escaped_canary}"
+    )
+
+    # Act
+    outcome = _check(raw)
+
+    # Assert
+    assert "V9" in outcome.codes
+
+
+def test_a_quote_is_shown_as_the_source_wrote_it_not_as_the_model_did() -> None:
+    # Arrange — same words, different case and no trailing full stop
+    model_version = STORY_QUOTE.lower().rstrip(".")
+
+    # Act
+    outcome = _check(_draft(quotes=[{"text": model_version, "source": "S1"}]))
+
+    # Assert
+    assert outcome.ok is True
+    assert outcome.quotes[0].text == STORY_QUOTE.rstrip(".")
+
+
+def test_a_quote_that_is_mostly_padding_is_refused() -> None:
+    # Act
+    outcome = _check(_draft(quotes=[{"text": "..........the", "source": "S1"}]))
+
+    # Assert
+    assert "V3" in outcome.codes
+
+
+def test_an_empty_point_is_not_an_answer() -> None:
+    # Act
+    outcome = _check(_draft(points=[{"text": "  ", "sources": ["S1"]}]))
+
+    # Assert
+    assert outcome.ok is False

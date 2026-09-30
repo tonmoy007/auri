@@ -1,4 +1,4 @@
-# version: 2
+# version: 3
 # Crisis phrases for priest mode: self-harm, suicide and intent to harm others.
 # Matched against the question after normalisation (casefolded, NFKC, punctuation
 # removed, apostrophes dropped so "don't" is "dont", digits in words read as letters
@@ -82,3 +82,41 @@ re:\bno longer want to be (alive|here|around)\b
 
 # intent to harm others
 re:\b(i|im|ill|id)( am| will| just| really| might| may| could)* (want|wanna|going|gonna|plan|planning|intend|mean|thinking of|thinking about|about)( to)? (kill|murder|shoot|stab|strangle|poison|hurt|harm|attack|beat up) (him|her|them|someone|somebody|everyone|people|my (boss|manager|coworker|co worker|colleague|supervisor|wife|husband|partner|ex|brother|sister|mother|father|mom|dad|parents?|son|daughter|children|kids?|teacher|neighbou?r|family|friend|employer|roommate))
+
+# added after the independent review: phrasings that passed to the model
+re:\b(take|taking|took|taken|takes) (my|their|his|her|your|ones) (own )?life\b
+re:\bkill(ed|ing|s)? (myself|my self|themselves|himself|herself)\b
+re:\b(want|wanna|going|gonna|ready|plan|planning|decided|need|thinking of|thinking about) (to )?end(ing)? (it|myself)\b
+re:\b(dont|do not) deserve (to )?(live|be alive|exist|life)\b
+kms
+unalive
+unaliving
+re:\b(slit|slitting|slash|slashing) (my )?(wrists?|throat)\b
+re:\bcut(ting)? my (wrists?|throat)\b
+re:\b(i|ive|im) (have |am |been |keep |started )*cutting (again|more)\b
+re:\b(going to|gonna|about to|want to|ready to) jump( off| from| out| in front| tonight| now| today|$)
+re:\b(saved|saving|stockpil\w+|hoard\w*) (up )?(my |the |some |all )?(pills|medication|meds|tablets)\b
+re:\bpills (saved|stockpiled)( up)?\b
+re:\b(a )?burden (to|on) (everyone|everybody|my family|my friends|others|them all)\b
+re:\b(pointless|meaningless|hopeless)\b.{0,40}\bi want out\b
+
+# religious and passive ideation
+re:\b(pray|prayed|praying|beg|begged|begging|ask|asked|asking|wish|wished|want|wanted|hope|hoped) (every (night|day) )?(that )?(god|allah|the lord|lord|jesus|he) (would |to |will |could )?(take|takes|taking) me\b
+re:\bwant(ed)? to be with \w+( \w+){0,3} in (heaven|paradise|jannah|the afterlife)\b
+re:\b(ready|prepared) to (go|die|leave)\b.{0,40}\b(heaven|paradise|jannah)\b
+re:\b(heaven|paradise|jannah)\b.{0,40}\b(ready|prepared) to (go|die)\b
+
+# romanised Bangla (needs a native-speaker review before real use)
+morte chai
+bachte ichha kore na
+bachte iccha kore na
+bachte ichchha kore na
+atmohotya
+atohotya
+atmahatya
+nijeke shesh kore
+
+# intent to harm others, wider forms (a named kind of person, not "the process")
+re:\b((i|id) (will|shall|am gonna|am going to|m going to|gonna|going to)|ill) (kill|murder|shoot|stab|strangle|poison|attack|beat up|hurt|harm) (him|her|them|everyone|everybody|someone|somebody|people|(the|that|this|those|these|my|our|his|her|their) (man|woman|person|guy|girl|boy|men|women|people|kids?|children|boss|manager|coworker|co worker|colleague|supervisor|teacher|neighbou?r|bully|driver|landlord|student|students|customers?|family|wife|husband|partner|brother|sister|mother|father|parents?|son|daughter))\b
+re:\b(want|wanna|going|gonna|plan|planning|intend|about)( to)? (kill|murder|shoot|stab|strangle|poison|attack|beat up|hurt|harm) (the|that|this|those|these) (man|woman|person|guy|girl|boy|men|women|people|boss|manager|coworker|co worker|colleague|supervisor|teacher|neighbou?r|bully|driver|landlord|students?|customers?)\b
+re:\bshoot(ing)? up (my|the|our|this) \w+

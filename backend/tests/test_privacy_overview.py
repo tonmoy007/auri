@@ -1005,11 +1005,12 @@ async def test_the_panel_says_nothing_about_the_guide_while_it_is_off(
 
 
 @pytest.mark.asyncio
-async def test_with_no_server_configured_the_guide_is_described_as_local(
+async def test_with_no_server_configured_the_guide_does_not_claim_own_infrastructure(
     api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
 ) -> None:
-    # Arrange
-    _guide(set_setting, PRIEST_LLM_BASE_URL="")
+    # Arrange — no primary, no fallback model: nothing can write an answer at all
+    _guide(set_setting, PRIEST_LLM_BASE_URL="", PRIEST_FALLBACK_MODEL="")
+    set_setting("THEMES_LLM_BASE_URL", "")
 
     # Act
     statement = (await _limit_ids_and_statements(api_client, make_staff))[
@@ -1017,11 +1018,75 @@ async def test_with_no_server_configured_the_guide_is_described_as_local(
     ]
 
     # Assert — what is kept, who can see it, and what happens in a crisis
-    assert "not stored" in statement
+    assert "No model server is configured" in statement
+    assert "own infrastructure" not in statement
+    assert "are not stored" in statement
     assert "not visible to staff" in statement
     assert "pattern matching" in statement
     assert "nobody at the company is told" in statement
-    assert "on this organisation's own infrastructure" in statement
+
+
+@pytest.mark.asyncio
+async def test_the_safety_check_is_named_and_said_to_read_the_question_as_typed(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(set_setting, PRIEST_LLM_BASE_URL="https://llm.example.test")
+    set_setting("OLLAMA_BASE_URL", "https://ollama.example.test")
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert — the moderation call gets the un-cleaned question
+    assert "safety check" in statement
+    assert "ollama.example.test" in statement
+    assert "as typed" in statement
+
+
+@pytest.mark.asyncio
+async def test_a_fallback_server_is_named_too(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(
+        set_setting,
+        PRIEST_LLM_BASE_URL="https://llm.example.test",
+        PRIEST_FALLBACK_MODEL="llama3.2:3b",
+        PRIEST_FALLBACK_BASE_URL="http://10.0.0.5:11434/v1",
+    )
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert
+    assert "llm.example.test" in statement
+    assert "10.0.0.5" in statement
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_model_is_reported_as_unusable_not_as_local(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    _guide(
+        set_setting,
+        PRIEST_LLM_BASE_URL="",
+        PRIEST_FALLBACK_MODEL="gpt-oss:120b-cloud",
+    )
+    set_setting("THEMES_LLM_BASE_URL", "")
+
+    # Act
+    statement = (await _limit_ids_and_statements(api_client, make_staff))[
+        "priest_guide"
+    ]
+
+    # Assert
+    assert "cannot be used" in statement
+    assert "own infrastructure" not in statement
 
 
 @pytest.mark.asyncio
