@@ -16,7 +16,7 @@ The Guide's chat server addresses, the key and the vault and index paths can onl
 
 Hosted providers are refused against a list of well-known names (`chat_endpoint.THIRD_PARTY_HOSTS`: OpenAI, Azure OpenAI, Google APIs, Anthropic, OpenRouter, Groq, Together, Mistral, Cohere, DeepSeek, xAI and Cloudflare AI Gateway), checked after IDNA folding, subdomains included. The list is not exhaustive. The real safeguard is that the address comes from the environment, so only whoever controls the environment can point questions elsewhere. A refusal is reported on the Privacy panel.
 
-Moderation: a second call sends the question as typed (before de-identification) to that Ollama, for questions the lexicon did not already route to crisis, deferral or the English-only notice. It uses a two-thread pool, and its HTTP call is capped at 5 seconds.
+Moderation: a second call sends the question as typed (before de-identification) to that Ollama, for questions the lexicon did not already route to crisis, deferral or the English-only notice. It uses a four-thread pool, and its HTTP call is capped at 5 seconds.
 
 ## Current prototype state (accepted)
 

@@ -49,4 +49,4 @@ The vLLM server generates at roughly 18 tokens per second and does not emit hidd
 
 ## Still open
 
-Regenerating the retrieval and bench figures under the new covered rule (see the note at the top); re-running the crisis and injection gates against lexicon v3 and the current validator; two reviewers scoring 30 answers; the local-model bench on a machine with memory; a review of the gold set's expected notes; clinical and HR review of the crisis, medical, legal and abuse wording.
+Regenerating the retrieval and bench figures under the new covered rule (see the note at the top); re-running the crisis and injection gates against the current crisis lexicon (v4) and the current validator; two reviewers scoring 30 answers; the local-model bench on a machine with memory; a review of the gold set's expected notes; clinical and HR review of the crisis, medical, legal and abuse wording.
