@@ -58,6 +58,14 @@ class Settings(BaseSettings):
     # therefore outlive RETENTION_HOURS by up to this long.
     RETENTION_EXPECTED_RUN_HOURS: int = Field(default=6, ge=1)
 
+    # ── Delivery ──────────────────────────────────────────────────────────
+    # How many characters of a forwarded confession's transcript the backend hands
+    # the Telegram bot (and so a department chat). 0 sends the summary only. The
+    # Privacy panel states the live value.
+    # Bounded so a message always fits Telegram's 4096-character limit; a refused
+    # message would be retried on every poll, for ever.
+    DELIVERY_TRANSCRIPT_CHARS: int = Field(default=1000, ge=0, le=2500)
+
     # ── Device code hardening ─────────────────────────────────────────────
     # A secret used to store each phone's code as an HMAC instead of as sent, so a
     # copy of the database cannot be presented as a phone. Empty keeps the old

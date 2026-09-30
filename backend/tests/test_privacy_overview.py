@@ -524,7 +524,7 @@ async def test_the_telegram_limit_states_how_much_text_is_posted(
     # Assert
     assert "1,000 characters" in telegram
     assert "500 characters" in telegram
-    assert "nor who reads those chats is recorded" in telegram
+    assert "who reads those chats is not recorded" in telegram
 
 
 @pytest.mark.asyncio
@@ -914,3 +914,64 @@ async def test_with_a_secret_the_panel_says_the_code_is_stored_hashed(
     assert "server's secret" in statement
     assert "could be used to read, forward or withdraw" not in statement
     assert "p" * 40 not in statement
+
+
+async def _facts(
+    api_client: AsyncClient, make_staff: StaffFactory, group: str
+) -> dict[str, str]:
+    _, headers = await make_staff(UserRole.hr)
+    return {
+        f["id"]: f["statement"] for f in (await _overview(api_client, headers))[group]
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chars", "expected"),
+    [(1000, "first 1,000 characters"), (250, "first 250 characters")],
+)
+async def test_the_telegram_statement_uses_the_live_transcript_cap(
+    chars: int,
+    expected: str,
+    api_client: AsyncClient,
+    make_staff: StaffFactory,
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("DELIVERY_TRANSCRIPT_CHARS", chars)
+
+    # Act
+    statement = (await _facts(api_client, make_staff, "limits"))["telegram"]
+
+    # Assert
+    assert expected in statement
+
+
+@pytest.mark.asyncio
+async def test_a_cap_of_zero_is_described_as_summary_only(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("DELIVERY_TRANSCRIPT_CHARS", 0)
+
+    # Act
+    statement = (await _facts(api_client, make_staff, "limits"))["telegram"]
+
+    # Assert
+    assert "no transcript" in statement
+    assert "first 0" not in statement
+
+
+@pytest.mark.asyncio
+async def test_the_audited_statement_says_what_the_bot_path_does_and_does_not_record(
+    api_client: AsyncClient, make_staff: StaffFactory
+) -> None:
+    # Act
+    statement = (await _facts(api_client, make_staff, "guarantees"))["audited"]
+
+    # Assert — decisions from Telegram are recorded as the bot; reading is not
+    assert "Telegram bot" in statement
+    assert (
+        "Reading through the bot, and who reads the Telegram chats, are not recorded"
+        in statement
+    )

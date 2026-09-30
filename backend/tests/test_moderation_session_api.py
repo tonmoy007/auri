@@ -121,7 +121,7 @@ async def test_rejecting_from_a_session_records_the_reviewer_and_audits_it(
 
 
 @pytest.mark.asyncio
-async def test_bot_path_still_works_and_stays_anonymous(
+async def test_bot_path_still_works_and_is_recorded_as_the_bot_not_a_person(
     api_client: AsyncClient, db_session: AsyncSession, set_setting
 ) -> None:
     # Arrange — 11.8 adds a caller, it does not change the existing one
@@ -134,14 +134,17 @@ async def test_bot_path_still_works_and_stays_anonymous(
         headers={"X-Moderation-Api-Key": "bot-secret"},
     )
 
-    # Assert — no reviewer stamped, no audit row: the Telegram path has no
-    # named actor, and inventing one would be a lie in the audit trail
+    # Assert — no reviewer is stamped (the shared key names nobody), but the
+    # decision is now in the trail, attributed to the bot rather than to a person
     await db_session.refresh(confession)
     events = (await db_session.execute(select(AuditEvent))).scalars().all()
     assert response.status_code == 200
     assert confession.status == ConfessionStatus.pending
     assert confession.reviewed_by is None
-    assert events == []
+    assert [(e.action, e.actor_user_id, e.actor_label) for e in events] == [
+        ("moderation.approve", None, "telegram-bot")
+    ]
+    assert events[0].target_confession_id == confession.id
 
 
 @pytest.mark.asyncio

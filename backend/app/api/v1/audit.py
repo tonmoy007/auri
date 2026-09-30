@@ -27,7 +27,8 @@ class AuditEventResponse(BaseModel):
     """One audit row as returned to the dashboard."""
 
     id: uuid.UUID
-    actor_user_id: uuid.UUID
+    actor_user_id: uuid.UUID | None
+    actor_label: str | None
     action: str
     target_confession_id: uuid.UUID | None
     content_tier: str | None

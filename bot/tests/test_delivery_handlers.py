@@ -320,3 +320,84 @@ async def test_the_delivery_message_does_not_claim_the_sender_is_never_stored(
     assert "never stored" not in text.lower()
     assert "no sender name or device details are attached" in text
     assert "can still point to someone" in text
+
+
+async def _delivered_text(
+    mock_context: MagicMock, delivery_settings: BotSettings, item: dict
+) -> str:
+    mock_context.bot_data["settings"] = delivery_settings
+    mock_context.bot.send_message = AsyncMock()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/delivery/queue":
+            return httpx.Response(200, json=[item])
+        return httpx.Response(200, json={**item, "status": "forwarded"})
+
+    with patch("bot.delivery_handlers.httpx.AsyncClient", _mock_async_client(handler)):
+        await poll_delivery_queue(mock_context)
+    return mock_context.bot.send_message.call_args.kwargs["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_truncated_transcript_is_marked_as_cut(
+    mock_context: MagicMock, delivery_settings: BotSettings
+) -> None:
+    # Arrange
+    item = {
+        "id": "abc-1",
+        "category": "work",
+        "ai_summary": "A summary",
+        "transcript": "the first words",
+        "transcript_truncated": True,
+        "recipient_dept": "HR",
+    }
+
+    # Act
+    text = await _delivered_text(mock_context, delivery_settings, item)
+
+    # Assert
+    assert "the first words…" in text
+
+
+@pytest.mark.asyncio
+async def test_a_summary_only_delivery_has_no_transcript_section(
+    mock_context: MagicMock, delivery_settings: BotSettings
+) -> None:
+    # Arrange
+    item = {
+        "id": "abc-2",
+        "category": "work",
+        "ai_summary": "A summary",
+        "transcript": "",
+        "transcript_truncated": True,
+        "recipient_dept": "HR",
+    }
+
+    # Act
+    text = await _delivered_text(mock_context, delivery_settings, item)
+
+    # Assert
+    assert "Transcript" not in text
+    assert "A summary" in text
+
+
+@pytest.mark.asyncio
+async def test_the_bot_never_builds_a_message_longer_than_telegram_accepts(
+    mock_context: MagicMock, delivery_settings: BotSettings
+) -> None:
+    # Arrange — a backend that ignores its cap (older, or misconfigured)
+    item = {
+        "id": "abc-3",
+        "category": "work",
+        "ai_summary": "A summary",
+        "transcript": "x" * 20000,
+        "recipient_dept": "HR",
+    }
+
+    # Act
+    text = await _delivered_text(mock_context, delivery_settings, item)
+
+    # Assert
+    assert len(text) < 4096
+    assert text.count("x") <= 2500
+    assert "x…" in text

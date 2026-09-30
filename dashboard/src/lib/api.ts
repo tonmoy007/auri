@@ -124,7 +124,10 @@ export const authApi = {
 
 export interface AuditEvent {
   id: string
-  actor_user_id: string
+  /** Null when a non-person acted; see actor_label. */
+  actor_user_id: string | null
+  /** e.g. 'telegram-bot' for decisions made with the bot's shared key. */
+  actor_label: string | null
   action: string
   target_confession_id: string | null
   content_tier: 'summary' | 'raw' | null

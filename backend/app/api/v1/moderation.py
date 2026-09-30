@@ -146,14 +146,23 @@ async def _record_decision(
 ) -> None:
     """Stamp the reviewer on *confession* and audit the decision.
 
-    The bot path passes ``actor=None``: there is no person to attribute the
-    decision to, so nothing is stamped and nothing is audited. That is the
-    gap staff sessions exist to close, not something to paper over with a
-    fake actor.
+    The bot path passes ``actor=None``: the shared key names no person, so no
+    reviewer is stamped, but the decision is still recorded, attributed to
+    ``telegram-bot``. Inventing a person would be a lie in the trail; recording
+    nothing would leave Telegram moderation invisible.
     """
     if actor is None:
         await session.flush()
         await session.refresh(confession)
+        await audit_service.record(
+            session,
+            actor=None,
+            actor_label=audit_service.BOT_ACTOR_LABEL,
+            action=action,
+            target_confession_id=confession.id,
+            content_tier=ContentTier.raw,
+            source_ip=audit_service.client_ip(request),
+        )
         return
 
     confession.reviewed_by = actor.id

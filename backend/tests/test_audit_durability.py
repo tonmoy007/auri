@@ -59,12 +59,17 @@ def _install(session_dependency) -> None:
     app.dependency_overrides[get_async_session] = session_dependency
 
 
+BOT_KEY = "bot-secret"
+BOT_HEADERS = {"X-Moderation-Api-Key": BOT_KEY}
+
+
 @pytest_asyncio.fixture
 async def durable_client(
     db_engine: AsyncEngine, set_setting: SettingPatcher
 ) -> AsyncIterator[AsyncClient]:
     """An API client whose request session never commits when the request ends."""
     set_setting("SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
+    set_setting("MODERATION_API_KEY", BOT_KEY)
     login_throttle.reset_all()
     factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
 
@@ -92,6 +97,7 @@ async def failing_commit_client(
     commit and not from somewhere unrelated.
     """
     set_setting("SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
+    set_setting("MODERATION_API_KEY", BOT_KEY)
     login_throttle.reset_all()
     factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
     attempts: list[bool] = []
@@ -121,6 +127,7 @@ async def spying_client(
 ) -> AsyncIterator[tuple[AsyncClient, SessionLog]]:
     """A client whose session logs every database call, marking the audit commit."""
     set_setting("SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
+    set_setting("MODERATION_API_KEY", BOT_KEY)
     login_throttle.reset_all()
     factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
     log = SessionLog(calls=[])
@@ -252,6 +259,25 @@ async def _reject(client: AsyncClient, headers: Headers, db: AsyncSession) -> Re
     )
 
 
+async def _bot_approve(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    # The bot's shared key names no person, so the staff headers are not used
+    confession = await add_confession(db, status=ConfessionStatus.flagged)
+    return await client.post(
+        f"/api/v1/moderation/{confession.id}/approve", headers=BOT_HEADERS
+    )
+
+
+async def _bot_reject(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    confession = await add_confession(db, status=ConfessionStatus.flagged)
+    return await client.post(
+        f"/api/v1/moderation/{confession.id}/reject", headers=BOT_HEADERS
+    )
+
+
 async def _acknowledge(
     client: AsyncClient, headers: Headers, db: AsyncSession
 ) -> Response:
@@ -321,6 +347,12 @@ SCENARIOS: dict[str, Scenario] = {
     "queue": Scenario(UserRole.moderator, ("confession.list", "raw"), _queue),
     "approve": Scenario(UserRole.moderator, ("moderation.approve", "raw"), _approve),
     "reject": Scenario(UserRole.moderator, ("moderation.reject", "raw"), _reject),
+    "bot-approve": Scenario(
+        UserRole.moderator, ("moderation.approve", "raw"), _bot_approve
+    ),
+    "bot-reject": Scenario(
+        UserRole.moderator, ("moderation.reject", "raw"), _bot_reject
+    ),
     "acknowledge": Scenario(HR, ("crisis.acknowledge", "raw"), _acknowledge),
     "resend": Scenario(HR, ("delivery.retry", None), _resend),
     "department-create": Scenario(
@@ -336,8 +368,9 @@ SCENARIOS: dict[str, Scenario] = {
 
 
 def test_every_audit_call_site_has_a_scenario() -> None:
-    # Arrange — 13 record() call sites; approve and reject share one helper, so
-    # the 14 scenarios cover all of them. A new site should add a scenario here.
+    # Arrange — 14 record() call sites; approve and reject share one helper per caller
+    # (staff session, bot key), so the 16 scenarios cover all of them. A new site
+    # should add a scenario here.
     import pathlib
     import re
 
@@ -348,8 +381,8 @@ def test_every_audit_call_site_has_a_scenario() -> None:
     )
 
     # Act / Assert
-    assert sites == 13
-    assert len(SCENARIOS) >= 13
+    assert sites == 14
+    assert len(SCENARIOS) >= 14
 
 
 # ── The audit service itself ─────────────────────────────────────────────

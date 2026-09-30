@@ -11,7 +11,7 @@ from __future__ import annotations
 import enum
 import uuid
 
-from sqlalchemy import ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -55,13 +55,22 @@ class AuditEvent(Base):
         Index("ix_audit_events_target_confession_id", "target_confession_id"),
         Index("ix_audit_events_action", "action"),
         Index("ix_audit_events_created_at", "created_at"),
+        CheckConstraint(
+            "actor_user_id IS NOT NULL OR actor_label IS NOT NULL",
+            name="ck_audit_events_has_actor",
+        ),
     )
 
-    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+    actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="RESTRICT"),
-        nullable=False,
-        comment="Staff account that performed the action; RESTRICT so history outlives account cleanup",
+        nullable=True,
+        comment="Staff account that performed the action; RESTRICT so history outlives account cleanup. Null only when actor_label names a non-person actor",
+    )
+    actor_label: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="Who acted when no named account did, e.g. 'telegram-bot' for the shared moderation key",
     )
     action: Mapped[str] = mapped_column(
         String(64),

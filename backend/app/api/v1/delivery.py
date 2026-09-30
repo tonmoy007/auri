@@ -48,6 +48,8 @@ class DeliveryQueueItem(ConfessionResponse):
     """
 
     recipient_chat_id: str | None
+    # True when ``transcript`` was cut to ``DELIVERY_TRANSCRIPT_CHARS`` (or left out).
+    transcript_truncated: bool = False
 
 
 class DeliveryOverviewItem(BaseModel):
@@ -178,7 +180,17 @@ async def _with_chat_id(
         else None
     )
     base = ConfessionResponse.model_validate(confession, from_attributes=True)
-    return DeliveryQueueItem(**base.model_dump(), recipient_chat_id=chat_id)
+    fields = base.model_dump()
+    # The cap is applied here, not in the bot: what the bot is never handed cannot
+    # end up in a chat, whatever the bot does.
+    full = fields["transcript"] or ""
+    cap = settings.DELIVERY_TRANSCRIPT_CHARS
+    fields["transcript"] = full[:cap]
+    return DeliveryQueueItem(
+        **fields,
+        recipient_chat_id=chat_id,
+        transcript_truncated=len(full) > cap,
+    )
 
 
 def _blocked_reason(confession: Confession, chat_id: str | None) -> str | None:

@@ -37,7 +37,6 @@ from app.services.themes_endpoint import (
     resolve_endpoint,
 )
 
-DEPARTMENT_TRANSCRIPT_CHARS = 1000
 MODERATOR_TRANSCRIPT_CHARS = 500
 
 
@@ -63,6 +62,7 @@ class PrivacySnapshot:
     error_tracking: bool
     sql_echo: bool
     device_codes_hashed: bool
+    delivery_transcript_chars: int
 
 
 @dataclass(frozen=True)
@@ -204,6 +204,7 @@ def build_snapshot() -> PrivacySnapshot:
         error_tracking=bool(settings.SENTRY_DSN),
         sql_echo=settings.SQL_ECHO,
         device_codes_hashed=device_identity.is_hardened(),
+        delivery_transcript_chars=settings.DELIVERY_TRANSCRIPT_CHARS,
     )
 
 
@@ -273,7 +274,10 @@ def build_guarantees(snapshot: PrivacySnapshot) -> list[Fact]:
             "Each time a signed-in staff member opens confession content in "
             "the dashboard, their account, the time and whether they saw the "
             "summary or the full text are recorded in an audit trail that "
-            "administrators can read and the app cannot change.",
+            "administrators can read and the app cannot change. A decision made "
+            "from Telegram with the bot's shared key is recorded as made by the "
+            "Telegram bot, not by a person. Reading through the bot, and who "
+            "reads the Telegram chats, are not recorded.",
         ),
         Fact(
             "retention",
@@ -358,6 +362,25 @@ def _db_access_statement(snapshot: PrivacySnapshot) -> str:
     )
 
 
+def _telegram_statement(snapshot: PrivacySnapshot) -> str:
+    """Say what a department's Telegram chat receives, from the live cap."""
+    chars = snapshot.delivery_transcript_chars
+    if chars == 0:
+        posted = "its category and summary (no transcript)"
+    else:
+        posted = (
+            f"its category, summary and the first {chars:,} characters of the "
+            "transcript"
+        )
+    return (
+        f"When a confession is forwarded, {posted} are posted to that "
+        "department's Telegram chat, and items held for review appear in the "
+        f"moderators' chat ({MODERATOR_TRANSCRIPT_CHARS} characters). Telegram "
+        "keeps messages after this system deletes the confession, and who reads "
+        "those chats is not recorded."
+    )
+
+
 def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
     """Limits about who can see content, and where copies live."""
     return [
@@ -368,13 +391,7 @@ def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
         ),
         Fact(
             "telegram",
-            "When a confession is forwarded, its category, summary and the "
-            f"first {DEPARTMENT_TRANSCRIPT_CHARS:,} characters of the "
-            "transcript are posted to that department's Telegram chat, and "
-            f"items held for review appear in the moderators' chat "
-            f"({MODERATOR_TRANSCRIPT_CHARS} characters). Telegram keeps "
-            "messages after this system deletes the confession, and neither "
-            "moderation from Telegram nor who reads those chats is recorded.",
+            _telegram_statement(snapshot),
         ),
         Fact(
             "exact_time",

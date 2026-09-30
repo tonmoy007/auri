@@ -32,6 +32,11 @@ def delivery_dedupe_key(item: dict) -> str:
     return f"{item['id']}:{item.get('updated_at', '')}"
 
 
+# Matches the backend bound on DELIVERY_TRANSCRIPT_CHARS: the largest transcript that
+# still leaves a whole message under Telegram's 4096-character limit.
+MAX_TRANSCRIPT_CHARS = 2500
+
+
 def _format_delivery_message(item: dict) -> str:
     """Render a forwarded confession as a recipient-facing Telegram message.
 
@@ -42,15 +47,22 @@ def _format_delivery_message(item: dict) -> str:
     """
     category = item.get("category") or "uncategorized"
     summary = item.get("ai_summary") or "(no summary generated)"
+    # The backend already applied DELIVERY_TRANSCRIPT_CHARS; this only marks a cut.
     transcript = item.get("transcript") or ""
-    if len(transcript) > 1000:
-        transcript = transcript[:1000] + "…"
+    truncated = bool(item.get("transcript_truncated"))
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        # A backend that ignored its cap must not make Telegram refuse the message
+        # (it would be retried on every poll, for ever).
+        transcript, truncated = transcript[:MAX_TRANSCRIPT_CHARS], True
+    if transcript and truncated:
+        transcript += "…"
+    transcript_section = f"*Transcript:*\n{transcript}\n\n" if transcript else ""
 
     return (
         "🕯️ *A teammate shared an anonymous confession*\n\n"
         f"*Category:* {category}\n"
         f"*Summary:* {summary}\n\n"
-        f"*Transcript:*\n{transcript}\n\n"
+        f"{transcript_section}"
         "_Sent anonymously: no sender name or device details are attached. "
         "The words themselves can still point to someone, so please handle "
         "them with care._"

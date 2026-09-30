@@ -30,6 +30,9 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGE_SIZE = 200
 MAX_DETAIL_CHARS = 500
+# Who the trail names for decisions made with the bot's shared moderation key:
+# the key identifies nobody, so this says so instead of inventing a person.
+BOT_ACTOR_LABEL = "telegram-bot"
 
 
 def client_ip(request: Request) -> str | None:
@@ -39,13 +42,14 @@ def client_ip(request: Request) -> str | None:
 
 async def record(
     session: AsyncSession,
-    actor: User,
+    actor: User | None,
     action: AuditAction,
     target_confession_id: uuid.UUID | None = None,
     content_tier: ContentTier | None = None,
     justification: str | None = None,
     source_ip: str | None = None,
     detail: str | None = None,
+    actor_label: str | None = None,
 ) -> AuditEvent:
     """Append one audit row and commit it (with any change already pending).
 
@@ -59,6 +63,11 @@ async def record(
         source_ip: Client address the action came from.
         detail: What changed, for an action that alters settings. Never put
             confession content here; it is capped at ``MAX_DETAIL_CHARS``.
+        actor_label: Who acted when *actor* is ``None`` (for example
+            ``BOT_ACTOR_LABEL``). One of the two is required.
+
+    Raises:
+        ValueError: If neither an actor nor a label is given.
 
     Returns:
         The persisted :class:`AuditEvent`.
@@ -69,8 +78,11 @@ async def record(
         commit: the production session factory sets ``expire_on_commit=False``,
         which a test pins.
     """
+    if actor is None and not actor_label:
+        raise ValueError("an audit row needs an actor account or an actor label")
     event = AuditEvent(
-        actor_user_id=actor.id,
+        actor_user_id=actor.id if actor else None,
+        actor_label=actor_label if actor is None else None,
         action=action.value,
         target_confession_id=target_confession_id,
         content_tier=content_tier.value if content_tier else None,
@@ -80,7 +92,7 @@ async def record(
     )
     # Read what the log line needs before committing: nothing after the commit
     # should be able to fail and turn a durable row into an error response.
-    actor_id = actor.id
+    actor_id = actor.id if actor else actor_label
     tier = content_tier.value if content_tier else "-"
     session.add(event)
     await session.commit()

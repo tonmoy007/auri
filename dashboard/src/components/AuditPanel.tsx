@@ -108,6 +108,7 @@ export function AuditPanel() {
           <TableHeader>
             <TableRow>
               <TableHead>When</TableHead>
+              <TableHead>Who</TableHead>
               <TableHead>Action</TableHead>
               <TableHead>Tier</TableHead>
               <TableHead>Confession</TableHead>
@@ -119,7 +120,7 @@ export function AuditPanel() {
           <TableBody>
             {events.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-muted-foreground">
+                <TableCell colSpan={8} className="text-muted-foreground">
                   No audit events recorded yet.
                 </TableCell>
               </TableRow>
@@ -128,6 +129,9 @@ export function AuditPanel() {
                 <TableRow key={event.id}>
                   <TableCell className="whitespace-nowrap font-mono text-xs">
                     {new Date(event.created_at).toLocaleString()}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {event.actor_label ?? event.actor_user_id?.slice(0, 8) ?? '—'}
                   </TableCell>
                   <TableCell>{event.action}</TableCell>
                   <TableCell>

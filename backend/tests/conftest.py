@@ -92,6 +92,7 @@ def isolate_optional_endpoints(set_setting: SettingPatcher) -> None:
         # Off unless a test turns it on: a secret in a developer's .env would
         # otherwise change what every device-scoped test stores.
         ("DEVICE_HASH_PEPPER", ""),
+        ("DELIVERY_TRANSCRIPT_CHARS", 1000),
     ):
         set_setting(name, value)
 

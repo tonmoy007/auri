@@ -259,3 +259,67 @@ async def test_mark_delivered_returns_404_for_pending_confession(
 
     # Assert
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_the_queue_caps_the_transcript_it_hands_the_bot(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange — "deidentified text" is 17 characters
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 5)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert — the rest never leaves the backend
+    assert item["transcript"] == "deide"
+    assert item["transcript_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_short_transcript_is_handed_over_whole(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 1000)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert
+    assert item["transcript"] == "deidentified text"
+    assert item["transcript_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_cap_of_zero_sends_no_transcript_at_all(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange — summary-only delivery
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 0)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert
+    assert item["transcript"] == ""
+    assert item["ai_summary"] == "A summary."
+
+
+def test_the_transcript_cap_cannot_exceed_what_a_telegram_message_can_carry() -> None:
+    # Arrange / Act / Assert — Telegram refuses a message over 4096 characters, and the
+    # bot would retry a refused one on every poll, for ever
+    from app.config import Settings
+    from pydantic import ValidationError
+
+    assert (
+        Settings(
+            _env_file=None, DELIVERY_TRANSCRIPT_CHARS=2500
+        ).DELIVERY_TRANSCRIPT_CHARS
+        == 2500
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, DELIVERY_TRANSCRIPT_CHARS=2501)
