@@ -2,6 +2,10 @@
 
 Generated 2026-09-30T19:23:49Z from 50 gold questions. Recall is over in-scope notes; BM25, dense and hybrid are compared.
 
+**These figures are historical.** They were produced before commit d4db828, which changed both the app and this evaluation: the app's "covered" decision is now the best cosine, or the best BM25 score over the chunks actually returned using a note's best 4 matching terms (it was the best raw scores before any cap), and `backend/scripts/eval_priest_retrieval.py` now scores the hybrid at the app's chunk-level `top_k` (the tables below were not scored that way) and gates on the configured F1. The recall, MRR and F1 figures below must be regenerated on a machine with enough memory (user action); no new numbers are given here.
+
+**The calibrated F1 is in-sample.** The calibrated floors are fitted on the same 50 questions (10 of them out-of-scope negatives) that the F1 is then scored on, so it describes this data and is not a forecast of how the floors will do on new questions. The "configured" rows use the floors from the settings at the time and are the ones the gate should judge.
+
 ## Embedder comparison
 
 | index | embed model | hybrid recall@6 | hybrid MRR | calibrated F1 | hybrid p95 ms |

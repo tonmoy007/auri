@@ -10,11 +10,19 @@ Order of resolution, from `app/llm/chat_endpoint.py`:
 2. **Prototype shortcut:** if it is empty, the same server and opt-ins as theme grouping (`THEMES_LLM_BASE_URL`, `THEMES_LLM_USE_OPENAI_API_KEY`, `THEMES_LLM_ALLOW_INSECURE_HTTP`), with the model from `PRIEST_LLM_MODEL`.
 3. Local Ollama (`PRIEST_FALLBACK_BASE_URL`, or `OLLAMA_BASE_URL` plus `/v1`) only if `PRIEST_FALLBACK_MODEL` is set.
 
-The address, the key and the paths can only be set in the environment, never from the dashboard. Hosted providers (OpenAI, Gemini, Anthropic) are refused and reported on the Privacy panel.
+The Guide's chat server addresses, the key and the vault and index paths can only be set in the environment, never from the dashboard. That covers the primary, the fallback (`priest_config.fallback_base_url` reads `settings.OLLAMA_BASE_URL`, not the dashboard layer) and the moderation call (`backend/app/priest/moderation.py` reads `OLLAMA_BASE_URL` and `OLLAMA_MODEL` from the environment). `OLLAMA_BASE_URL` can still be edited in the dashboard, but that only affects confession moderation and other non-Guide paths. The query embedding for retrieval also uses `OLLAMA_BASE_URL` from the environment.
+
+`PRIEST_LLM_MODEL` and `PRIEST_FALLBACK_MODEL` are model names and stay editable in the dashboard. Any model name ending in `-cloud` is refused (`chat_endpoint.refuse_cloud_model`), because Ollama runs those on a third party's servers.
+
+Hosted providers are refused against a list of well-known names (`chat_endpoint.THIRD_PARTY_HOSTS`: OpenAI, Azure OpenAI, Google APIs, Anthropic, OpenRouter, Groq, Together, Mistral, Cohere, DeepSeek, xAI and Cloudflare AI Gateway), checked after IDNA folding, subdomains included. The list is not exhaustive. The real safeguard is that the address comes from the environment, so only whoever controls the environment can point questions elsewhere. A refusal is reported on the Privacy panel.
+
+Moderation: a second call sends the question as typed (before de-identification) to that Ollama, for questions the lexicon did not already route to crisis, deferral or the English-only notice. It uses a two-thread pool, and its HTTP call is capped at 5 seconds.
 
 ## Current prototype state (accepted)
 
 The vLLM box is reached over plain HTTP on a public address with an API key. That means a Guide question and the key cross the internet unencrypted, anyone can reach the GPU port, and the operator can see questions while they are answered. This was accepted for the prototype. Do not enable the Guide for real users in this state.
+
+Who can see a question: the operator of each server that handles it, while it is handled. That is the vLLM box, the fallback Ollama if it is used, and the Ollama that does moderation and query embedding. Each server's access log records the time and client address of a request, and the request time of a question also appears in Auri's API access log. Whether any of these servers logs prompt text is not verified. Auri stores no question or answer. `/metrics` folds crisis and deferral into one `fixed_reply` label; the admin usage view withholds latency until the total reaches the cohort and always lists an `other` row. Differencing the admin usage counts over time can still show when a count crosses the cohort (admin-only; accepted for the prototype).
 
 ## Before a pilot
 

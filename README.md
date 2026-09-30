@@ -12,7 +12,7 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 - **Anonymity Modes** — Fully blind or "someone in your team" context — your choice at send-time
 - **Telegram Delivery** — Confessions delivered posted to the chosen department's Telegram chat
 - **Moderation** — AI-flagged content queued to designated moderator for review
-- **Guide (off by default)** — an AI companion that answers questions from a study library of world religions, cites the notes it used, and stores nothing; crisis questions get a fixed message with contacts, never a generated one
+- **Guide (off by default)** — an AI companion that answers questions from a study library of world religions and cites the notes it used. Auri keeps no questions or answers; the model server's own logging is not yet verified (prototype). Crisis questions get a fixed message with contacts, never a generated one
 - **Forward or Delete** — Send to a department, or delete it
 - **3 Environments** — Classic booth, forest glade, rooftop at night
 

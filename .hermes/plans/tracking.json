@@ -191,10 +191,14 @@
         "13.25": "in_progress",
         "13.26": "in_progress",
         "13.27": "in_progress",
-        "13.28": "in_progress"
+        "13.28": "in_progress",
+        "13.29": "completed",
+        "13.30": "completed",
+        "13.31": "completed",
+        "13.32": "completed"
       }
     }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-10-01T01:57:17+06:00"
+  "updated_at": "2026-10-01T02:43:06+06:00"
 }
