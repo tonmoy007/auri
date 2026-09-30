@@ -18,6 +18,7 @@ import Constants from 'expo-constants';
 import { colors } from '../theme/colors';
 import { typography, spacing, borderRadius } from '../theme';
 import { VoiceMaskSelector } from '../components/VoiceMaskSelector';
+import { GuideSettingsSection } from '../components/GuideSettingsSection';
 import { useHaptics } from '../hooks/useHaptics';
 import { useSettings } from '../hooks/useSettings';
 import { useBackendUrl } from '../hooks/useBackendUrl';
@@ -42,6 +43,10 @@ export default function SettingsScreen(): React.JSX.Element {
     defaultEnvironment,
     setDefaultVoiceMask,
     setDefaultEnvironment,
+    showGuideMode,
+    guideTradition,
+    setShowGuideMode,
+    setGuideTradition,
   } = useSettings();
   const [identityRef, setIdentityRef] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
@@ -186,6 +191,16 @@ export default function SettingsScreen(): React.JSX.Element {
               </TouchableOpacity>
             );
           })}
+        </View>
+
+        {/* Guide */}
+        <View style={styles.sectionSpaced}>
+          <GuideSettingsSection
+            showGuideMode={showGuideMode}
+            guideTradition={guideTradition}
+            onChangeShowGuideMode={setShowGuideMode}
+            onChangeGuideTradition={setGuideTradition}
+          />
         </View>
 
         {/* Privacy & Identity */}

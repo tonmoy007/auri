@@ -108,6 +108,20 @@ export default function RootLayout(): React.JSX.Element | null {
             animation: 'fade',
           }}
         />
+        <Stack.Screen
+          name="priest/intro"
+          options={{
+            title: 'Before you ask',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="priest/index"
+          options={{
+            title: 'Guide',
+            animation: 'slide_from_right',
+          }}
+        />
       </Stack>
     </>
   );

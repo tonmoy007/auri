@@ -15,6 +15,9 @@ import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ThreeCanvas } from '../components/ThreeCanvas';
 import { useHaptics } from '../hooks/useHaptics';
+import { usePriestStatus } from '../hooks/usePriestStatus';
+import { hasAcknowledgedPriestIntro, useSettings } from '../hooks/useSettings';
+import { guideEntryLabel, shouldShowGuideEntry } from '../lib/priestInput';
 
 const { width, height } = Dimensions.get('window');
 
@@ -28,6 +31,8 @@ const ENTRY_FADE_MS = 350;
 export default function HomeScreen(): React.JSX.Element {
   const haptics = useHaptics();
   const fadeToBlack = useRef(new Animated.Value(0)).current;
+  const { status: guideStatus, reload: reloadGuideStatus } = usePriestStatus(false);
+  const { showGuideMode, reload: reloadSettings } = useSettings();
 
   // The fade-to-black overlay is mounted only while the booth entry
   // transition is actually running.
@@ -48,7 +53,11 @@ export default function HomeScreen(): React.JSX.Element {
     useCallback(() => {
       setIsEnteringBooth(false);
       fadeToBlack.setValue(0);
-    }, [fadeToBlack]),
+      // Settings may have changed the Guide toggle, and the server may have
+      // switched the Guide on or off, while this screen sat under another.
+      void reloadGuideStatus();
+      void reloadSettings();
+    }, [fadeToBlack, reloadGuideStatus, reloadSettings]),
   );
 
   const handleEnterAuri = useCallback(() => {
@@ -67,6 +76,14 @@ export default function HomeScreen(): React.JSX.Element {
       fadeToBlack.setValue(0);
     });
   }, [fadeToBlack, haptics]);
+
+  const handleOpenGuide = useCallback(async () => {
+    haptics.selectionChanged();
+    const acknowledged = guideStatus
+      ? await hasAcknowledgedPriestIntro(guideStatus.disclaimer_version)
+      : false;
+    router.push(acknowledged ? '/priest' : '/priest/intro');
+  }, [guideStatus, haptics]);
 
   const handleOpenSettings = useCallback(() => {
     router.push('/settings');
@@ -114,15 +131,28 @@ export default function HomeScreen(): React.JSX.Element {
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.enterButton}
-          onPress={handleEnterAuri}
-          activeOpacity={0.8}
-          accessibilityRole="button"
-          accessibilityLabel="Enter the confession booth"
-        >
-          <Text style={styles.enterButtonText}>Enter Auri</Text>
-        </TouchableOpacity>
+        <View style={styles.ctaGroup}>
+          <TouchableOpacity
+            style={styles.enterButton}
+            onPress={handleEnterAuri}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Enter the confession booth"
+          >
+            <Text style={styles.enterButtonText}>Enter Auri</Text>
+          </TouchableOpacity>
+          {guideStatus && shouldShowGuideEntry(guideStatus, showGuideMode) ? (
+            <TouchableOpacity
+              style={styles.guideButton}
+              onPress={() => void handleOpenGuide()}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityLabel={`${guideEntryLabel(guideStatus.persona_name)}, an AI guide drawing on a study library`}
+            >
+              <Text style={styles.guideButtonText}>{guideEntryLabel(guideStatus.persona_name)}</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
 
         <Text style={styles.disclaimer}>
           Your voice is masked. No name is asked for.
@@ -230,6 +260,27 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.4,
     shadowRadius: 16,
     elevation: 8,
+  },
+  ctaGroup: {
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  guideButton: {
+    minHeight: 44,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    borderRadius: 50,
+    borderWidth: 1.5,
+    borderColor: colors.candleGlow,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  guideButtonText: {
+    fontSize: typography.fontSize.md,
+    fontWeight: typography.fontWeight.semibold,
+    color: colors.candleGlow,
+    letterSpacing: 1,
   },
   enterButtonText: {
     fontSize: typography.fontSize.lg,

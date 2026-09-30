@@ -1,6 +1,8 @@
 // Auri — TypeScript type definitions
 // Core types used throughout the application
 
+import type { TraditionId } from './priest';
+
 /**
  * Voice mask options for audio anonymization.
  */
@@ -148,3 +150,14 @@ export type WebSocketConnectionState =
   | 'connecting'
   | 'connected'
   | 'reconnecting';
+
+/**
+ * Guide (priest mode) preferences. Stored only on this device: the tradition is
+ * sent to the server solely as the per-request `tradition` field.
+ */
+export interface GuideSettings {
+  /** Whether the home screen offers the Guide (when the server has it on). */
+  showGuideMode: boolean;
+  /** Optional tradition the Guide's answers should be limited to. */
+  guideTradition: TraditionId | null;
+}
