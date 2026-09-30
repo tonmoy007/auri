@@ -18,9 +18,12 @@ by the same scenario table so no call site can be left out:
 
 from __future__ import annotations
 
+import tempfile
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
@@ -301,6 +304,40 @@ async def _resend(client: AsyncClient, headers: Headers, db: AsyncSession) -> Re
     )
 
 
+async def _priest_reindex(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    # The builder launcher and the index directory are replaced: only the audit row is
+    # under test here, and nothing may be started.
+    from app.api.v1.priest_admin import get_builder_launcher
+
+    with (
+        tempfile.TemporaryDirectory() as root,
+        patch("app.api.v1.priest_admin._index_dir", return_value=Path(root)),
+    ):
+        app.dependency_overrides[get_builder_launcher] = lambda: lambda: 4242
+        return await client.post("/api/v1/admin/priest/reindex", headers=headers)
+
+
+async def _priest_activate(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    with (
+        tempfile.TemporaryDirectory() as root,
+        patch("app.api.v1.priest_admin._index_dir", return_value=Path(root)),
+        patch(
+            "app.api.v1.priest_admin.index_store.list_versions",
+            return_value=["20260930T100000Z-abcdef12"],
+        ),
+        patch("app.api.v1.priest_admin.index_store.activate"),
+    ):
+        return await client.post(
+            "/api/v1/admin/priest/activate",
+            json={"version": "20260930T100000Z-abcdef12"},
+            headers=headers,
+        )
+
+
 async def _department_create(
     client: AsyncClient, headers: Headers, db: AsyncSession
 ) -> Response:
@@ -364,12 +401,18 @@ SCENARIOS: dict[str, Scenario] = {
     "department-delete": Scenario(
         UserRole.admin, ("department.write", None), _department_delete
     ),
+    "priest-reindex": Scenario(
+        UserRole.admin, ("priest.reindex", None), _priest_reindex
+    ),
+    "priest-activate": Scenario(
+        UserRole.admin, ("priest.activate", None), _priest_activate
+    ),
 }
 
 
 def test_every_audit_call_site_has_a_scenario() -> None:
-    # Arrange — 14 record() call sites; approve and reject share one helper per caller
-    # (staff session, bot key), so the 16 scenarios cover all of them. A new site
+    # Arrange — 16 record() call sites; approve and reject share one helper per caller
+    # (staff session, bot key), so the 18 scenarios cover all of them. A new site
     # should add a scenario here.
     import pathlib
     import re
@@ -381,8 +424,8 @@ def test_every_audit_call_site_has_a_scenario() -> None:
     )
 
     # Act / Assert
-    assert sites == 14
-    assert len(SCENARIOS) >= 14
+    assert sites == 16
+    assert len(SCENARIOS) >= 16
 
 
 # ── The audit service itself ─────────────────────────────────────────────
@@ -451,7 +494,7 @@ async def test_each_audited_route_leaves_a_durable_row(
     response = await scenario.request(durable_client, headers, db_session)
 
     # Assert
-    assert response.status_code in (200, 201, 204)
+    assert response.status_code in (200, 201, 202, 204)
     assert await _audit_rows(db_engine) == [scenario.audit]
 
 
@@ -684,7 +727,7 @@ async def test_nothing_touches_the_database_after_the_audit_commit(
     response = await scenario.request(client, headers, db_session)
 
     # Assert
-    assert response.status_code in (200, 201, 204)
+    assert response.status_code in (200, 201, 202, 204)
     assert log.calls.count("commit:audit") == 1
     after_audit = log.calls[log.calls.index("commit:audit") + 1 :]
     assert after_audit == []
