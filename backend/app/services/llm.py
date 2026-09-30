@@ -13,6 +13,7 @@ from app.exceptions import (
     SentimentError,
     SummarizationError,
 )
+from app.llm.prompt_loader import load_prompt
 from app.models.confession import ModerationSeverity
 from app.services.settings_service import get_config
 
@@ -92,14 +93,7 @@ class LLMService:
 
         cleaned = strip_pii_regex(text)
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "You are a PII redaction assistant. Review the delimited text "
-                "below and replace any remaining personally-identifiable "
-                "information (names, addresses, phone numbers, email "
-                "addresses, IP addresses, etc.) with placeholders like "
-                "[NAME], [ADDRESS], [PHONE]. Do not change the meaning or "
-                "flow of the text."
-            ),
+            instruction=load_prompt("deidentify").render(),
             content=cleaned,
         )
         llm_response = self._call_llm(prompt)
@@ -116,12 +110,7 @@ class LLMService:
             CategorizationError: If the LLM fails to produce a label.
         """
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "Assign exactly one category to the following confession "
-                "text. Choose from: health, faith, relationships, work, "
-                "family, guilt, grief, addiction, trauma, other. Return "
-                "ONLY the category label, nothing else."
-            ),
+            instruction=load_prompt("categorize").render(),
             content=text,
         )
         result = self._call_llm(prompt).strip().lower()
@@ -147,11 +136,7 @@ class LLMService:
             SentimentError: If the LLM returns anything outside that set.
         """
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "Classify the overall emotional tone of the following "
-                "workplace confession. Answer with exactly one word: "
-                "negative, neutral, or positive."
-            ),
+            instruction=load_prompt("classify_sentiment").render(),
             content=text,
         )
         result = self._call_llm(prompt).strip().lower()
@@ -180,11 +165,7 @@ class LLMService:
             SummarizationError: If the LLM fails to produce a summary.
         """
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "Summarise the following confession in 2-3 sentences. "
-                "Remove all identifying details. Be compassionate and "
-                "neutral in tone. Output only the summary."
-            ),
+            instruction=load_prompt("summarize").render(),
             content=text,
         )
         result = self._call_llm(prompt)
@@ -213,21 +194,7 @@ class LLMService:
             CounselingError: If the LLM fails to produce a response.
         """
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "You are a compassionate, non-judgmental listener, in the "
-                "tradition of a priest hearing confession: someone has just "
-                "shared something they needed to say aloud. Write a short "
-                "response (3-4 sentences), speaking directly to them as "
-                "'you', that: acknowledges what they shared without "
-                "repeating private details back, validates that it took "
-                "courage to speak it, offers one gentle and concrete "
-                "reflection (never clinical advice, never religious "
-                "doctrine), and closes with a brief affirmation that they "
-                "have been heard. If the content suggests they may be in "
-                "crisis or in danger, gently and briefly encourage them to "
-                "reach out to someone they trust. Output only the "
-                "response, nothing else."
-            ),
+            instruction=load_prompt("counsel").render(),
             content=text,
         )
         result = self._call_llm(prompt)
@@ -257,17 +224,7 @@ class LLMService:
             The :class:`ModerationSeverity` describing the content.
         """
         prompt = self._build_delimited_prompt(
-            instruction=(
-                "Classify the following confession for safety review. Answer "
-                "with exactly one word:\n"
-                "crisis - imminent self-harm, suicidal intent, or a threat of "
-                "violence to anyone;\n"
-                "harassment - targeted abuse or harassment naming a specific "
-                "person;\n"
-                "policy - other content needing review, such as illegal "
-                "activity;\n"
-                "none - nothing requiring review."
-            ),
+            instruction=load_prompt("moderate").render(),
             content=text,
         )
         result = self._call_llm(prompt).strip().lower()
