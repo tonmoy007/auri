@@ -1,0 +1,635 @@
+{
+  "version": 1,
+  "description": "Retrieval gold set for priest mode: questions and expected note paths relative to religion-study/. No vault text.",
+  "questions": [
+    {
+      "id": "g01",
+      "question": "What is the Činvat bridge?",
+      "kind": "proper_noun",
+      "tradition": "zoroastrianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Činvat Bridge.md"
+        },
+        {
+          "note_path": "stories/zoroastrian/The Daena on the Chinvat Bridge.md"
+        }
+      ]
+    },
+    {
+      "id": "g02",
+      "question": "Who is Kisā Gotamī?",
+      "kind": "proper_noun",
+      "tradition": "buddhism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "figures/Kisā Gotamī.md"
+        },
+        {
+          "note_path": "stories/buddhist/Kisā Gotamī and the Mustard Seed.md"
+        }
+      ]
+    },
+    {
+      "id": "g03",
+      "question": "What does Teshuvah mean in Judaism?",
+      "kind": "proper_noun",
+      "tradition": "judaism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Teshuvah.md"
+        }
+      ]
+    },
+    {
+      "id": "g04",
+      "question": "What is Ahiṃsā in Jainism?",
+      "kind": "proper_noun",
+      "tradition": "jainism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "Ahiṃsā.md"
+        }
+      ]
+    },
+    {
+      "id": "g05",
+      "question": "Explain wu wei, effortless action.",
+      "kind": "proper_noun",
+      "tradition": "daoism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Wu Wei (Effortless Action).md"
+        }
+      ]
+    },
+    {
+      "id": "g06",
+      "question": "Who was Gurū Nānak?",
+      "kind": "proper_noun",
+      "tradition": "sikhism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "figures/Gurū Nānak.md"
+        },
+        {
+          "note_path": "stories/sikh/Gurū Nānak's Birth and Early Life.md"
+        }
+      ]
+    },
+    {
+      "id": "g07",
+      "question": "What is Tikkun Olam?",
+      "kind": "proper_noun",
+      "tradition": "judaism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Tikkun Olam.md"
+        }
+      ]
+    },
+    {
+      "id": "g08",
+      "question": "Who are the Amesha Spentas?",
+      "kind": "proper_noun",
+      "tradition": "zoroastrianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Amesha Spentas.md"
+        }
+      ]
+    },
+    {
+      "id": "g09",
+      "question": "What is the Khālsā?",
+      "kind": "proper_noun",
+      "tradition": "sikhism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Khālsā.md"
+        },
+        {
+          "note_path": "stories/sikh/The Creation of the Khalsa (Vaisākhī 1699).md"
+        }
+      ]
+    },
+    {
+      "id": "g10",
+      "question": "Who was Enkidu and what was his friendship with Gilgamesh?",
+      "kind": "proper_noun",
+      "tradition": "mesopotamian",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/mesopotamian/Gilgamesh and Enkidu — The Friendship That Changed a King.md"
+        },
+        {
+          "note_path": "figures/Enkidu.md"
+        },
+        {
+          "note_path": "figures/Gilgamesh.md"
+        }
+      ]
+    },
+    {
+      "id": "g11",
+      "question": "What is Ren, humaneness, in Confucian thought?",
+      "kind": "proper_noun",
+      "tradition": "confucianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Ren (Humaneness).md"
+        }
+      ]
+    },
+    {
+      "id": "g12",
+      "question": "What is the Druj?",
+      "kind": "proper_noun",
+      "tradition": "zoroastrianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Druj.md"
+        }
+      ]
+    },
+    {
+      "id": "g13",
+      "question": "Who was Luqman the Wise?",
+      "kind": "proper_noun",
+      "tradition": "islam",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/islamic/Luqman the Wise — Wisdom for His Son.md"
+        },
+        {
+          "note_path": "figures/Luqman.md"
+        }
+      ]
+    },
+    {
+      "id": "g14",
+      "question": "a story about accepting that everyone loses someone",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/buddhist/Kisā Gotamī and the Mustard Seed.md"
+        },
+        {
+          "note_path": "figures/Kisā Gotamī.md"
+        }
+      ]
+    },
+    {
+      "id": "g15",
+      "question": "how do I forgive someone who hurt me badly",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/Joseph in Egypt.md"
+        },
+        {
+          "note_path": "stories/Joseph — The Longest Story Across Scriptures.md"
+        },
+        {
+          "note_path": "figures/Joseph and Yusuf - A Figure Traced.md"
+        }
+      ]
+    },
+    {
+      "id": "g16",
+      "question": "I keep failing and feel I cannot change, is there a way back",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Teshuvah.md"
+        },
+        {
+          "note_path": "stories/jewish/The Woman Who Ate a Fig — A Story of Repentance.md"
+        },
+        {
+          "note_path": "stories/The Prodigal Son.md"
+        }
+      ]
+    },
+    {
+      "id": "g17",
+      "question": "is it wrong to feel calm or even glad when someone I love has died",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/daoist/Zhuangzi Sings While His Wife Lies Dead.md"
+        }
+      ]
+    },
+    {
+      "id": "g18",
+      "question": "a tale about bad luck that turns out to be good luck",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/daoist/The Man Who Lost His Horse.md"
+        },
+        {
+          "note_path": "stories/jewish/Nachum Ish Gamzu — Everything for the Best.md"
+        }
+      ]
+    },
+    {
+      "id": "g19",
+      "question": "how should I cope when people spread rumours about me",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/islamic/Hadith al-Ifk — The Slander of Aisha.md"
+        }
+      ]
+    },
+    {
+      "id": "g20",
+      "question": "a story about a violent man who completely changed his life",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "figures/Aṅgulimāla.md"
+        }
+      ]
+    },
+    {
+      "id": "g21",
+      "question": "how to stay content when I am poor",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "figures/Yan Hui.md"
+        }
+      ]
+    },
+    {
+      "id": "g22",
+      "question": "why do good people suffer for no reason",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "philosophy-theology/The Problem of Evil.md"
+        },
+        {
+          "note_path": "figures/Job and Ayyub - A Figure Traced.md"
+        }
+      ]
+    },
+    {
+      "id": "g23",
+      "question": "a story of staying loyal to family when everything is lost",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/Ruth and Naomi.md"
+        },
+        {
+          "note_path": "figures/Ruth.md"
+        }
+      ]
+    },
+    {
+      "id": "g24",
+      "question": "doing my duty without obsessing over the result",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/The Bhagavad Gita.md"
+        },
+        {
+          "note_path": "figures/Arjuna.md"
+        }
+      ]
+    },
+    {
+      "id": "g25",
+      "question": "quieting a busy mind and letting thoughts fall away",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Xin Zhai (Fasting of the Mind).md"
+        },
+        {
+          "note_path": "concepts/Zuo Wang (Sitting in Forgetfulness).md"
+        }
+      ]
+    },
+    {
+      "id": "g26",
+      "question": "how should I treat a stranger who needs help",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/The Good Samaritan.md"
+        }
+      ]
+    },
+    {
+      "id": "g27",
+      "question": "a parent welcoming home a child who wasted everything",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/The Prodigal Son.md"
+        }
+      ]
+    },
+    {
+      "id": "g28",
+      "question": "why are we so afraid of dying and looking for a way out of it",
+      "kind": "feeling",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/mesopotamian/Gilgamesh's Quest for Immortality.md"
+        }
+      ]
+    },
+    {
+      "id": "g29",
+      "question": "What does 2:255 refer to, the Throne Verse?",
+      "kind": "verse",
+      "tradition": "islam",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "islamic-concepts/Tawhid.md"
+        },
+        {
+          "note_path": "texts/Quranic Tafsir - A Surah-by-Surah Companion.md"
+        }
+      ]
+    },
+    {
+      "id": "g30",
+      "question": "What is said about Yasna 44.14?",
+      "kind": "verse",
+      "tradition": "zoroastrianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "concepts/Druj.md"
+        }
+      ]
+    },
+    {
+      "id": "g31",
+      "question": "Which story is Luke 15?",
+      "kind": "verse",
+      "tradition": "christianity",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/The Prodigal Son.md"
+        }
+      ]
+    },
+    {
+      "id": "g32",
+      "question": "Who is the neighbour in Luke 10:25?",
+      "kind": "verse",
+      "tradition": "christianity",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/The Good Samaritan.md"
+        }
+      ]
+    },
+    {
+      "id": "g33",
+      "question": "What does Micah 6:8 require of a person?",
+      "kind": "verse",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "comparative/Scripture-Based Comparative Study.md"
+        }
+      ]
+    },
+    {
+      "id": "g34",
+      "question": "Matthew 5:44 love your enemies",
+      "kind": "verse",
+      "tradition": "christianity",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "comparative/Scripture-Based Comparative Study.md"
+        },
+        {
+          "note_path": "stories/The Sermon on the Mount.md"
+        }
+      ]
+    },
+    {
+      "id": "g35",
+      "question": "What is Isaiah 53 about?",
+      "kind": "verse",
+      "tradition": null,
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "figures/Isaiah.md"
+        },
+        {
+          "note_path": "stories/jewish/The Disputation of Barcelona.md"
+        }
+      ]
+    },
+    {
+      "id": "g36",
+      "question": "What are the two spirits of Yasna 30?",
+      "kind": "verse",
+      "tradition": "zoroastrianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/zoroastrian/The Parable of the Two Paths.md"
+        },
+        {
+          "note_path": "concepts/Spenta Mainyu.md"
+        },
+        {
+          "note_path": "concepts/Angra Mainyu.md"
+        }
+      ]
+    },
+    {
+      "id": "g37",
+      "question": "Analects 1.1, the pleasure of learning and practising",
+      "kind": "verse",
+      "tradition": "confucianism",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "stories/confucian/Confucius Opens His School.md"
+        }
+      ]
+    },
+    {
+      "id": "g38",
+      "question": "Qur'an 13:28 hearts find rest",
+      "kind": "verse",
+      "tradition": "islam",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "islamic-concepts/Iman.md"
+        },
+        {
+          "note_path": "texts/Quranic Tafsir - A Surah-by-Surah Companion.md"
+        }
+      ]
+    },
+    {
+      "id": "g39",
+      "question": "What does 94:5 say about hardship and ease?",
+      "kind": "verse",
+      "tradition": "islam",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "texts/Quranic Tafsir - A Surah-by-Surah Companion.md"
+        }
+      ]
+    },
+    {
+      "id": "g40",
+      "question": "What is 49:13 about nations and tribes?",
+      "kind": "verse",
+      "tradition": "islam",
+      "expected_covered": true,
+      "expected": [
+        {
+          "note_path": "texts/Quranic Tafsir - A Surah-by-Surah Companion.md"
+        }
+      ]
+    },
+    {
+      "id": "g41",
+      "question": "How do I fix a leaking tap?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g42",
+      "question": "What is the capital of Peru?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g43",
+      "question": "What is a good recipe for sourdough bread?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g44",
+      "question": "Which programming language should I learn for web development?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g45",
+      "question": "How do I reset my home wifi router?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g46",
+      "question": "Explain how quantum entanglement works.",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g47",
+      "question": "What is the best way to negotiate a higher salary?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g48",
+      "question": "Who won the football world cup in 1966?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g49",
+      "question": "What does the Book of Mormon say about forgiveness?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    },
+    {
+      "id": "g50",
+      "question": "Who is Odin and what are the Norse myths?",
+      "kind": "out_of_scope",
+      "tradition": null,
+      "expected_covered": false,
+      "expected": []
+    }
+  ]
+}
