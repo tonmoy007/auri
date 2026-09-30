@@ -111,13 +111,14 @@ export function AuditPanel() {
               <TableHead>Tier</TableHead>
               <TableHead>Confession</TableHead>
               <TableHead>Justification</TableHead>
+              <TableHead>Detail</TableHead>
               <TableHead>Source IP</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {events.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-muted-foreground">
+                <TableCell colSpan={7} className="text-muted-foreground">
                   No audit events recorded yet.
                 </TableCell>
               </TableRow>
@@ -140,6 +141,9 @@ export function AuditPanel() {
                   </TableCell>
                   <TableCell className="max-w-xs truncate">
                     {event.justification ?? '—'}
+                  </TableCell>
+                  <TableCell className="max-w-sm whitespace-normal break-words">
+                    {event.detail ?? '—'}
                   </TableCell>
                   <TableCell className="font-mono text-xs">{event.source_ip ?? '—'}</TableCell>
                 </TableRow>

@@ -88,3 +88,8 @@ class AuditEvent(Base):
         nullable=True,
         comment="Client address the action arrived from, when known",
     )
+    detail: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="What changed, for actions that alter settings (never confession content)",
+    )

@@ -441,3 +441,199 @@ async def test_list_summaries_filters_by_reply_state(
     # Assert
     assert {view.id for view in views} == expected_ids
     assert total == len(expected_ids)
+
+
+@pytest.mark.asyncio
+async def test_a_competing_first_save_becomes_an_edit_and_keeps_the_first_timestamp(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    # Arrange — another HR user saved the first reply between our read and our
+    # write. Our read is stale (no reply yet); the row already has one.
+    confession = await add_confession(
+        db_session,
+        status=ConfessionStatus.pending,
+        hr_reply="the first reply",
+        hr_replied_at=T1,
+    )
+    stale_view = confession_access.ConfessionSummaryView(
+        id=confession.id,
+        status=ConfessionStatus.pending,
+        category=None,
+        sentiment=None,
+        ai_summary=None,
+        recipient_dept=None,
+        created_at=T1,
+        delivered_at=None,
+        severity="none",
+        hr_reply=None,
+        hr_replied_at=None,
+        hr_reply_edited_at=None,
+    )
+    real_read = confession_access.read_summary
+    reads: list[int] = []
+
+    async def stale_then_real(
+        session: AsyncSession, confession_id: uuid.UUID
+    ) -> confession_access.ConfessionSummaryView:
+        reads.append(1)
+        return (
+            stale_view if len(reads) == 1 else await real_read(session, confession_id)
+        )
+
+    monkeypatch.setattr(confession_access, "read_summary", stale_then_real)
+
+    # Act
+    result = await hr_reply_service.write_reply(
+        db_session, confession.id, "the second reply", T2
+    )
+
+    # Assert — the first save's timestamp is not overwritten; this is an edit
+    stored = await _reply_columns(db_session, confession.id)
+    assert stored == (
+        "the second reply",
+        T1.replace(tzinfo=None),
+        T2.replace(tzinfo=None),
+    )
+    assert result.changed is True
+
+
+@pytest.mark.asyncio
+async def test_a_competing_identical_first_save_writes_nothing_more(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    # Arrange — the other user saved exactly the same words
+    confession = await add_confession(
+        db_session,
+        status=ConfessionStatus.pending,
+        hr_reply="we heard you",
+        hr_replied_at=T1,
+    )
+    stale_view = confession_access.ConfessionSummaryView(
+        id=confession.id,
+        status=ConfessionStatus.pending,
+        category=None,
+        sentiment=None,
+        ai_summary=None,
+        recipient_dept=None,
+        created_at=T1,
+        delivered_at=None,
+        severity="none",
+        hr_reply=None,
+        hr_replied_at=None,
+        hr_reply_edited_at=None,
+    )
+    real_read = confession_access.read_summary
+    reads: list[int] = []
+
+    async def stale_then_real(
+        session: AsyncSession, confession_id: uuid.UUID
+    ) -> confession_access.ConfessionSummaryView:
+        reads.append(1)
+        return (
+            stale_view if len(reads) == 1 else await real_read(session, confession_id)
+        )
+
+    monkeypatch.setattr(confession_access, "read_summary", stale_then_real)
+
+    # Act
+    result = await hr_reply_service.write_reply(
+        db_session, confession.id, "we heard you", T2
+    )
+
+    # Assert
+    assert await _reply_columns(db_session, confession.id) == (
+        "we heard you",
+        T1.replace(tzinfo=None),
+        None,
+    )
+    assert result.changed is False
+
+
+def _stale_view(
+    confession_id: uuid.UUID,
+    hr_reply: str | None,
+    hr_replied_at: datetime | None,
+) -> confession_access.ConfessionSummaryView:
+    """A summary view as read *before* a competing save landed."""
+    return confession_access.ConfessionSummaryView(
+        id=confession_id,
+        status=ConfessionStatus.pending,
+        category=None,
+        sentiment=None,
+        ai_summary=None,
+        recipient_dept=None,
+        created_at=T1,
+        delivered_at=None,
+        severity="none",
+        hr_reply=hr_reply,
+        hr_replied_at=hr_replied_at,
+        hr_reply_edited_at=None,
+    )
+
+
+def _first_read_stale(monkeypatch, stale: confession_access.ConfessionSummaryView):
+    """Make the first ``read_summary`` return *stale*, later reads the real row."""
+    real_read = confession_access.read_summary
+    reads: list[int] = []
+
+    async def stale_then_real(
+        session: AsyncSession, confession_id: uuid.UUID
+    ) -> confession_access.ConfessionSummaryView:
+        reads.append(1)
+        return stale if len(reads) == 1 else await real_read(session, confession_id)
+
+    monkeypatch.setattr(confession_access, "read_summary", stale_then_real)
+
+
+@pytest.mark.asyncio
+async def test_a_competing_identical_edit_does_not_move_the_edit_time(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    # Arrange — another HR user already changed the reply to the very words this
+    # user is now saving; this user's read still shows the earlier text.
+    confession = await add_confession(
+        db_session,
+        status=ConfessionStatus.pending,
+        hr_reply="the second version",
+        hr_replied_at=T1,
+        hr_reply_edited_at=T2,
+    )
+    _first_read_stale(monkeypatch, _stale_view(confession.id, "the first version", T1))
+
+    # Act
+    result = await hr_reply_service.write_reply(
+        db_session, confession.id, "the second version", T2 + timedelta(hours=1)
+    )
+
+    # Assert — nothing changed, so the confessor's "edited" signal stays put
+    stored = await _reply_columns(db_session, confession.id)
+    assert stored == (
+        "the second version",
+        T1.replace(tzinfo=None),
+        T2.replace(tzinfo=None),
+    )
+    assert result.changed is False
+
+
+@pytest.mark.asyncio
+async def test_a_reply_whose_row_keeps_vanishing_is_reported_as_not_found(
+    db_session: AsyncSession, monkeypatch
+) -> None:
+    # Arrange — the guarded write matches nothing on either attempt, as when the
+    # row is deleted or emptied while the save is in flight
+    confession = await add_confession(
+        db_session,
+        status=ConfessionStatus.pending,
+        hr_reply="already there",
+        hr_replied_at=T1,
+    )
+    _first_read_stale(monkeypatch, _stale_view(confession.id, None, None))
+
+    async def never_matches(*args: object, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(hr_reply_service, "_apply_reply", never_matches)
+
+    # Act / Assert
+    with pytest.raises(ConfessionNotFoundError):
+        await hr_reply_service.write_reply(db_session, confession.id, "new words", T2)

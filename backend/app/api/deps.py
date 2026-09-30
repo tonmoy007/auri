@@ -19,7 +19,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.exceptions import InvalidSessionTokenError
 from app.models.user import User, UserRole
 from app.services.auth_tokens import decode_token
@@ -53,7 +53,7 @@ async def _load_active_user(session: AsyncSession, user_id: uuid.UUID) -> User:
 
 async def get_current_user(
     authorization: str | None = Header(None),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> User:
     """Resolve the staff account behind the request's session token.
 
@@ -118,7 +118,7 @@ def _matches_admin_api_key(candidate: str | None) -> bool:
 async def require_admin_access(
     authorization: str | None = Header(None),
     x_admin_api_key: str | None = Header(None, alias="X-Admin-Api-Key"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> User | None:
     """Allow an ``admin`` session **or** the legacy ``X-Admin-Api-Key``.
 

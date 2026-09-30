@@ -4,11 +4,12 @@ There is deliberately no update or delete function here. An audit trail that
 its own subjects can edit proves nothing, so the only write path is
 :func:`record`.
 
-:func:`record` also **commits**. The request session's own commit runs after the
-response has gone out, so a row left to it can be lost after the content it
-describes has already been released. Committing here makes the row (and the
-change it accounts for, which every caller writes first) durable before the
-handler can return anything; if the commit fails the request fails and nothing
+:func:`record` also **commits**. The request session commits when its dependency
+exits, which is declared function-scoped (see ``app.database.session_dependency``)
+so that it runs right after the handler and before the response goes out. Committing
+here as well makes the audit row (and the change it accounts for, which every caller
+writes first) durable at the point the handler chooses, and keeps it durable even if
+a later step in the handler fails; if this commit fails the request fails and nothing
 is released.
 """
 
@@ -28,6 +29,7 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 
 MAX_PAGE_SIZE = 200
+MAX_DETAIL_CHARS = 500
 
 
 def client_ip(request: Request) -> str | None:
@@ -43,6 +45,7 @@ async def record(
     content_tier: ContentTier | None = None,
     justification: str | None = None,
     source_ip: str | None = None,
+    detail: str | None = None,
 ) -> AuditEvent:
     """Append one audit row and commit it (with any change already pending).
 
@@ -54,6 +57,8 @@ async def record(
         content_tier: How much content the actor was served.
         justification: Reason given for a raw-transcript read.
         source_ip: Client address the action came from.
+        detail: What changed, for an action that alters settings. Never put
+            confession content here; it is capped at ``MAX_DETAIL_CHARS``.
 
     Returns:
         The persisted :class:`AuditEvent`.
@@ -71,6 +76,7 @@ async def record(
         content_tier=content_tier.value if content_tier else None,
         justification=justification,
         source_ip=source_ip,
+        detail=detail[:MAX_DETAIL_CHARS] if detail else None,
     )
     # Read what the log line needs before committing: nothing after the commit
     # should be able to fail and turn a durable row into an error response.

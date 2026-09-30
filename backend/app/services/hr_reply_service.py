@@ -78,8 +78,8 @@ async def _apply_reply(
     reply: str,
     first_save: bool,
     now: datetime,
-) -> None:
-    """Run the guarded UPDATE that saves *reply*, or raise if the row is gone.
+) -> bool:
+    """Run the guarded UPDATE that saves *reply*; ``False`` if it matched no row.
 
     ``hr_replied_at`` is stamped once, on the first save, and never moves.
     ``hr_reply_edited_at`` is stamped only when the text changes afterwards:
@@ -90,30 +90,71 @@ async def _apply_reply(
     A reply must neither restart the retention clock nor change the Telegram
     bot's delivery dedupe key.
 
-    The status guard in the WHERE clause closes the race with the confessor's
-    soft delete, and ``content_present()`` the race with retention emptying the
-    row: either, after the eligibility read, matches nothing.
+    The WHERE clause carries every condition the caller's earlier read relied
+    on, so a change made in between matches nothing instead of being
+    overwritten: the status guard closes the race with the confessor's soft
+    delete, ``content_present()`` the race with retention emptying the row, and
+    the ``hr_replied_at`` condition the race with another HR user's first save
+    (a first save requires no reply yet; an edit requires one), and the
+    text condition the race with another edit that stored the same words.
     """
+    already_replied = Confession.hr_replied_at.is_not(None)
     statement = (
         update(Confession)
         .where(
             Confession.id == confession_id,
             Confession.status.in_(REPLY_ELIGIBLE_STATUSES),
             content_present(),
+            ~already_replied if first_save else already_replied,
         )
         .values(hr_reply=reply, updated_at=Confession.updated_at)
     )
     if first_save:
         statement = statement.values(hr_replied_at=now)
     else:
-        statement = statement.values(hr_reply_edited_at=now)
+        # An edit must change the text: if a competing save already stored these
+        # very words, stamping ``hr_reply_edited_at`` again would tell the
+        # confessor their reply changed when it did not.
+        statement = statement.where(Confession.hr_reply.is_distinct_from(reply)).values(
+            hr_reply_edited_at=now
+        )
 
     result = cast(
         CursorResult,
         await session.execute(statement.execution_options(synchronize_session=False)),
     )
-    if result.rowcount == 0:
+    return result.rowcount > 0
+
+
+async def _save_reply(
+    session: AsyncSession,
+    confession_id: uuid.UUID,
+    reply: str,
+    current: confession_access.ConfessionSummaryView,
+    now: datetime,
+) -> ReplyWriteResult:
+    """Save *reply* over *current*, treating a lost first-save race as an edit.
+
+    Raises:
+        ConfessionNotFoundError: If the confession is no longer visible.
+    """
+    if await _apply_reply(
+        session, confession_id, reply, first_save=current.hr_replied_at is None, now=now
+    ):
+        saved = await confession_access.read_summary(session, confession_id)
+        return ReplyWriteResult(saved, changed=True)
+
+    # No row matched. Either the confession is gone (this read then raises), or
+    # someone saved the first reply between our read and our write.
+    latest = await confession_access.read_summary(session, confession_id)
+    if reply == latest.hr_reply:
+        return ReplyWriteResult(latest, changed=False)
+    if not await _apply_reply(
+        session, confession_id, reply, first_save=latest.hr_replied_at is None, now=now
+    ):
         raise ConfessionNotFoundError(f"no visible confession with id {confession_id}")
+    saved = await confession_access.read_summary(session, confession_id)
+    return ReplyWriteResult(saved, changed=True)
 
 
 async def write_reply(
@@ -122,7 +163,8 @@ async def write_reply(
     """Save *text* as the reply to a confession, or report it is unchanged.
 
     Saving identical stripped text writes nothing and moves no timestamp. If
-    two HR users save at once the last write wins, and both are audited.
+    two HR users save at once the first one's ``hr_replied_at`` stands, the
+    second is recorded as an edit, and both are audited.
 
     Args:
         session: Active database session (the caller commits).
@@ -147,12 +189,4 @@ async def write_reply(
     if reply == current.hr_reply:
         return ReplyWriteResult(current, changed=False)
 
-    await _apply_reply(
-        session,
-        confession_id,
-        reply,
-        first_save=current.hr_replied_at is None,
-        now=now,
-    )
-    updated = await confession_access.read_summary(session, confession_id)
-    return ReplyWriteResult(updated, changed=True)
+    return await _save_reply(session, confession_id, reply, current, now)

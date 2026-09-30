@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_hr_role
 from app.api.v1.hr import BucketResponse
-from app.database import get_async_session
+from app.database import session_dependency
 from app.models.user import User, UserRole
 from app.services import privacy_overview
 
@@ -104,7 +104,7 @@ def get_clock() -> ClockDependency:
     summary="How confession data is handled, kept and protected (HR, admin)",
 )
 async def read_privacy_overview(
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
     clock: ClockDependency = Depends(get_clock),
 ) -> PrivacyOverviewResponse:

@@ -360,8 +360,9 @@ def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
         ),
         Fact(
             "audit_kept",
-            "The audit trail keeps the confession numbers and written reasons "
-            "it records, with no expiry.",
+            "The audit trail keeps the confession numbers, the written reasons, "
+            "and a short note of what changed when a department is added, edited "
+            "or removed (such as a new Telegram chat), with no expiry.",
         ),
         Fact(
             "content_identifies",

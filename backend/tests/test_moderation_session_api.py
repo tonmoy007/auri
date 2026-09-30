@@ -6,14 +6,18 @@ behaving identically; these cases cover the second caller added in 11.8.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
+from app.api.v1 import moderation
 from app.models.audit_event import AuditEvent
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 from app.models.user import UserRole
 from httpx import AsyncClient
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from tests.confession_seeding import add_confession
 from tests.conftest import StaffFactory
 
 QUEUE_PATH = "/api/v1/moderation/queue"
@@ -171,3 +175,127 @@ async def test_an_hr_session_can_also_work_the_queue(
     # Assert
     assert response.status_code == 200
     assert len(response.json()) == 1
+
+
+# ── Two decisions on one item (11.23) ────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_stale_second_decision_is_refused_and_changes_nothing(
+    api_client: AsyncClient,
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    make_staff: StaffFactory,
+    monkeypatch,
+) -> None:
+    # Arrange — two moderators opened the same item. The first approves it; the
+    # second's request then arrives holding a stale "still flagged" view.
+    _, first = await make_staff(UserRole.moderator, email="first@example.test")
+    _, second = await make_staff(UserRole.moderator, email="second@example.test")
+    confession = await add_confession(db_session, status=ConfessionStatus.flagged)
+    confession_id = confession.id
+    await api_client.post(f"/api/v1/moderation/{confession_id}/approve", headers=first)
+    stale_flagged = Confession(
+        id=confession_id,
+        device_token_hash="x" * 32,
+        voice_mask="warm",
+        transcript="t",
+        pii_stripped=True,
+        status=ConfessionStatus.flagged,
+    )
+
+    async def stale_fetch(session: AsyncSession, cid: uuid.UUID) -> Confession:
+        return stale_flagged
+
+    monkeypatch.setattr(moderation, "_fetch_flagged_or_404", stale_fetch)
+
+    # Act
+    response = await api_client.post(
+        f"/api/v1/moderation/{confession_id}/reject", headers=second
+    )
+
+    # Assert — the first decision stands, and the refused one left no audit row
+    assert response.status_code == 404
+    factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
+    async with factory() as session:
+        status_now = (
+            await session.execute(
+                select(Confession.status).where(Confession.id == confession_id)
+            )
+        ).scalar_one()
+        decisions = (
+            (
+                await session.execute(
+                    select(AuditEvent.action).where(
+                        AuditEvent.action.like("moderation.%")
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert status_now is ConfessionStatus.pending
+    assert decisions == ["moderation.approve"]
+
+
+@pytest.mark.asyncio
+async def test_a_stale_acknowledge_of_a_decided_crisis_item_is_refused(
+    api_client: AsyncClient,
+    db_engine: AsyncEngine,
+    db_session: AsyncSession,
+    make_staff: StaffFactory,
+    monkeypatch,
+) -> None:
+    # Arrange — a crisis item is rejected, then a second moderator's acknowledge
+    # arrives still holding the "flagged" view it read before the rejection.
+    _, first = await make_staff(UserRole.moderator, email="first@example.test")
+    _, second = await make_staff(UserRole.moderator, email="second@example.test")
+    confession = await add_confession(
+        db_session,
+        status=ConfessionStatus.flagged,
+        severity=ModerationSeverity.crisis.value,
+    )
+    confession_id = confession.id
+    await api_client.post(f"/api/v1/moderation/{confession_id}/reject", headers=first)
+    stale_flagged = Confession(
+        id=confession_id,
+        device_token_hash="x" * 32,
+        voice_mask="warm",
+        transcript="t",
+        pii_stripped=True,
+        status=ConfessionStatus.flagged,
+        severity=ModerationSeverity.crisis.value,
+    )
+
+    async def stale_fetch(session: AsyncSession, cid: uuid.UUID) -> Confession:
+        return stale_flagged
+
+    monkeypatch.setattr(moderation, "_fetch_flagged_or_404", stale_fetch)
+
+    # Act
+    response = await api_client.post(
+        f"/api/v1/moderation/{confession_id}/acknowledge", headers=second
+    )
+
+    # Assert — nothing was stamped, and the refused request left no audit row
+    assert response.status_code == 404
+    factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
+    async with factory() as session:
+        acknowledged_at = (
+            await session.execute(
+                select(Confession.acknowledged_at).where(Confession.id == confession_id)
+            )
+        ).scalar_one()
+        acknowledgements = (
+            (
+                await session.execute(
+                    select(AuditEvent.action).where(
+                        AuditEvent.action == "crisis.acknowledge"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    assert acknowledged_at is None
+    assert acknowledgements == []

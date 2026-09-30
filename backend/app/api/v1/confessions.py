@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.exceptions import DeidentificationError, RateLimitError
 from app.models.confession import (
     Confession,
@@ -350,7 +350,7 @@ def _upsert_anonymous_user(
 )
 async def create_confession(
     body: ConfessionCreate,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Persist a new confession after de-identifying its transcript.
@@ -442,7 +442,7 @@ async def preview_confession(
 )
 async def list_confessions(
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> list[Confession]:
     """Return the requesting device's confession history, newest first.
 
@@ -470,7 +470,7 @@ async def list_confessions(
 async def get_confession(
     confession_id: uuid.UUID,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> Confession:
     """Return a single confession identified by ``confession_id``.
 
@@ -490,7 +490,7 @@ async def get_confession(
 async def delete_confession(
     confession_id: uuid.UUID,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> None:
     """Mark a confession as ``deleted`` without removing the row.
 
@@ -512,7 +512,7 @@ async def forward_confession(
     confession_id: uuid.UUID,
     body: ConfessionForward,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> Confession:
     """Change a confession's status to ``forwarded`` and assign a department.
 

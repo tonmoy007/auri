@@ -1,10 +1,11 @@
 """Tests that an audit row is durable before any content is released.
 
-``get_async_session`` commits *after* the ``yield``, which FastAPI runs after the
-response has been sent. A commit that fails there cannot change what the caller
-already received, so a read could be served with no record of it. Every audited
-route is therefore held to three properties, each driven by the same scenario
-table so no call site can be left out:
+``get_async_session`` commits *after* the ``yield``. That exit now runs before the
+response is sent (the dependency is function-scoped; ``test_session_scope`` pins
+that), but the audit row is still committed by ``audit_service.record`` itself, so
+it is durable at the moment the handler releases content and does not depend on
+the exit code running. Every audited route is held to three properties, each driven
+by the same scenario table so no call site can be left out:
 
 * **durable** - run against a session that never commits on exit; the audit row
   (and the change it accounts for) is only visible afterwards if the route

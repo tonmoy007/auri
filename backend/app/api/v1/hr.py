@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_hr_role
-from app.database import get_async_session
+from app.database import session_dependency
 from app.exceptions import (
     ConfessionNotFoundError,
     HrReplyInvalidError,
@@ -117,7 +117,7 @@ async def list_confessions(
     replied: bool | None = Query(None),
     limit: int = Query(25, ge=1, le=confession_access.MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
 ) -> ConfessionPage:
     """Return de-identified confession summaries, newest first."""
@@ -155,7 +155,7 @@ async def list_confessions(
 async def read_confession_summary(
     confession_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
 ) -> ConfessionSummaryResponse:
     """Return the de-identified summary for one confession."""
@@ -210,7 +210,7 @@ async def write_confession_reply(
     confession_id: uuid.UUID,
     body: HrReplyRequest,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
     clock: ClockDependency = Depends(get_clock),
 ) -> ConfessionSummaryResponse:
@@ -250,7 +250,7 @@ async def read_confession_raw(
     confession_id: uuid.UUID,
     body: RawAccessRequest,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
 ) -> ConfessionRawResponse:
     """Return the original transcript for an escalated confession.
@@ -342,7 +342,7 @@ async def read_insights(
     request: Request,
     since: datetime | None = Query(None),
     until: datetime | None = Query(None),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
 ) -> InsightsResponse:
     """Return aggregates over the requested window (default: last 30 days).

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import CredentialsRequired, get_current_user
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.exceptions import InvalidSessionTokenError
 from app.models.user import User, UserRole
 from app.services import login_throttle
@@ -81,7 +81,7 @@ class TokenResponse(BaseModel):
 async def login(
     body: LoginRequest,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     clock: ClockDependency = Depends(get_clock),
 ) -> TokenResponse:
     """Exchange email and password for an access + refresh token pair.
@@ -132,7 +132,7 @@ async def login(
 )
 async def refresh(
     body: RefreshRequest,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     clock: ClockDependency = Depends(get_clock),
 ) -> TokenResponse:
     """Issue a fresh token pair from a valid, unrevoked refresh token."""
@@ -156,7 +156,7 @@ async def refresh(
 )
 async def logout(
     user: User = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> None:
     """Bump the account's ``token_version``, invalidating its issued tokens.
 

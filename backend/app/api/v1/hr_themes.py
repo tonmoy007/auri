@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_hr_role
 from app.api.v1.hr import BucketResponse
-from app.database import get_async_session
+from app.database import session_dependency
 from app.models.audit_event import AuditAction, ContentTier
 from app.models.user import User
 from app.services import audit_service, theme_digest, theme_service
@@ -96,7 +96,7 @@ def _to_response(report: ThemeReport) -> ThemesResponse:
 async def read_themes(
     request: Request,
     days: int = Query(DEFAULT_REPORT_DAYS, ge=1, le=MAX_REPORT_DAYS),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
     clock: ClockDependency = Depends(get_clock),
 ) -> ThemesResponse:

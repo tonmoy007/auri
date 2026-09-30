@@ -13,15 +13,16 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.models.audit_event import AuditAction, ContentTier
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 from app.models.user import User, UserRole
@@ -59,7 +60,7 @@ def _matches_moderation_key(candidate: str | None) -> bool:
 async def moderation_actor(
     authorization: str | None = Header(None),
     x_moderation_api_key: str | None = Header(None, alias="X-Moderation-Api-Key"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> User | None:
     """Authenticate the caller as the bot **or** a queue-capable staff member.
 
@@ -102,6 +103,37 @@ async def _fetch_flagged_or_404(
             detail="No flagged confession found with that ID",
         )
     return confession
+
+
+async def _claim_flagged(
+    session: AsyncSession, confession_id: uuid.UUID, **values: Any
+) -> None:
+    """Atomically apply *values* to a confession that is *still flagged*.
+
+    The earlier fetch is an unlocked read, so two moderators can both see the
+    item as flagged. The status condition in this UPDATE means only one of them
+    changes it: the other matches no row, and is refused rather than silently
+    overwriting the first decision. That holds for approve and reject, which
+    leave the flagged state. Acknowledging does not, so a repeat acknowledge of a
+    still-flagged item is accepted and restamps who saw it and when (unchanged).
+
+    Raises:
+        HTTPException: 404 if the confession is no longer flagged.
+    """
+    result = await session.execute(
+        update(Confession)
+        .where(
+            Confession.id == confession_id,
+            Confession.status == ConfessionStatus.flagged,
+        )
+        .values(**values)
+        .execution_options(synchronize_session=False)
+    )
+    if cast(CursorResult, result).rowcount == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No flagged confession found with that ID",
+        )
 
 
 async def _record_decision(
@@ -148,7 +180,7 @@ async def _record_decision(
 )
 async def list_moderation_queue(
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User | None = Depends(moderation_actor),
 ) -> list[Confession]:
     """Return every confession awaiting moderator review, oldest first.
@@ -189,13 +221,13 @@ async def list_moderation_queue(
 async def approve_confession(
     confession_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User | None = Depends(moderation_actor),
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Move *confession_id* from ``flagged`` back to ``pending``."""
     confession = await _fetch_flagged_or_404(session, confession_id)
-    confession.status = ConfessionStatus.pending
+    await _claim_flagged(session, confession.id, status=ConfessionStatus.pending)
     await _record_decision(
         session, request, actor, confession, AuditAction.moderation_approve, clock()
     )
@@ -210,13 +242,13 @@ async def approve_confession(
 async def reject_confession(
     confession_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User | None = Depends(moderation_actor),
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Move *confession_id* from ``flagged`` to ``deleted``."""
     confession = await _fetch_flagged_or_404(session, confession_id)
-    confession.status = ConfessionStatus.deleted
+    await _claim_flagged(session, confession.id, status=ConfessionStatus.deleted)
     await _record_decision(
         session, request, actor, confession, AuditAction.moderation_reject, clock()
     )
@@ -231,7 +263,7 @@ async def reject_confession(
 async def acknowledge_crisis(
     confession_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User | None = Depends(moderation_actor),
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
@@ -255,9 +287,12 @@ async def acknowledge_crisis(
             detail="Only crisis items are acknowledged",
         )
 
-    confession.acknowledged_by = actor.id
-    confession.acknowledged_at = clock()
-    await session.flush()
+    await _claim_flagged(
+        session,
+        confession.id,
+        acknowledged_by=actor.id,
+        acknowledged_at=clock(),
+    )
     await session.refresh(confession)
     # Last database call: it commits, so nothing after it may fail.
     await audit_service.record(

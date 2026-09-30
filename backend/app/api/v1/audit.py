@@ -15,7 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin_role
-from app.database import get_async_session
+from app.database import session_dependency
 from app.models.audit_event import AuditAction
 from app.models.user import User
 from app.services import audit_service
@@ -33,6 +33,7 @@ class AuditEventResponse(BaseModel):
     content_tier: str | None
     justification: str | None
     source_ip: str | None
+    detail: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -60,7 +61,7 @@ async def list_audit_events(
     until: datetime | None = Query(None),
     limit: int = Query(50, ge=1, le=audit_service.MAX_PAGE_SIZE),
     offset: int = Query(0, ge=0),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     _admin: User = Depends(require_admin_role),
 ) -> AuditPage:
     """Return audit events newest-first, filtered and paginated.

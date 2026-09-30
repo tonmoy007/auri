@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import require_hr_role
 from app.api.v1.confessions import ConfessionResponse
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.models.audit_event import AuditAction
 from app.models.confession import (
     Confession,
@@ -119,7 +119,7 @@ async def _fetch_undelivered_or_404(
     summary="List forwarded confessions awaiting Telegram delivery",
 )
 async def list_delivery_queue(
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> list[DeliveryQueueItem]:
     """Return every forwarded confession not yet marked delivered, oldest first."""
     # A crisis item never rides the automatic delivery path until a named
@@ -150,7 +150,7 @@ async def list_delivery_queue(
 )
 async def mark_delivered(
     confession_id: uuid.UUID,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Set ``delivered_at`` on *confession_id*, removing it from the queue.
@@ -211,7 +211,7 @@ def _blocked_reason(confession: Confession, chat_id: str | None) -> str | None:
     summary="What was forwarded where, and what is still stuck (HR)",
 )
 async def read_delivery_overview(
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     _actor: User = Depends(require_hr_role),
 ) -> list[DeliveryOverviewItem]:
     """Return every forwarded confession with its delivery state.
@@ -255,7 +255,7 @@ async def read_delivery_overview(
 async def resend_confession(
     confession_id: uuid.UUID,
     request: Request,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
 ) -> DeliveryOverviewItem:
     """Clear ``delivered_at`` so the bot sends the confession again.

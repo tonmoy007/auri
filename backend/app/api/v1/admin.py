@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import require_admin_access
 from app.config import settings
-from app.database import get_async_session
+from app.database import session_dependency
 from app.services import settings_service
 from app.services.voice_mod import MASKS
 
@@ -195,7 +195,7 @@ async def get_config_all() -> ConfigResponse:
 )
 async def update_config(
     body: ConfigUpdateRequest,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Upsert *body.key* = *body.value*. Rejects unknown keys and, for
     ``VOICE_MASK_*`` keys, anything that isn't a JSON list of strings."""
@@ -229,7 +229,7 @@ async def update_config(
 )
 async def reset_config(
     key: str,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Remove *key*'s DB override."""
     if key not in ALLOWED_CONFIG_KEYS:

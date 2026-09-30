@@ -130,6 +130,7 @@ export interface AuditEvent {
   content_tier: 'summary' | 'raw' | null
   justification: string | null
   source_ip: string | null
+  detail: string | null
   created_at: string
 }
 
