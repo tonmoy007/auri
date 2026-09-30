@@ -274,10 +274,12 @@ async def update_config(
                 detail=f"{body.key} value must be a JSON list of strings",
             )
 
-    await settings_service.set_config(session, body.key, body.value)
+    # The change and its audit row are one commit: if the audit cannot be written, the
+    # change (the kill switch, an address) must not be left live, unaudited.
+    await settings_service.stage_config(session, body.key, body.value)
     entry = ConfigEntry(key=body.key, value=_mask(body.key, body.value), source="db")
-    # Last database call: it commits, so nothing after it may fail.
     await _audit_config_write(session, request, actor, f"set {body.key}")
+    settings_service.cache_config(body.key, body.value)
     return entry
 
 
@@ -297,10 +299,10 @@ async def reset_config(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown config key: {key!r}",
         )
-    await settings_service.clear_config(session, key)
+    await settings_service.stage_clear(session, key)
     entry = ConfigEntry(key=key, value=_mask(key, _default_for(key)), source="default")
-    # Last database call: it commits, so nothing after it may fail.
     await _audit_config_write(session, request, actor, f"cleared {key}")
+    settings_service.cache_config(key, None)
     return entry
 
 

@@ -282,10 +282,10 @@ export function useAudioRecorder({
 
       // Recording mode is set here, not only on mount, so a screen that does not
       // prepare on mount still gets it when the user taps the mic.
-      if (!isSessionRecordingRef.current) {
-        await configureForRecording();
-        isSessionRecordingRef.current = true;
-      }
+      // Always, not only when the ref is unset: it is idempotent, and a cleanup from a
+      // previous screen can still be restoring playback after this one mounted.
+      await configureForRecording();
+      isSessionRecordingRef.current = true;
 
       // Unload any previous recording
       if (recordingRef.current) {

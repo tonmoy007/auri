@@ -61,6 +61,12 @@ _LEET: Final = str.maketrans("013457", "oieast")
 # Cyrillic and Greek letters that look like Latin ones, so "kіll" (Cyrillic і) still
 # reads as "kill". Lexicon matching only; the script check runs on the raw text.
 _CONFUSABLES: Final = str.maketrans("аеорсхуіјѕкмтнвοιανε", "aeopcxyijskmthboiave")
+_MAX_EXPANSION: Final = 10
+# Shortest run of single letters read as one broken-up word ("s u i c i d e"); three
+# would join ordinary initials ("K. M. S. Rahman").
+_MIN_SPLIT_WORD: Final = 4
+# The Bengali block: the library and the model are English only, and so is the lexicon.
+_BENGALI: Final = range(0x0980, 0x0A00)
 _JOINERS: Final = re.compile(r"(?<=\w)[-._*·](?=\w)")
 
 
@@ -110,11 +116,10 @@ def normalise_text(text: str, *, leet: bool = True, squeeze: bool = False) -> st
     inside a word ("sui-cide", "k.i.l.l") and spaces between single letters
     ("s u i c i d e") are removed too, to read deliberately broken-up words.
     """
-    folded = "".join(
-        ch
-        for ch in unicodedata.normalize("NFKC", text)
-        if unicodedata.category(ch) != "Cf"
-    )
+    # NFKC can expand one character into many (U+FDFA into 18); the cap keeps the cost of
+    # routing a hostile question bounded without dropping anything a real one holds.
+    expanded = unicodedata.normalize("NFKC", text)[: len(text) * _MAX_EXPANSION + 64]
+    folded = "".join(ch for ch in expanded if unicodedata.category(ch) != "Cf")
     decomposed = unicodedata.normalize("NFD", folded.casefold())
     bare = "".join(ch for ch in decomposed if unicodedata.category(ch) != "Mn")
     bare = bare.translate(_CONFUSABLES)
@@ -141,11 +146,11 @@ def _join_single_letters(words: list[str]) -> list[str]:
             run += word
             continue
         if run:
-            joined.append(run)
+            joined.extend([run] if len(run) >= _MIN_SPLIT_WORD else list(run))
             run = ""
         joined.append(word)
     if run:
-        joined.append(run)
+        joined.extend([run] if len(run) >= _MIN_SPLIT_WORD else list(run))
     return joined
 
 
@@ -271,13 +276,24 @@ def not_covered_text() -> str:
 
 
 def is_unsupported_script(text: str) -> bool:
-    """Whether *text* has a letter outside the Latin script (Bengali, Arabic, ...)."""
-    return any(
-        ch.isalpha()
-        and unicodedata.category(ch) != "Lm"
-        and not unicodedata.name(ch, "").startswith("LATIN")
+    """Whether a question is in a script the Guide cannot read.
+
+    Any Bengali letter counts (the users write Bangla, and the crisis lexicon cannot
+    read it). For other scripts a single Greek, Hebrew or Arabic term inside an English
+    question is normal in a study of religions and is allowed; the notice is for a
+    question written in another script, where half or more of the letters are non-Latin.
+    """
+    letters = [
+        ch
         for ch in unicodedata.normalize("NFKC", text)
+        if ch.isalpha() and unicodedata.category(ch) != "Lm"
+    ]
+    if any(ord(ch) in _BENGALI for ch in letters):
+        return True
+    foreign = sum(
+        1 for ch in letters if not unicodedata.name(ch, "").startswith("LATIN")
     )
+    return foreign > 0 and foreign * 2 >= len(letters)
 
 
 def english_only_text() -> str:

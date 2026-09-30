@@ -20,6 +20,7 @@ import asyncio
 import logging
 import threading
 import time
+import traceback
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -95,7 +96,7 @@ _DRAFT_SCHEMA: Final = PriestDraft.model_json_schema()
 # Moderation gets its own small pool. The shared default pool also serves every other
 # ``to_thread`` caller, and a stuck Ollama must not be able to starve them (or itself).
 _MODERATION_POOL: Final = ThreadPoolExecutor(
-    max_workers=2, thread_name_prefix="priest-moderation"
+    max_workers=4, thread_name_prefix="priest-moderation"
 )
 # What a moderation call may raise; any of them counts as "policy", never "crisis".
 _MODERATION_ERRORS: Final = (
@@ -197,6 +198,15 @@ def is_fixed_reply(question: str) -> bool:
     original = " ".join(strip_fence_runs(question).split())[:MAX_QUESTION_CHARS]
     decision = _decide(original, _clean(question))
     return decision.kind != "pass" or safety_router.is_unsupported_script(original)
+
+
+def _failure_site(exc: BaseException) -> str:
+    """Where an exception was raised, as ``file:line`` only: never its message, which
+    can echo the question, but enough to find a programming error."""
+    frames = traceback.extract_tb(exc.__traceback__)
+    if not frames:
+        return "unknown"
+    return f"{Path(frames[-1].filename).name}:{frames[-1].lineno}"
 
 
 def _tradition_scope(
@@ -334,7 +344,10 @@ class PriestService:
         try:
             return self._finish(run, await self._heavy(run))
         except PriestUnavailableError as exc:
-            raise self._refused(request_id, exc.code, "error") from None
+            outcome = "busy" if exc.code == "priest_busy" else "error"
+            raise self._refused(
+                request_id, exc.code, outcome, exc.retry_after
+            ) from None
         finally:
             self._slots.release()
 
@@ -430,8 +443,9 @@ class PriestService:
             return None
         except Exception as exc:  # noqa: BLE001 — whatever the pipeline raised, moderation is consulted before an error goes out, or a crisis verdict would be lost; the class name is logged, never the message, which can echo the question
             logger.error(
-                "priest pipeline failed (%s) request_id=%s",
+                "priest pipeline failed (%s at %s) request_id=%s",
                 type(exc).__name__,
+                _failure_site(exc),
                 run.request_id,
             )
             return None
@@ -727,7 +741,7 @@ class LiveRetriever:
 
     async def _current(self) -> Retriever:
         key = (
-            self._model(),
+            await asyncio.to_thread(self._model),
             priest_config.min_relevance_dense(),
             priest_config.min_relevance_bm25(),
             priest_config.top_k(),

@@ -12,8 +12,8 @@ press charges
 unfair dismissal
 wrongful termination
 wrongfully terminated
-re:\b(they|he|she|boss|employer|manager|company|supervisor|school) (can |could |will |would |might |may |did |do |does )?(fire|sack|dismiss) me\b
-re:\b(can|could|will|would|might|may) (they|he|she|my \w+|the \w+|our \w+) (fire|sack|dismiss) me\b
+re:\b(they|he|she|boss|employer|manager|company|supervisor|school) (can |could |will |would |might |may |did |do |does )?(fire|sack|dismiss) me\b(?! up\b)
+re:\b(can|could|will|would|might|may) (they|he|she|my \w+|the \w+|our \w+) (fire|sack|dismiss) me\b(?! up\b)
 fired for
 get fired
 lose my job for

@@ -153,7 +153,13 @@ def test_unknown_keys_in_a_draft_are_ignored_not_trusted() -> None:
 
 @pytest.mark.parametrize(
     "bad",
-    ["c1\x85control", "bidi\u202eflip", "isolate\u2066here", "sep\u2028here", "sep\u2029here"],
+    [
+        "c1\x85control",
+        "bidi\u202eflip",
+        "isolate\u2066here",
+        "sep\u2028here",
+        "sep\u2029here",
+    ],
 )
 def test_c1_controls_bidi_overrides_and_line_separators_are_refused(bad: str) -> None:
     # Act / Assert

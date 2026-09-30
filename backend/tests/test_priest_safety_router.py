@@ -771,3 +771,150 @@ def test_the_abuse_deferral_points_to_the_emergency_number_even_with_no_contacts
     # Assert
     assert contacts == []
     assert "local emergency number" in text
+
+
+# ── regressions found by the verification review ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I will hurt my parents if I leave Islam",
+        "I will harm my family by lying, is lying a sin",
+        "I'll shoot the kids' portraits this weekend",
+        "I'm going to shoot the students for the yearbook photo",
+        "we are shooting up the charts",
+        "the band is shooting up the rankings",
+    ],
+)
+def test_ordinary_sentences_with_hurt_harm_and_shoot_do_not_route_to_crisis(
+    question: str,
+) -> None:
+    # Act / Assert — harm-to-others rules are tighter than the self-harm ones
+    assert _decision(question).kind == "pass"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I am going to shoot up my office",
+        "I want to shoot up the school",
+        "I will kill him",
+    ],
+)
+def test_real_threats_still_route_to_crisis(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "crisis"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "Paul was beaten and imprisoned, why",
+        "Joseph was abused by his brothers?",
+        "what does the Bible say about rape",
+        "the story of Dinah and rape in Genesis 34",
+        "I was beaten at chess",
+        "he was beaten in the race",
+        "I was harassed by doubts",
+        "my faith was assaulted by doubts",
+    ],
+)
+def test_scripture_and_everyday_uses_of_abuse_words_are_not_deferred(
+    question: str,
+) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "pass"
+
+
+@pytest.mark.parametrize(
+    "question",
+    ["I was abused", "I was sexually abused", "my uncle abused me as a child"],
+)
+def test_first_person_abuse_disclosures_are_still_deferred(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).category == "abuse"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "the word \u03bb\u03cc\u03b3\u03bf\u03c2 in John 1",
+        "Jesus said \u1f00\u03b3\u03ac\u03c0\u03b7",
+        "\u03c0 in the Bible",
+        "\u00b5 symbol",
+        "\u2126 resistance",
+        "the Hebrew \u05e9\u05dc\u05d5\u05dd means peace",
+    ],
+)
+def test_a_foreign_word_inside_an_english_question_is_not_refused(text: str) -> None:
+    # Act / Assert — a religious-study question quotes Greek, Hebrew and Arabic terms
+    assert safety_router.is_unsupported_script(text) is False
+
+
+def test_a_question_mostly_in_another_script_is_refused() -> None:
+    # Act / Assert
+    assert (
+        safety_router.is_unsupported_script("\u0928\u092e\u0938\u094d\u0924\u0947 what")
+        is True
+    )
+    assert safety_router.is_unsupported_script("\u0645\u0631\u062d\u0628\u0627") is True
+
+
+def test_normalised_text_is_bounded_even_when_nfkc_expands_it_hugely() -> None:
+    # Arrange — U+FDFA becomes 18 characters; 1000 of them must not cost 18,000
+    text = "\ufdfa" * 1000
+
+    # Act
+    normalised = normalise_text(text)
+
+    # Assert
+    assert len(normalised) <= 10 * len(text) + 64
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I hope he takes me to the game tomorrow",
+        "I ask that the Lord take me as I am",
+        "I pray that God will take me to church on time",
+        "I want God to take me as his servant",
+        "the prophet was ready to go to paradise",
+        "the martyrs were ready to die for heaven",
+        "we want to end it on a good note",
+        "I am thinking of ending it with a prayer",
+        "I'm going to jump from topic to topic",
+        "I'm cutting again the onions",
+        "the meaningless ritual, I want out of this religion",
+        "I walk 3 kms to the mosque",
+        "Dr. K. M. S. Rahman wrote on Sufism",
+    ],
+)
+def test_devotional_and_everyday_phrasings_do_not_route_to_crisis(
+    question: str,
+) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "pass"
+
+
+@pytest.mark.parametrize(
+    "question",
+    [
+        "I pray every night that God takes me",
+        "I want God to take me away",
+        "I want to end it",
+        "I'm going to jump",
+        "I have been cutting again",
+        "everything is pointless and I want out",
+        "I want to kms",
+    ],
+)
+def test_the_tightened_rules_still_catch_the_real_phrasings(question: str) -> None:
+    # Act / Assert
+    assert _decision(question).kind == "crisis"
+
+
+def test_fire_me_up_is_not_a_legal_question() -> None:
+    # Act / Assert
+    assert _decision("my boss will fire me up for the project").kind == "pass"
+    assert _decision("my boss will fire me for praying at work").kind == "deferral"

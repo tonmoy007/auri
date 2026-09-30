@@ -30,7 +30,7 @@ MAX_RAW_CHARS: Final = 32 * 1024
 MAX_REFLECTION_QUOTE_WORDS: Final = 6
 # A quoted span in a point longer than this must be in the cited source (V3).
 MAX_FREE_QUOTE_WORDS: Final = 4
-MIN_QUOTE_CHARS: Final = 12
+MIN_QUOTE_CHARS: Final = 8
 LEAK_RUN_WORDS: Final = 8
 _MAX_LABEL_PART: Final = 80
 _BANNED_OUTPUT_FILE: Final = "banned_output_en.txt"
@@ -282,8 +282,8 @@ def _verify_quotes(
 _QUOTED_SPAN: Final = re.compile(
     r'"([^"]*)"|\u201c([^\u201d]*)\u201d|\u00ab([^\u00bb]*)\u00bb'
     r"|\u201e([^\u201c\u201d]*)[\u201c\u201d]|\u300c([^\u300d]*)\u300d"
-    r"|\u300e([^\u300f]*)\u300f|\u2018([^\u2019]*)\u2019"
-    r"|(?<!\w)'([^']+)'(?!\w)"
+    r"|\u300e([^\u300f]*)\u300f|(?<!\w)\u2018(.+?)\u2019(?!\w)"
+    r"|(?<!\w)'(.+?)'(?!\w)"
 )
 
 
@@ -319,7 +319,7 @@ _BOOKS: Final = (
     r"dhammapada|sutta|sutra|analects|mandala|canto|hymn|gita|"
     r"rig ?veda|atharva ?veda|sama ?veda|yajur ?veda|"
     r"qur'?an|quran|koran|hebrews|galatians|ephesians|philippians|revelation|"
-    r"ecclesiastes|ezekiel|daniel|dhp|ang|tao te ching|upanishad|purana"
+    r"ecclesiastes|ezekiel|dhp|tao te ching|upanishad|purana"
 )
 # Words that can stand before a book name in a sentence ("In Yasna 30.3") and are not
 # part of the reference.
@@ -367,7 +367,9 @@ _LEADING_WORDS: Final = frozenset(
 )
 _REFERENCE_PATTERNS: Final = (
     re.compile(
-        rf"\b(?:{_BOOKS})\s+(?:\d{{1,3}}|(?-i:[IVXLC]{{2,6}})\b)(?:[:.]\d{{1,3}}){{0,3}}",
+        rf"\b(?:{_BOOKS})\s+(?:\d{{1,3}}|(?-i:[IVXLC]{{2,6}})\b)(?:[:.]\d{{1,3}}){{0,3}}"
+        r"(?!\s*(?:times?|lines?|days?|years?|verses?|words?|people|hours?|minutes?|"
+        r"pages?|chapters?|points?|ways?|steps?|parts?|stanzas?|sections?)\b)",
         re.IGNORECASE,
     ),
     re.compile(r"\b[Ss]urah\s+(?:[Aa]l-)?[A-Z][a-z]+"),
@@ -439,8 +441,16 @@ _CONTACT_PATTERNS: Final = (
         re.IGNORECASE,
     ),
 )
-_PHONE_CANDIDATE: Final = re.compile(r"\+?\d[\d\s().-]{6,}\d")
-_MIN_PHONE_DIGITS: Final = 9
+# Phone shapes: a run of nine or more digits (01712345678), a number led by +, three
+# groups split by spaces, hyphens or brackets (0171 234 5678, (555) 010-0199), and two
+# groups of a long national number (01712 345678). Verse lists (30.3-11 31.2-4) and
+# years (1054 1517 1545) have none of these shapes.
+_PHONE_SHAPES: Final = (
+    re.compile(r"(?<![\d.:])\d{9,}(?!\d)"),
+    re.compile(r"\+\d[\d\s().-]{7,}\d"),
+    re.compile(r"(?<![\d.:])(?<!\d )(?<!\d-)\(?\d{2,4}\)?[\s-]\d{3}[\s-]\d{3,5}(?!\d)"),
+    re.compile(r"(?<![\d.:])\d{4,5}[\s-]\d{6,7}(?!\d)"),
+)
 
 
 def _has_contact(text: str) -> bool:
@@ -452,10 +462,7 @@ def _has_contact(text: str) -> bool:
     composed = unicodedata.normalize("NFKC", text)
     if any(pattern.search(composed) for pattern in _CONTACT_PATTERNS):
         return True
-    return any(
-        sum(ch.isdigit() for ch in match.group(0)) >= _MIN_PHONE_DIGITS
-        for match in _PHONE_CANDIDATE.finditer(composed)
-    )
+    return any(shape.search(composed) for shape in _PHONE_SHAPES)
 
 
 def _check_banned(draft: PriestDraft) -> bool:

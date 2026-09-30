@@ -1,4 +1,4 @@
-# version: 2
+# version: 3
 # Disclosures of abuse or harassment; the Guide defers and offers contacts.
 # Normalised text; "re:" lines are regular expressions.
 sexual harassment
@@ -22,8 +22,6 @@ re:(touch|touched|touching|grabbed|grabbing) me (without|against)
 re:\b(abused|harassed|threatened|slapped|kicked|choked|stalked|groped|assaulted|molested|raped|beaten|punched|strangled|blackmailed) me\b
 re:\bsexually (abused|assaulted|harassed|molested|touched)\b
 sexual abuse
-rape
-raping
-re:\b(i )?was (abused|raped|assaulted|molested|beaten|harassed|stalked|groped)\b
+re:\bi (was|got|have been|had been) (abused|raped|assaulted|molested|beaten|harassed|stalked|groped)\b(?! (at|in|on) )(?! by (doubts?|fear|worry|thoughts|guilt|anxiety|temptation))
 re:\b(touched|touching|grabbed|groping|groped) me (inappropriately|sexually|against my will)\b
 re:\bsending me (sexual|explicit|naked|nude|dirty)\b

@@ -508,7 +508,12 @@ def _tradition_keys(value: object) -> list[str]:
             continue
         words = _TRADITION_WORD.findall(text)
         keys.append("-".join(re.findall(r"[a-z]+", text)))
-        keys.extend(w for w in words if not w.startswith(_NEGATING_PREFIXES))
+        for word in words:
+            if word.startswith(_NEGATING_PREFIXES):
+                continue
+            keys.append(word)
+            # "Hindu-Buddhist" names both; each part is a key of its own.
+            keys.extend(part for part in word.split("-") if "-" in word and part)
     return keys
 
 

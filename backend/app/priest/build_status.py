@@ -225,8 +225,14 @@ def acquire_lock(
             return False
         if fd < 0:
             continue
-        os.ftruncate(fd, 0)
-        os.write(fd, f"{pid} {_LOCK_MARK}\n".encode())
+        try:
+            os.ftruncate(fd, 0)
+            os.write(fd, f"{pid} {_LOCK_MARK}\n".encode())
+        except OSError:
+            # A full disk or an I/O error: drop the descriptor, and with it the kernel
+            # lock, rather than keep a lock nothing records and nothing can release.
+            os.close(fd)
+            raise
         with _held_guard:
             _held[str(path)] = (fd, pid)
         return True

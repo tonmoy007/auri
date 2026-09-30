@@ -11,6 +11,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from app.priest import build_status
 from app.priest.build_status import BuildState, BuildStatus
 
@@ -224,3 +225,22 @@ def test_a_running_builder_whose_process_died_is_reported_as_failed(
 
     # Assert
     assert status.state is BuildState.failed and status.error_code == "builder_died"
+
+
+def test_a_failed_write_to_the_lock_file_does_not_leave_the_lock_held(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Arrange — a full disk: the descriptor and the kernel lock must not be kept
+    real_write = os.write
+
+    def failing_write(fd: int, data: bytes) -> int:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(build_status.os, "write", failing_write)
+
+    # Act / Assert
+    with pytest.raises(OSError):
+        build_status.acquire_lock(tmp_path, pid=os.getpid())
+    monkeypatch.setattr(build_status.os, "write", real_write)
+    assert build_status.acquire_lock(tmp_path, pid=os.getpid()) is True
+    build_status.release_lock(tmp_path, pid=os.getpid())

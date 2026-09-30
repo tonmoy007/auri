@@ -1352,3 +1352,59 @@ async def test_a_local_address_passes_the_embedder_check(
     with pytest.raises(PriestIndexError):
         await retriever.retrieve("a question", None)
     assert made == [("http://localhost:11434", "bge-large")]
+
+
+# ── regressions found by the verification review ─────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_refusal_is_counted_as_busy_with_its_retry_hint() -> None:
+    # Arrange
+    service = make_service(retriever=FakeRetriever(hang=True), deadline_seconds=0.1)
+
+    # Act
+    with pytest.raises(PriestUnavailableError) as raised:
+        await ask(service)
+
+    # Assert
+    assert raised.value.retry_after == priest_service.BUSY_RETRY_AFTER
+    assert metrics.snapshot().outcomes == {"busy": 1}
+
+
+@pytest.mark.asyncio
+async def test_the_active_index_is_loaded_off_the_event_loop(
+    set_setting: Callable[[str, object], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange — a reload parses megabytes; on the loop it would stall every request
+    from app.exceptions import PriestIndexError
+
+    threads: list[str] = []
+
+    class SpyActive:
+        def get(self) -> object:
+            threads.append(threading.current_thread().name)
+            raise PriestIndexError("no index")
+
+    class FakeEmbedder:
+        def __init__(self, base_url: str, model: str) -> None:
+            pass
+
+        async def model_info(self) -> None:
+            raise PriestIndexError("stop here")
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(priest_service, "OllamaEmbedder", FakeEmbedder)
+    set_setting("OLLAMA_BASE_URL", "http://localhost:11434")
+    retriever = priest_service.LiveRetriever(SpyActive())  # type: ignore[arg-type]
+
+    # Act
+    with pytest.raises(PriestIndexError):
+        await retriever.retrieve("a question", None)
+
+    # Assert
+    assert threads
+    assert threading.main_thread().name not in threads

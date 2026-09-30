@@ -773,3 +773,42 @@ def test_cleaning_is_deterministic_and_the_result_is_frozen() -> None:
     assert first == second
     with pytest.raises(dataclasses.FrozenInstanceError):
         first.title = "changed"  # type: ignore[misc]
+
+
+# ── regressions found by the verification review ─────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Hindu-Buddhist", {"hinduism", "buddhism"}),
+        ("Sikh-Hindu", {"sikhism", "hinduism"}),
+        ("Judeo-Christian", {"christianity"}),
+        ("Mahayana-Buddhism", {"buddhism"}),
+        ("Sufi-Islamic", {"islam"}),
+        ("Zoroastrian-Parsi", {"zoroastrianism"}),
+    ],
+)
+def test_a_hyphenated_tradition_value_maps_each_of_its_parts(
+    value: str, expected: set[str]
+) -> None:
+    # Arrange
+    from app.priest.vault_cleaner import _tradition_keys
+    from app.priest.vault_rules import traditions_for
+
+    # Act
+    found = set(traditions_for(_tradition_keys(value), "notes/x.md"))
+
+    # Assert
+    assert expected <= found
+
+
+def test_a_negated_hyphenated_part_is_still_ignored() -> None:
+    # Arrange
+    from app.priest.vault_cleaner import _tradition_keys
+    from app.priest.vault_rules import traditions_for
+
+    # Act / Assert — "Pre-Islamic" says what the note is not
+    assert "islam" not in set(
+        traditions_for(_tradition_keys("Pre-Islamic Arabian"), "notes/x.md")
+    )

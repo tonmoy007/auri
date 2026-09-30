@@ -870,3 +870,113 @@ def test_an_empty_point_is_not_an_answer() -> None:
 
     # Assert
     assert outcome.ok is False
+
+
+# ── regressions found by the verification review ─────────────────────────────
+
+
+def test_a_curly_quotation_with_a_typographic_apostrophe_inside_is_one_span() -> None:
+    # Arrange — the apostrophe in "I\u2019m" must not end the quotation
+    text = "It says \u2018I\u2019m the way, the truth and the life, said nobody ever\u2019 here."
+
+    # Act
+    outcome = _check(_point(text))
+
+    # Assert — the invented long quotation is caught, not cut down to "I"
+    assert "V3" in outcome.codes
+
+
+def test_an_apostrophe_inside_a_word_does_not_end_a_straight_quotation() -> None:
+    # Act
+    from app.priest.answer_validator import quoted_spans
+
+    spans = quoted_spans("He said 'it's fine and we can go' today")
+
+    # Assert
+    assert spans == ["it's fine and we can go"]
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Yasna 30.3-11 (31.2-4) describes two spirits.",
+        "See Psalm 23.1-6 24.1-10 for shepherd imagery.",
+        "Yasna 28.1 28.2 28.3 28.4 28.5 are the opening verses.",
+        "The years 1054 1517 1545 mark schisms.",
+        "Verses 1 2 3 4 5 6 7 8 9 follow.",
+        "About 1 000 000 000 grains were counted.",
+    ],
+)
+def test_runs_of_verse_numbers_and_years_are_not_phone_numbers(claim: str) -> None:
+    # Act
+    outcome = _check(_draft(reflection=claim))
+
+    # Assert
+    assert "V6" not in outcome.codes
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Call 01712345678 today.",
+        "Call +8801712345678 today.",
+        "Ring 0171 234 5678 now.",
+        "Ring (555) 010-0199 now.",
+        "Ring 01712 345678 now.",
+    ],
+)
+def test_real_phone_numbers_are_still_caught(claim: str) -> None:
+    # Act
+    outcome = _check(_draft(reflection=claim))
+
+    # Assert
+    assert "V6" in outcome.codes
+
+
+def test_a_short_quote_is_accepted_when_it_is_really_twelve_characters() -> None:
+    # Arrange — "God is love." is 12 raw characters and 11 once folded
+    chunk = _chunk(
+        "c9",
+        "Synthetic Love",
+        "concept",
+        "Synthetic Love \u203a A\nThe note says God is love. Always.",
+    )
+    sources = [SourceChunk("S1", chunk)]
+    raw = _draft(quotes=[{"text": "God is love.", "source": "S1"}])
+
+    # Act
+    outcome = _check_with(sources, raw)
+
+    # Assert
+    assert outcome.ok is True
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "Daniel 12 in the lions den is a story.",
+        "The gita 2 times is repeated in the note.",
+    ],
+)
+def test_names_and_counts_after_a_book_word_are_not_references(claim: str) -> None:
+    # Act
+    outcome = _check(_draft(reflection=claim))
+
+    # Assert
+    assert "V4" not in outcome.codes and "V5" not in outcome.codes
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "In your tradition, pride is sinful according to S1.",
+        "The notes say theyre sinful acts in the story.",
+        "The shed where they burn in hell imagery appears.",
+    ],
+)
+def test_descriptive_sentences_are_not_verdicts_on_people(claim: str) -> None:
+    # Act
+    outcome = _check(_draft(reflection=claim))
+
+    # Assert
+    assert "V6" not in outcome.codes

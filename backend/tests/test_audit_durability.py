@@ -423,16 +423,9 @@ SCENARIOS: dict[str, Scenario] = {
     "priest-activate": Scenario(
         UserRole.admin, ("priest.activate", None), _priest_activate
     ),
-    # set_config commits the setting first, then the audit row (like themes)
-    "config-set": Scenario(
-        UserRole.admin, ("config.write", None), _config_set, audit_is_first_commit=False
-    ),
-    "config-reset": Scenario(
-        UserRole.admin,
-        ("config.write", None),
-        _config_reset,
-        audit_is_first_commit=False,
-    ),
+    # the setting and its audit row are staged together and committed once
+    "config-set": Scenario(UserRole.admin, ("config.write", None), _config_set),
+    "config-reset": Scenario(UserRole.admin, ("config.write", None), _config_reset),
 }
 
 
@@ -757,3 +750,36 @@ async def test_nothing_touches_the_database_after_the_audit_commit(
     assert log.calls.count("commit:audit") == 1
     after_audit = log.calls[log.calls.index("commit:audit") + 1 :]
     assert after_audit == []
+
+
+@pytest.mark.asyncio
+async def test_a_config_write_whose_audit_row_fails_is_not_left_applied(
+    durable_client: AsyncClient,
+    db_engine: AsyncEngine,
+    make_staff: StaffFactory,
+) -> None:
+    # Arrange — the setting and its audit row are one commit: if the audit cannot be
+    # written, the change (the kill switch, an address) must not be live unaudited
+    from app.models.app_setting import AppSetting
+    from app.services import settings_service
+
+    _, headers = await make_staff(UserRole.admin)
+    settings_service._cache.pop("PRIEST_TOP_K", None)
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.admin.audit_service.record",
+            side_effect=RuntimeError("audit store unavailable"),
+        ),
+        pytest.raises(RuntimeError, match="audit store unavailable"),
+    ):
+        await durable_client.put(
+            "/api/v1/admin/config",
+            json={"key": "PRIEST_TOP_K", "value": "9"},
+            headers=headers,
+        )
+
+    # Assert
+    assert await _fresh(db_engine, select(AppSetting.key)) == []
+    assert "PRIEST_TOP_K" not in settings_service._cache
