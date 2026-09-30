@@ -1,0 +1,39 @@
+# version: 1
+# Patterns the Guide's own words (points and reflection) must never contain (V6).
+# Verdicts on people, proselytising, medical or legal directives, minimising
+# distress, and agreement next to judgement. Matched against the normalised text
+# (casefolded, punctuation removed, apostrophes dropped). Person-directed on
+# purpose: a point that describes what a tradition teaches may name hell.
+
+# verdicts on people
+re:\b(you|he|she|they|your \w+|my \w+|someone|anyone|people who \w+) (is|are|was|were|seem|seems|must be) (a |an |such a )?(sinners?|sinful|evil|wicked|damned|doomed|bad (person|muslim|christian|jew|hindu|buddhist|sikh|believer))
+re:\b(you|he|she|they|him|her|your \w+|my \w+|(anyone|someone|everyone) who \w+( \w+)?) (will|would|shall|is going to|are going to|going to) (surely |certainly )?(go to|burn in|end up in|rot in|suffer in) hell
+re:\bdeserv(e|es) (to )?(suffer|burn|die|rot|be punished|punishment|hell)
+re:\b(god|allah) (will|is going to) punish (you|him|her|them)
+# proselytising
+re:\byou (should|must|need to|ought to|have to|had better) (convert|believe|embrace|accept|follow|join|turn to|return to|submit to)
+re:\bthe (one |only )?true (religion|faith|path|way|god)
+only path to salvation
+only way to be saved
+accept jesus
+accept islam
+join our faith
+# medical or legal directives
+re:\bstop taking (your |the |any |all )?(medication|medications|medicine|meds|pills|antidepressants|treatment)
+re:\b(dont|do not) (take|need) (your |the )?(medication|medications|meds|pills|medicine|a doctor|therapy|treatment)
+re:\binstead of (seeing )?(a |the |your )?(doctor|medication|medicine|treatment|therapy|psychiatrist)
+re:\byou (should|must|need to|ought to|have to) (sue|file a lawsuit|press charges|take legal action|quit|resign|divorce|leave your (job|husband|wife|partner|family))
+# minimising distress and toxic positivity
+re:\b(just )?get over it
+others have it worse
+re:\bits not that bad
+re:\b(you are|youre) (overreacting|too sensitive|being dramatic)
+cheer up
+man up
+stop being sad
+everything happens for a reason
+count your blessings
+re:\bat least you\b
+# agreement next to judgement
+re:\b(you are right|youre right|you are absolutely right|i agree|i completely agree|thats right|thats true|exactly right) .{0,60}(deserv|sinner|evil|wicked|damned|punish|worthless|hate)
+re:(deserv|sinner|evil|wicked|damned|punish|worthless|hate) .{0,60}\b(you are right|youre right|i agree|thats right)
