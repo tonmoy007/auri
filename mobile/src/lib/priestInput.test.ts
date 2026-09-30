@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canSubmitQuestion,
   classifyRecorderError,
+  guideEntryAccessibilityLabel,
   guideEntryLabel,
   introAckValue,
   isIntroAcknowledged,
@@ -159,12 +160,22 @@ describe('entry point', () => {
     expect(shown).toBe(false);
   });
 
-  it('is labelled from the persona name', () => {
+  it('is labelled "Seek guidance" whatever the persona is called', () => {
     // Arrange / Act
-    const label = guideEntryLabel('Sage');
+    const label = guideEntryLabel();
+
+    // Assert — the name is for the screen reader and the conversation, not the button
+    expect(label).toBe('Seek guidance');
+  });
+
+  it('names the persona in the spoken label', () => {
+    // Arrange / Act
+    const spoken = guideEntryAccessibilityLabel('Sage');
 
     // Assert
-    expect(label).toBe('Ask Sage');
+    expect(spoken).toContain('Seek guidance');
+    expect(spoken).toContain('Sage');
+    expect(spoken).toContain('AI');
   });
 });
 

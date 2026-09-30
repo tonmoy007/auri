@@ -17,7 +17,11 @@ import { ThreeCanvas } from '../components/ThreeCanvas';
 import { useHaptics } from '../hooks/useHaptics';
 import { usePriestStatus } from '../hooks/usePriestStatus';
 import { hasAcknowledgedPriestIntro, useSettings } from '../hooks/useSettings';
-import { guideEntryLabel, shouldShowGuideEntry } from '../lib/priestInput';
+import {
+  guideEntryAccessibilityLabel,
+  guideEntryLabel,
+  shouldShowGuideEntry,
+} from '../lib/priestInput';
 
 const { width, height } = Dimensions.get('window');
 
@@ -147,9 +151,9 @@ export default function HomeScreen(): React.JSX.Element {
               onPress={() => void handleOpenGuide()}
               activeOpacity={0.8}
               accessibilityRole="button"
-              accessibilityLabel={`${guideEntryLabel(guideStatus.persona_name)}, an AI guide drawing on a study library`}
+              accessibilityLabel={guideEntryAccessibilityLabel(guideStatus.persona_name)}
             >
-              <Text style={styles.guideButtonText}>{guideEntryLabel(guideStatus.persona_name)}</Text>
+              <Text style={styles.guideButtonText}>{guideEntryLabel()}</Text>
             </TouchableOpacity>
           ) : null}
         </View>

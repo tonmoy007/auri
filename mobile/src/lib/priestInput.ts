@@ -104,8 +104,14 @@ export function shouldShowGuideEntry(status: PriestStatus | null, showGuideMode:
   return status !== null && status.enabled && showGuideMode;
 }
 
-export function guideEntryLabel(personaName: string): string {
-  return `Ask ${personaName}`;
+/** The entry button's text. The persona's name appears inside the conversation instead. */
+export function guideEntryLabel(): string {
+  return 'Seek guidance';
+}
+
+/** What a screen reader says for the entry button: the label, the persona and what it is. */
+export function guideEntryAccessibilityLabel(personaName: string): string {
+  return `${guideEntryLabel()} from ${personaName}, an AI guide drawing on a study library`;
 }
 
 /** SecureStore key holding the last disclaimer version the user accepted. */
