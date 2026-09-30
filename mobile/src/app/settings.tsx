@@ -199,8 +199,8 @@ export default function SettingsScreen(): React.JSX.Element {
             {identityRef ? `${identityRef}…` : 'Loading…'}
           </Text>
           <Text style={styles.identityHint}>
-            No name, email, or device info is ever stored — this reference is
-            derived locally and never leaves your device in this form.
+            No name or email is asked for. A one-way code made on this device is kept
+            with each confession so you can see your own history and replies.
           </Text>
         </View>
 

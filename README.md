@@ -2,17 +2,17 @@
 
 **Whisper in the ear.** An anonymous AI-driven confession booth for internal teams.
 
-Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you forward anonymously or delete. Your voice is masked. Your identity never stored.
+Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you forward anonymously or delete. Your voice is masked and no name is asked for.
 
 ## ✨ Features
 
 - **Immersive 3D Booth** — Interactive candlelit confessional built with React Three Fiber
 - **AI STT/TTS Agent** — Whisper transcription + Edge-TTS voice response
-- **Voice Modulation** — 5 voice masks (Warm, Robotic, Ethereal, Deep, Random) via SoX + RVC
+- **Voice Modulation** — 5 voice masks (Warm, Robotic, Ethereal, Deep, Random) via SoX
 - **Anonymity Modes** — Fully blind or "someone in your team" context — your choice at send-time
-- **Telegram Delivery** — Confessions delivered via anonymous Telegram bot DM
+- **Telegram Delivery** — Confessions delivered posted to the chosen department's Telegram chat
 - **Moderation** — AI-flagged content queued to designated moderator for review
-- **Forward or Delete** — Send to department/person or extinguish forever
+- **Forward or Delete** — Send to a department, or delete it
 - **3 Environments** — Classic booth, forest glade, rooftop at night
 
 ## 🏗️ Architecture
@@ -24,9 +24,9 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 | Backend | FastAPI + WebSocket |
 | STT | OpenAI Whisper / faster-whisper |
 | TTS | Edge-TTS |
-| Voice Mod | SoX pitch/formant + RVC AI voice conversion |
-| AI Agent | GPT-4o / Claude |
-| DB | PostgreSQL + pgcrypto |
+| Voice Mod | SoX pitch/formant |
+| AI Agent | Local Ollama first, with Gemini or OpenAI as configurable fallbacks (Claude optional) |
+| DB | PostgreSQL |
 | Delivery | Telegram Bot (python-telegram-bot) |
 
 ## 📱 The Flow
@@ -34,15 +34,15 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 ```
 [Enter Auri] → Pick Voice Mask → AI greets you
     ↓
-[Speak] → Voice modulated in real-time → STT transcribes
+[Speak] → STT transcribes, and the recording is voice-masked
     ↓
-[AI processes] → Strips PII, categorizes, summarizes
+[AI processes] → Replaces recognised details, categorizes, summarizes
     ↓
 [Review] → Transcription | AI Summary | Voice-masked Audio
     ↓
 [Choose] → Fully blind / "Someone in your team"
     ↓
-[Act] → Send anonymously | Forward to person | Delete
+[Act] → Send | Forward to a department | Delete
 ```
 
 ## 🗺️ Roadmap
@@ -57,12 +57,12 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 
 ## 🛡️ Privacy
 
-- No user accounts — anonymous device tokens only
-- Audio deleted from server after transcription
-- All PII stripped by LLM before storage
-- Original voice never stored — only the masked version
-- Encrypted at rest with pgcrypto
-- Blind relay — recipient never knows who sent it
+- No user accounts and no name asked for — a one-way code made on the device is kept with each confession, so someone with database access could tell which confessions came from one phone
+- Audio is processed in temporary files on the server and deleted afterwards (if a speech fallback provider is configured, the audio may be sent to it); the phone deletes its own copies (the unmasked recording once masking succeeds, the rest when a confession is sent or deleted, or at the next app start)
+- Recognised personal details are replaced before the text is stored (by the model, or by simple pattern matching if it fails); it can miss some, so what a confession says can still point to its author
+- Nothing is encrypted at the column level; protect the database and its backups accordingly
+- The recipient receives no sender name or device details, but sees a summary and up to the first 1,000 characters of the transcript; HR sees the summary, category and exact send time of every confession that is not deleted, and staff can read the full text of held and forwarded ones
+- The dashboard's Privacy tab states what is kept, for how long, and what is not protected, from the live configuration
 
 ## 🗂️ Project Structure
 

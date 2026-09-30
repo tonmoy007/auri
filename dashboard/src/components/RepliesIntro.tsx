@@ -5,7 +5,7 @@ const REPLY_DISCLOSURES: string[] = [
   'Your account is recorded against every save in the audit trail, which admins can review.',
   "They aren't notified and you won't know whether they read it. It appears only when they open their history on the device they used.",
   'You can edit a saved reply but not withdraw it. If you edit it, they see that it was edited.',
-  'Forwarded confessions are removed automatically soon after delivery (by default within a day), and the reply goes with them.',
+  'Forwarded confessions are emptied by a scheduled job once the retention window has passed (24 hours by default, counted from their last change, so the exact time depends on when the job runs). The reply and the code needed to show it stay for up to 30 days by default so the confessor can still read it. A reply to a confession that has not been forwarded stays until it is.',
 ]
 
 /** What HR must know before writing to someone who spoke up. */

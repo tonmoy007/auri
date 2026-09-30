@@ -5,7 +5,7 @@
 -- first time (placed in /docker-entrypoint-initdb.d/).
 -- ============================================================================
 
--- Enable pgcrypto extension for encrypted-at-rest storage
+-- pgcrypto is installed but no column is encrypted with it today
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Create the application database (idempotent — only created if missing)

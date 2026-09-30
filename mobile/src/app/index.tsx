@@ -125,7 +125,7 @@ export default function HomeScreen(): React.JSX.Element {
         </TouchableOpacity>
 
         <Text style={styles.disclaimer}>
-          Your voice is anonymized. No identity is stored.
+          Your voice is masked. No name is asked for.
         </Text>
       </View>
 

@@ -81,7 +81,7 @@ services:
       - auri-net
 
   # ---------------------------------------------------------------------------
-  # DB — PostgreSQL with pgcrypto
+  # DB — PostgreSQL (pgcrypto installed; no column is encrypted with it)
   # ---------------------------------------------------------------------------
   db:
     image: postgres:16-alpine

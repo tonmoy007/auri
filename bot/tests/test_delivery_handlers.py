@@ -288,3 +288,35 @@ async def test_poll_delivery_queue_still_skips_an_unchanged_repeat_poll(
 
     # Assert
     mock_context.bot.send_message.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_the_delivery_message_does_not_claim_the_sender_is_never_stored(
+    mock_context: MagicMock, delivery_settings: BotSettings
+) -> None:
+    # Arrange — the backend does store a device code, and the words can point to
+    # someone, so the footer may only say what is true of *this message*
+    mock_context.bot_data["settings"] = delivery_settings
+    mock_context.bot.send_message = AsyncMock()
+    queue_item = {
+        "id": "abc-123",
+        "category": "work",
+        "ai_summary": "A summary",
+        "transcript": "the full transcript",
+        "recipient_dept": "HR",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/v1/delivery/queue":
+            return httpx.Response(200, json=[queue_item])
+        return httpx.Response(200, json={**queue_item, "status": "forwarded"})
+
+    # Act
+    with patch("bot.delivery_handlers.httpx.AsyncClient", _mock_async_client(handler)):
+        await poll_delivery_queue(mock_context)
+
+    # Assert
+    text = mock_context.bot.send_message.call_args.kwargs["text"]
+    assert "never stored" not in text.lower()
+    assert "no sender name or device details are attached" in text
+    assert "can still point to someone" in text

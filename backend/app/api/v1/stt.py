@@ -85,7 +85,9 @@ async def transcribe_audio(
 
     The uploaded file is written to a temp path only for the duration of
     the Whisper call and deleted immediately after — per the Data Privacy
-    Design in the project plan, audio is never retained server-side.
+    Design in the project plan, audio is never retained server-side. If the
+    local step fails and an OpenAI key is configured, that provider receives the
+    audio instead.
     """
     _check_stt_rate_limit(x_device_token_hash, clock())
 

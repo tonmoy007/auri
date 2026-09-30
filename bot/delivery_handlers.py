@@ -36,7 +36,9 @@ def _format_delivery_message(item: dict) -> str:
     """Render a forwarded confession as a recipient-facing Telegram message.
 
     Only de-identified fields are ever included — no device token, no raw
-    audio, nothing that could re-identify the sender.
+    audio, no name. The footer says only that: it must not promise the sender
+    is unidentifiable, because the backend keeps a device code and a transcript
+    can point to its speaker on its own.
     """
     category = item.get("category") or "uncategorized"
     summary = item.get("ai_summary") or "(no summary generated)"
@@ -49,7 +51,9 @@ def _format_delivery_message(item: dict) -> str:
         f"*Category:* {category}\n"
         f"*Summary:* {summary}\n\n"
         f"*Transcript:*\n{transcript}\n\n"
-        "_The sender's identity is never stored or shared._"
+        "_Sent anonymously: no sender name or device details are attached. "
+        "The words themselves can still point to someone, so please handle "
+        "them with care._"
     )
 
 

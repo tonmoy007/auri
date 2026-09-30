@@ -66,8 +66,9 @@ export function AuditPanel() {
       <div>
         <h3 className="font-medium text-card-foreground">Audit trail</h3>
         <p className="text-sm text-muted-foreground">
-          Append-only. Every staff read of confession content is recorded here and can never be
-          edited or deleted — this is the evidence behind the anonymity promise.
+          Append-only: the app has no way to edit or delete a row. Staff reads of confession content
+          through this dashboard are recorded here; moderation from Telegram and reading the
+          department chats are not.
         </p>
       </div>
 

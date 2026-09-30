@@ -19,7 +19,8 @@ export function ThemesPanel() {
       <CardHeader>
         <CardTitle>Recurring themes</CardTitle>
         <CardDescription>
-          Grouped by the local model from de-identified summaries, never transcripts. A theme
+          Grouped by the configured model from de-identified summaries, never transcripts (the
+          Privacy tab says where that model runs). A theme
           with too few confessions is hidden along with its name, so a small group cannot be
           picked out. The digest you download is exactly what is shown here.
         </CardDescription>
@@ -33,14 +34,14 @@ export function ThemesPanel() {
         />
         {state.status === 'idle' && (
           <p className="text-sm text-muted-foreground">
-            Choose a period and generate. This asks the local model, so it can take a few
+            Choose a period and generate. This asks the configured model, so it can take a few
             minutes.
           </p>
         )}
         {busy && (
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground">
-              Grouping confessions with the local model…
+              Grouping confessions with the configured model…
             </p>
             <Skeleton className="h-24 w-full" />
           </div>

@@ -33,6 +33,63 @@ async def test_start_replies_with_welcome_and_web_url(
     assert bot_settings.web_url in reply_text
 
 
+# Phrases that promise more than the system gives: a device code is stored, pending
+# and flagged confessions are kept until someone acts, staff read what is held or
+# forwarded, and the words themselves can point to a person.
+OVERCLAIMS = (
+    "never stored",
+    "stays between",
+    "stays anonymous",
+    "remains anonymous",
+    "without knowing who sent",
+    "delete forever",
+    "limited time",
+    "safely delivered",
+    "has been delivered",
+    "strips any identifying",
+    "forward anonymously here",
+    "arrive here automatically",
+    "confirm receipt",
+    "send to a specific person",
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "handler_name", ["start", "help_command", "confess", "forward"]
+)
+async def test_no_command_reply_promises_more_anonymity_than_the_system_gives(
+    handler_name: str, mock_update: MagicMock, mock_context: MagicMock
+) -> None:
+    # Arrange
+    handler = {
+        "start": start,
+        "help_command": help_command,
+        "confess": confess,
+        "forward": forward,
+    }[handler_name]
+
+    # Act
+    await handler(mock_update, mock_context)
+
+    # Assert
+    reply_text = mock_update.effective_message.reply_text.call_args.args[0].lower()
+    assert [phrase for phrase in OVERCLAIMS if phrase in reply_text] == []
+
+
+@pytest.mark.asyncio
+async def test_start_tells_people_that_handlers_can_read_what_is_forwarded(
+    mock_update: MagicMock, mock_context: MagicMock
+) -> None:
+    # Act
+    await start(mock_update, mock_context)
+
+    # Assert
+    reply_text = mock_update.effective_message.reply_text.call_args.args[0].lower()
+    assert "can read" in reply_text
+    assert "point to you" in reply_text
+
+
 @pytest.mark.asyncio
 async def test_start_ignores_update_without_effective_user(
     mock_update: MagicMock, mock_context: MagicMock, caplog: pytest.LogCaptureFixture
@@ -80,31 +137,33 @@ async def test_confess_explains_voice_mask_choice(
 
 
 @pytest.mark.asyncio
-async def test_forward_confirms_delivery(
+async def test_forward_says_nothing_was_sent_from_the_chat(
     mock_update: MagicMock, mock_context: MagicMock
 ) -> None:
-    # Arrange — mock_update/mock_context come from conftest fixtures
+    # Arrange — this command does not forward anything, so it must not say it did
 
     # Act
     await forward(mock_update, mock_context)
 
     # Assert
     reply_text = mock_update.effective_message.reply_text.call_args.args[0]
-    assert "Confession Received" in reply_text
+    assert "Nothing was sent from this chat" in reply_text
+    assert "/start" in reply_text
 
 
 @pytest.mark.asyncio
-async def test_handle_confession_message_confirms_delivery(
+async def test_handle_confession_message_does_not_claim_a_delivery(
     mock_update: MagicMock, mock_context: MagicMock
 ) -> None:
-    # Arrange — mock_update/mock_context come from conftest fixtures
+    # Arrange — a plain message in a chat forwards nothing, so nothing is confirmed
 
     # Act
     await handle_confession_message(mock_update, mock_context)
 
     # Assert
     reply_text = mock_update.effective_message.reply_text.call_args.args[0]
-    assert "Delivery Confirmed" in reply_text
+    assert "nothing was forwarded" in reply_text
+    assert [p for p in OVERCLAIMS if p in reply_text.lower()] == []
 
 
 @pytest.mark.asyncio
