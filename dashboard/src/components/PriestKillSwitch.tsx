@@ -30,7 +30,7 @@ export function PriestKillSwitch({ enabled, disabled, onChange }: PriestKillSwit
         description={
           next
             ? 'People will see the Guide in the app and can ask it questions, answered from the study notes.'
-            : 'The Guide disappears from the app straight away and any open conversation shows it as unavailable.'
+            : 'Questions are refused at once. The app hides the Guide within about a minute, and any open conversation shows it as unavailable.'
         }
         confirmLabel={next ? 'Turn on' : 'Turn off'}
         onConfirm={() => onChange(next)}
