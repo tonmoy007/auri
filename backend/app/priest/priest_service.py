@@ -37,7 +37,13 @@ from app.exceptions import (
     PriestUnavailableError,
 )
 from app.llm.chat_client import ChatClient, ChatMessage, ChatResult, PriestLLMChain
-from app.llm.chat_endpoint import ChatEndpoint, resolve_fallback, resolve_primary
+from app.llm.chat_endpoint import (
+    ChatEndpoint,
+    checked_base,
+    refuse_cloud_model,
+    resolve_fallback,
+    resolve_primary,
+)
 from app.llm.fencing import strip_fence_runs
 from app.llm.prompt_loader import PromptError
 from app.models.confession import ModerationSeverity
@@ -732,7 +738,12 @@ class LiveRetriever:
             await self._embedder.aclose()
             self._embedder = None
         if self._embedder is None:
-            self._embedder = OllamaEmbedder(settings.OLLAMA_BASE_URL, key[0])
+            # The embedder reads the cleaned question, so its address gets the same
+            # checks as the chat servers: not a hosted provider, not plain http to a
+            # public address, not a cloud-hosted model.
+            base, _ = checked_base(settings.OLLAMA_BASE_URL, "OLLAMA_BASE_URL")
+            refuse_cloud_model(key[0])
+            self._embedder = OllamaEmbedder(base, key[0])
         self._retriever = Retriever(
             self._active,
             self._embedder,

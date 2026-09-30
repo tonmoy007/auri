@@ -1275,3 +1275,80 @@ async def test_a_natural_reply_that_echoes_a_worked_example_is_not_a_leak() -> N
     # Assert
     assert response.kind is AnswerKind.answer
     assert response.reflection == reflection
+
+
+# ── the query embedder reads the cleaned question, so its address is checked too ──
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "address",
+    [
+        "https://api.openai.com",
+        "https://openrouter.ai/api",
+        "http://203.0.113.10:11434",
+    ],
+)
+async def test_the_query_embedder_refuses_a_hosted_or_unencrypted_public_address(
+    address: str, set_setting: Callable[[str, object], None], tmp_path: Path
+) -> None:
+    # Arrange
+    from app.exceptions import PriestEndpointError
+    from app.priest.index_store import ActiveIndex
+
+    set_setting("OLLAMA_BASE_URL", address)
+    set_setting("PRIEST_LLM_ALLOW_INSECURE_HTTP", False)
+    retriever = priest_service.LiveRetriever(ActiveIndex(tmp_path))
+
+    # Act / Assert — nothing is sent: the address is refused before an embedder exists
+    with pytest.raises(PriestEndpointError):
+        await retriever.retrieve("a question", None)
+
+
+@pytest.mark.asyncio
+async def test_the_query_embedder_refuses_a_cloud_hosted_model(
+    set_setting: Callable[[str, object], None], tmp_path: Path
+) -> None:
+    # Arrange
+    from app.exceptions import PriestEndpointError
+    from app.priest.index_store import ActiveIndex
+
+    set_setting("OLLAMA_BASE_URL", "http://localhost:11434")
+    set_setting("PRIEST_EMBED_MODEL", "some-embedder-cloud")
+    retriever = priest_service.LiveRetriever(ActiveIndex(tmp_path))
+
+    # Act / Assert
+    with pytest.raises(PriestEndpointError):
+        await retriever.retrieve("a question", None)
+
+
+@pytest.mark.asyncio
+async def test_a_local_address_passes_the_embedder_check(
+    set_setting: Callable[[str, object], None],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Arrange — a fake embedder, so nothing is sent; it records the address it got
+    from app.exceptions import PriestIndexError
+    from app.priest.index_store import ActiveIndex
+
+    made: list[tuple[str, str]] = []
+
+    class FakeEmbedder:
+        def __init__(self, base_url: str, model: str) -> None:
+            made.append((base_url, model))
+
+        async def model_info(self) -> None:
+            raise PriestIndexError("stop here")
+
+        async def aclose(self) -> None:
+            return None
+
+    monkeypatch.setattr(priest_service, "OllamaEmbedder", FakeEmbedder)
+    set_setting("OLLAMA_BASE_URL", "http://localhost:11434/")
+    retriever = priest_service.LiveRetriever(ActiveIndex(tmp_path))
+
+    # Act / Assert
+    with pytest.raises(PriestIndexError):
+        await retriever.retrieve("a question", None)
+    assert made == [("http://localhost:11434", "bge-large")]
