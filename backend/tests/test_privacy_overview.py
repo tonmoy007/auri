@@ -870,3 +870,47 @@ async def test_the_phone_and_device_statements_match_what_the_code_now_does(
     assert "unmasked" in phone
     assert "keeps a copy" not in phone
     assert "rate limit" in limits["db_access"]
+
+
+async def _db_access_statement(
+    api_client: AsyncClient, make_staff: StaffFactory
+) -> str:
+    _, headers = await make_staff(UserRole.hr)
+    limits = {
+        fact["id"]: fact["statement"]
+        for fact in (await _overview(api_client, headers))["limits"]
+    }
+    return limits["db_access"]
+
+
+@pytest.mark.asyncio
+async def test_without_a_secret_the_panel_says_the_phone_code_is_usable_from_the_database(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("DEVICE_HASH_PEPPER", "")
+
+    # Act
+    statement = await _db_access_statement(api_client, make_staff)
+
+    # Assert
+    assert "No server secret is set" in statement
+    assert "could be used to read, forward or withdraw" in statement
+    assert "keyed hash" not in statement
+
+
+@pytest.mark.asyncio
+async def test_with_a_secret_the_panel_says_the_code_is_stored_hashed(
+    api_client: AsyncClient, make_staff: StaffFactory, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("DEVICE_HASH_PEPPER", "p" * 40)
+
+    # Act
+    statement = await _db_access_statement(api_client, make_staff)
+
+    # Assert — it says what still holds, and does not repeat the old warning
+    assert "keyed hash" in statement
+    assert "server's secret" in statement
+    assert "could be used to read, forward or withdraw" not in statement
+    assert "p" * 40 not in statement

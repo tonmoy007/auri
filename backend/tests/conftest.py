@@ -89,6 +89,9 @@ def isolate_optional_endpoints(set_setting: SettingPatcher) -> None:
         ("THEMES_LLM_USE_OPENAI_API_KEY", False),
         ("THEMES_LLM_SELF_HOSTED", False),
         ("THEMES_LLM_ALLOW_INSECURE_HTTP", False),
+        # Off unless a test turns it on: a secret in a developer's .env would
+        # otherwise change what every device-scoped test stores.
+        ("DEVICE_HASH_PEPPER", ""),
     ):
         set_setting(name, value)
 

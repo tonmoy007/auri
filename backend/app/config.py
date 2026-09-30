@@ -18,6 +18,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
+        # A refused value must not be echoed back: the error for a too-short
+        # DEVICE_HASH_PEPPER would otherwise print fragments of it and of its neighbours.
+        hide_input_in_errors=True,
     )
 
     # ── Database ──────────────────────────────────────────────────────────
@@ -54,6 +57,13 @@ class Settings(BaseSettings):
     # overdue once a run is older than this, and states that a confession can
     # therefore outlive RETENTION_HOURS by up to this long.
     RETENTION_EXPECTED_RUN_HOURS: int = Field(default=6, ge=1)
+
+    # ── Device code hardening ─────────────────────────────────────────────
+    # A secret used to store each phone's code as an HMAC instead of as sent, so a
+    # copy of the database cannot be presented as a phone. Empty keeps the old
+    # behaviour (the Privacy panel says so). Losing or changing it strands every
+    # phone's history and every unread HR reply, so keep it with the other secrets.
+    DEVICE_HASH_PEPPER: str = ""
 
     # ── Speech-to-Text ────────────────────────────────────────────────────
     WHISPER_MODEL: str = "base"  # tiny / base / small / medium / large-v3
@@ -139,6 +149,20 @@ class Settings(BaseSettings):
     # Log every SQL statement with its parameters. Off by default, including in
     # development: the parameters are transcripts, summaries and reply text.
     SQL_ECHO: bool = False
+
+    @model_validator(mode="after")
+    def _pepper_is_strong_enough(self) -> Settings:
+        """Refuse a short ``DEVICE_HASH_PEPPER`` instead of quietly using it.
+
+        A guessable secret would leave the codes brute-forceable while the Privacy
+        panel reported them as hardened.
+        """
+        if self.DEVICE_HASH_PEPPER and len(self.DEVICE_HASH_PEPPER) < 32:
+            raise ValueError(
+                "DEVICE_HASH_PEPPER must be at least 32 characters "
+                "(generate one with: openssl rand -hex 32)"
+            )
+        return self
 
     @model_validator(mode="after")
     def _reply_outlives_confession(self) -> Settings:

@@ -27,7 +27,7 @@ from app.config import settings
 from app.exceptions import ThemesEndpointError
 from app.models.retention_run import RetentionRun
 from app.models.user import User, UserRole
-from app.services import insights_service, retention, retention_status
+from app.services import device_identity, insights_service, retention, retention_status
 from app.services.confession_access import MIN_JUSTIFICATION_LENGTH
 from app.services.insights_service import Bucket
 from app.services.settings_service import get_config
@@ -62,6 +62,7 @@ class PrivacySnapshot:
     openai_speech_fallback: bool
     error_tracking: bool
     sql_echo: bool
+    device_codes_hashed: bool
 
 
 @dataclass(frozen=True)
@@ -202,6 +203,7 @@ def build_snapshot() -> PrivacySnapshot:
         openai_speech_fallback=bool(_configured("OPENAI_API_KEY")),
         error_tracking=bool(settings.SENTRY_DSN),
         sql_echo=settings.SQL_ECHO,
+        device_codes_hashed=device_identity.is_hardened(),
     )
 
 
@@ -331,6 +333,31 @@ def _ai_limits(snapshot: PrivacySnapshot) -> list[Fact]:
     return facts
 
 
+def _db_access_statement(snapshot: PrivacySnapshot) -> str:
+    """Say what a copy of the database lets someone do, from how codes are stored."""
+    if snapshot.device_codes_hashed:
+        phone_code = (
+            "Each phone's code is stored as a keyed hash, so the stored value "
+            "cannot be used to read, forward or withdraw its confessions unless "
+            "the server's secret is taken too. Confessions from before the "
+            "secret was set keep the code as the phone sent it until that phone "
+            "next connects or an administrator runs the upgrade."
+        )
+    else:
+        phone_code = (
+            "No server secret is set for phone codes, so the stored code could "
+            "be used to read, forward or withdraw them."
+        )
+    return (
+        "Anyone with direct access to the database can read every stored "
+        "transcript without being recorded in the audit trail, and can see "
+        f"which confessions came from the same phone (though not whose). {phone_code} "
+        "A separate record of when a phone last sent a confession is "
+        "cleared by the scheduled job once the rate limit no longer needs "
+        "it. Database backups are outside this system's control."
+    )
+
+
 def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
     """Limits about who can see content, and where copies live."""
     return [
@@ -355,16 +382,7 @@ def _people_limits(snapshot: PrivacySnapshot) -> list[Fact]:
             "each one with its department. In a small team, that alone can "
             "point to someone.",
         ),
-        Fact(
-            "db_access",
-            "Anyone with direct access to the database can read every stored "
-            "transcript without being recorded in the audit trail, can see "
-            "which confessions came from the same phone (though not whose), "
-            "and could use that phone's code to read, forward or withdraw "
-            "them. A separate record of when a phone last sent a confession is "
-            "cleared by the scheduled job once the rate limit no longer needs "
-            "it. Database backups are outside this system's control.",
-        ),
+        Fact("db_access", _db_access_statement(snapshot)),
         Fact(
             "audit_kept",
             "The audit trail keeps the confession numbers, the written reasons, "

@@ -22,7 +22,7 @@ from app.models.confession import (
     ModerationSeverity,
 )
 from app.models.user import AnonymousUser
-from app.services import department_service
+from app.services import department_service, device_identity
 from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
@@ -195,7 +195,9 @@ def _verify_ownership(confession: Confession, device_token_hash: str) -> None:
     Raises:
         HTTPException: 403 if the hashes do not match.
     """
-    if confession.device_token_hash != device_token_hash:
+    if confession.device_token_hash not in device_identity.lookup_codes(
+        device_token_hash
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this confession",
@@ -370,8 +372,12 @@ async def create_confession(
     """
     now = clock()
 
+    # A phone whose rows predate DEVICE_HASH_PEPPER is moved to the hashed form
+    # first, so its rate limit carries over instead of starting again.
+    await device_identity.upgrade_legacy_rows(session, body.device_token_hash)
+    stored_device_code = device_identity.stored_code(body.device_token_hash)
     stmt = select(AnonymousUser).where(
-        AnonymousUser.device_token_hash == body.device_token_hash
+        AnonymousUser.device_token_hash == stored_device_code
     )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -396,7 +402,7 @@ async def create_confession(
     counselor_response = _safe_counsel(llm_service, deidentified_transcript)
 
     confession = Confession(
-        device_token_hash=body.device_token_hash,
+        device_token_hash=stored_device_code,
         voice_mask=body.voice_mask,
         transcript=deidentified_transcript,
         category=category,
@@ -412,7 +418,7 @@ async def create_confession(
         counselor_response=counselor_response,
     )
     session.add(confession)
-    await _record_submission(session, body.device_token_hash, now)
+    await _record_submission(session, stored_device_code, now)
 
     await session.flush()
     await session.refresh(confession)
@@ -458,10 +464,13 @@ async def list_confessions(
     should not reappear in their history. Requires the
     ``X-Device-Token-Hash`` header identifying the owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     stmt = (
         select(Confession)
         .where(
-            Confession.device_token_hash == x_device_token_hash,
+            Confession.device_token_hash.in_(
+                device_identity.lookup_codes(x_device_token_hash)
+            ),
             Confession.status != ConfessionStatus.deleted,
         )
         .order_by(Confession.created_at.desc())
@@ -485,6 +494,7 @@ async def get_confession(
     Requires the ``X-Device-Token-Hash`` header to match the confession's
     owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
     return confession
@@ -506,6 +516,7 @@ async def delete_confession(
     appear in any forward-facing query. Requires the ``X-Device-Token-Hash``
     header to match the confession's owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
     confession.status = ConfessionStatus.deleted
@@ -528,6 +539,7 @@ async def forward_confession(
     request is rejected with a ``409 Conflict``. Requires the
     ``X-Device-Token-Hash`` header to match the confession's owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
 
