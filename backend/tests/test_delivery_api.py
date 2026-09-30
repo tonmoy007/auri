@@ -22,6 +22,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+pytestmark = pytest.mark.usefixtures("no_model_calls")
+
 DEVICE_HASH = "a" * 32
 DELIVERY_KEY = "test-delivery-secret"
 AUTH_HEADERS = {"X-Delivery-Api-Key": DELIVERY_KEY}

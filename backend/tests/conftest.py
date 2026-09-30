@@ -35,11 +35,76 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import StaticPool
 
+from tests import network_guard
+
 TEST_SESSION_SECRET = "test-session-secret-not-a-real-one"
 TEST_PASSWORD = "correct-horse-battery"
 
 StaffFactory = Callable[..., Awaitable[tuple[User, dict[str, str]]]]
 SettingPatcher = Callable[[str, Any], None]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Register the marker for the rare test that really talks to a model server."""
+    config.addinivalue_line(
+        "markers",
+        "live_llm: talks to a real model server (the vLLM box in the config); "
+        "skipped unless RUN_LIVE_LLM=1 and never run in CI",
+    )
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """Skip live model tests unless they were asked for on purpose."""
+    if network_guard.live_tests_enabled():
+        return
+    skip = pytest.mark.skip(
+        reason=f"live model test: set {network_guard.LIVE_ENV}=1 to run"
+    )
+    for item in items:
+        if "live_llm" in item.keywords:
+            item.add_marker(skip)
+
+
+@pytest.fixture
+def no_model_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every model call fail fast, as if no provider were reachable.
+
+    Tests of the confession flow patch the model steps they care about; the ones they
+    do not (counselling, sentiment) used to walk the real provider chain. Those steps
+    are wrapped in fail-safes that fall back, so failing them keeps behaviour and sends
+    nothing anywhere.
+    """
+    from app.exceptions import ProcessingError
+    from app.services.llm import LLMService
+
+    def _no_model(self: LLMService, prompt: str) -> str:
+        raise ProcessingError("no model is available in tests")
+
+    monkeypatch.setattr(LLMService, "_call_llm", _no_model)
+
+
+@pytest.fixture(autouse=True)
+def network_violations(request: pytest.FixtureRequest) -> Any:
+    """Refuse real network connections in every test, and fail a test that tried one.
+
+    The LLM code catches its own errors, so a blocked call alone would pass silently
+    through a fail-safe; the recorded attempt fails the test at teardown instead.
+    A test marked ``live_llm`` is exempt (and is skipped unless asked for).
+    """
+    violations: list[str] = []
+    if request.node.get_closest_marker("live_llm"):
+        yield violations
+        return
+    with network_guard.block_network(violations):
+        yield violations
+    if violations:
+        pytest.fail(
+            "test made real network connection(s) to "
+            f"{sorted(set(violations))}; mock them, or mark a live test live_llm",
+            pytrace=False,
+        )
 
 
 @pytest.fixture

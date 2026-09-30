@@ -104,7 +104,7 @@ jobs:
           pip install -r backend/requirements.txt -r bot/requirements.txt
 
       - name: Run Python tests
-        run: pytest backend/ bot/ -v --cov=backend --cov=bot --cov-report=xml
+        run: pytest backend/ bot/ -v -m "not live_llm" --cov=backend --cov=bot --cov-report=xml
         env:
           DATABASE_URL: postgresql+asyncpg://auri:auri@localhost:5432/auri_test
           ENVIRONMENT: test

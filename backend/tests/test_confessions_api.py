@@ -32,6 +32,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+pytestmark = pytest.mark.usefixtures("no_model_calls")
+
 FROZEN_NOW = datetime(2026, 7, 17, 12, 0, 0)  # noqa: DTZ001 — deliberately naive, see module docstring
 DEVICE_HASH = "a" * 32
 OTHER_DEVICE_HASH = "b" * 32

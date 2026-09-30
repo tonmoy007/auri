@@ -21,6 +21,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+pytestmark = pytest.mark.usefixtures("no_model_calls")
+
 DEVICE_HASH = "a" * 32
 MODERATION_KEY = "test-moderation-secret"
 AUTH_HEADERS = {"X-Moderation-Api-Key": MODERATION_KEY}
