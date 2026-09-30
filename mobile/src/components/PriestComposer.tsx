@@ -76,7 +76,10 @@ export function PriestComposer({
     async (uri: string, durationMs: number) => {
       setIsTranscribing(true);
       try {
-        const transcript = await recorder.transcribeRecording(uri, durationMs);
+        // Local only: a spoken question must never be retried through a hosted provider.
+        const transcript = await recorder.transcribeRecording(uri, durationMs, {
+          localOnly: true,
+        });
         if (!isMountedRef.current) return;
         if (transcript === null || !transcript.trim()) {
           setVoiceIssue('transcribe');

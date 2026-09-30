@@ -15,6 +15,7 @@ import {
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
 import { deleteRecordingFile } from '../lib/recordingFiles';
+import { speechToTextPath, type SpeechOptions } from '../lib/speechRoute';
 
 /** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
 const METERING_FLOOR_DB = -60;
@@ -64,13 +65,14 @@ function uploadForTranscription(
   deviceTokenHash: string,
   durationMs: number,
   onProgress: (fraction: number) => void,
+  options: SpeechOptions = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     // Scaled to the recording's length: transcription is slower than
     // realtime, so a flat budget fails long confessions by construction.
     xhr.timeout = uploadTimeoutMsFor(durationMs);
-    xhr.open('POST', `${getApiBaseUrl()}${ENDPOINTS.stt}`);
+    xhr.open('POST', `${getApiBaseUrl()}${speechToTextPath(ENDPOINTS.stt, options)}`);
     xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
 
     xhr.upload.onprogress = (event) => {
@@ -406,7 +408,7 @@ export function useAudioRecorder() {
    * callers can fall back to a placeholder transcript instead of losing the
    * recording the user just made.
    */
-  const transcribeRecording = useCallback(async (uri: string, durationMs: number): Promise<string | null> => {
+  const transcribeRecording = useCallback(async (uri: string, durationMs: number, options: SpeechOptions = {}): Promise<string | null> => {
     setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
 
     const deviceTokenHash = await hashDeviceToken();
@@ -414,9 +416,15 @@ export function useAudioRecorder() {
 
     for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
       try {
-        const transcript = await uploadForTranscription(uri, deviceTokenHash, durationMs, (fraction) => {
-          setState((prev) => ({ ...prev, uploadProgress: fraction }));
-        });
+        const transcript = await uploadForTranscription(
+          uri,
+          deviceTokenHash,
+          durationMs,
+          (fraction) => {
+            setState((prev) => ({ ...prev, uploadProgress: fraction }));
+          },
+          options,
+        );
         setState((prev) => ({
           ...prev,
           isUploading: false,

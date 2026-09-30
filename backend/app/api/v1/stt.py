@@ -15,7 +15,15 @@ from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import BaseModel
 
 from app.config import settings
@@ -79,6 +87,10 @@ def _check_stt_rate_limit(device_token_hash: str, now: datetime) -> None:
 async def transcribe_audio(
     audio: UploadFile,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
+    local_only: bool = Query(
+        False,
+        description="Never retry through a hosted provider (used for Guide questions)",
+    ),
     clock: ClockDependency = Depends(get_clock),
 ) -> TranscriptionResponse:
     """Transcribe an uploaded audio file with Whisper and return the text.
@@ -87,7 +99,7 @@ async def transcribe_audio(
     the Whisper call and deleted immediately after — per the Data Privacy
     Design in the project plan, audio is never retained server-side. If the
     local step fails and an OpenAI key is configured, that provider receives the
-    audio instead.
+    audio instead, unless ``local_only`` is set.
     """
     _check_stt_rate_limit(x_device_token_hash, clock())
 
@@ -110,7 +122,7 @@ async def transcribe_audio(
         with os.fdopen(fd, "wb") as tmp_file:
             tmp_file.write(body)
 
-        transcriber = WhisperTranscriber()
+        transcriber = WhisperTranscriber(allow_api_fallback=not local_only)
         try:
             transcript = transcriber.transcribe(tmp_path)
         except Exception as exc:

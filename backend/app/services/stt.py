@@ -23,13 +23,18 @@ class WhisperTranscriber:
     falls back to the OpenAI Whisper API (requires ``OPENAI_API_KEY``).
     """
 
-    def __init__(self, model_name: str | None = None) -> None:
+    def __init__(
+        self, model_name: str | None = None, *, allow_api_fallback: bool = True
+    ) -> None:
         """Initialise the transcriber.
 
         Args:
             model_name: Path or size tag for the faster-whisper model
                 (defaults to ``settings.WHISPER_MODEL``).
+            allow_api_fallback: Whether a local failure may be retried through the
+                OpenAI API. Off for audio that must never reach a hosted provider.
         """
+        self._allow_api_fallback = allow_api_fallback
         self._model_name: str = model_name or get_config(
             "WHISPER_MODEL", settings.WHISPER_MODEL
         )
@@ -88,8 +93,11 @@ class WhisperTranscriber:
     def _api_fallback(self, audio_path: Path) -> str:
         """Transcribe via the OpenAI Whisper API as a fallback.
 
-        Requires ``OPENAI_API_KEY`` to be set in the environment.
+        Requires ``OPENAI_API_KEY`` to be set in the environment. Returns an empty
+        string without calling anything when the fallback is switched off.
         """
+        if not self._allow_api_fallback:
+            return ""
         api_key = get_config("OPENAI_API_KEY", settings.OPENAI_API_KEY)
         if not api_key:
             logger.error("OPENAI_API_KEY is not set — cannot use API fallback.")
