@@ -1,0 +1,70 @@
+# version: 1
+# Crisis phrases for priest mode: self-harm, suicide and intent to harm others.
+# Matched against the question after normalisation (casefolded, NFKC, punctuation
+# removed, apostrophes dropped so "don't" is "dont", digits in words read as letters
+# so "k1ll" is "kill"). One entry per line: a plain phrase matches whole words; a
+# line starting "re:" is a regular expression over the normalised text.
+# Policy: a false alarm is better than a miss for self-harm. The bare word suicide
+# counts, even in a study question, because the reply is gentle and the cost is low.
+# "killing me" and "killing time" are idioms and are not listed.
+
+# explicit self-harm and suicide
+re:suicid(e|al)
+kill myself
+killing myself
+kill my self
+unalive myself
+end my life
+ending my life
+end it all
+take my own life
+taking my own life
+hurt myself
+hurting myself
+harm myself
+harming myself
+re:cut(ting)? myself(?! (off|out|loose|free|some|a|an)\b)
+self harm
+selfharm
+want to die
+wanna die
+want to be dead
+wish i was dead
+wish i were dead
+wish i were not alive
+better off dead
+dont want to live
+do not want to live
+dont wanna live
+dont want to be alive
+dont want to exist
+re:overdos(e|ed|ing)\b
+re:hang(ing)? myself
+re:shoot(ing)? myself
+re:jump(ing)? (off|from) (a |the )?(bridge|roof|building|balcony)
+
+# indirect
+better off without me
+would be better off if i was gone
+would be better off if i were gone
+nobody would miss me
+no one would miss me
+no reason to live
+nothing to live for
+no point in living
+not worth living
+life is not worth living
+re:(no|whats the|what is the) point (of|in) (going on|living|carrying on|continuing)( anymore| like this| this way|$)
+re:cant go on( anymore| like this|$)
+cant do this anymore and want it to end
+dont want to be here anymore
+dont want to wake up
+wish i could disappear
+wish i could just disappear
+wish i had never been born
+wish i was never born
+re:wish i (had|was|were|would)? ?(never|not) (been |be )?(born|alive|here)
+re:(want|wish) (it|everything) (to )?(all )?(stop|end|be over)
+
+# intent to harm others
+re:\b(i|im|ill|id)( am| will| just| really| might| may| could)* (want|wanna|going|gonna|plan|planning|intend|mean|thinking of|thinking about|about)( to)? (kill|murder|shoot|stab|strangle|poison|hurt|harm|attack|beat up) (him|her|them|someone|somebody|everyone|people|my (boss|manager|coworker|co worker|colleague|supervisor|wife|husband|partner|ex|brother|sister|mother|father|mom|dad|parents?|son|daughter|children|kids?|teacher|neighbou?r|family|friend|employer|roommate))

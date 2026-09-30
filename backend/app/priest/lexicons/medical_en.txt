@@ -1,0 +1,23 @@
+# version: 1
+# Medical questions the Guide must not answer: medication, treatment, diagnosis.
+# Normalised text; "re:" lines are regular expressions.
+antidepressant
+antidepressants
+antipsychotic
+antipsychotics
+medication
+medications
+my meds
+my pills
+prescription
+prescribed
+dosage
+diagnosis
+diagnosed
+chemotherapy
+insulin
+what dose
+re:(stop|quit|skip|cease|reduce|lower|increase|change) (taking |using )?(my|the|all|any) (meds|medicine|medication|pills|treatment|therapy|dose|antidepressants?)
+re:instead of (seeing |taking |getting )?(a |the |my )?(doctor|medicine|medication|treatment|therapy|psychiatrist|insulin|pills)
+re:(cure|heal|treat) my (cancer|diabetes|depression|anxiety|illness|disease|condition|epilepsy|asthma)
+re:is it safe to (take|stop|mix|combine)

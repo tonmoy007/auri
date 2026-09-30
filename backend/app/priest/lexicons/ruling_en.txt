@@ -1,0 +1,15 @@
+# version: 1
+# Requests for a religious ruling. Generation is allowed, but the reply carries a
+# fixed footer pointing to a qualified scholar.
+# Normalised text; "re:" lines are regular expressions.
+haram
+halal
+permissible
+impermissible
+makruh
+forbidden in islam
+is it a sin
+is it sinful
+re:\b(is|are) [\w ]{1,40}?(a sin|sinful|haram|halal|permissible|impermissible|forbidden|allowed|lawful|unlawful)\b
+re:\b(am i|are we) (allowed|permitted) to
+re:\b(does|do) (islam|judaism|christianity|hinduism|buddhism|my religion|my faith) (allow|permit|forbid|prohibit)
