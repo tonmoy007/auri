@@ -14,8 +14,13 @@ from pydantic import BaseModel
 from app.api.v1 import router as api_v1_router
 from app.config import parse_comma_separated_list, settings
 from app.database import async_session_factory, engine
-from app.exceptions import AuthConfigurationError, RateLimitError
+from app.exceptions import (
+    AuthConfigurationError,
+    PriestUnavailableError,
+    RateLimitError,
+)
 from app.observability import init_sentry, mount_metrics
+from app.priest.rate_limiter import PriestRateLimitError
 from app.services.department_service import seed_from_env_if_empty
 from app.services.settings_service import load_cache as load_config_cache
 from app.services.user_service import bootstrap_admin
@@ -147,6 +152,33 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         """Map a domain ``RateLimitError`` to an HTTP 429 response."""
         return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+    @app.exception_handler(PriestRateLimitError)
+    async def priest_rate_limit_handler(
+        request: Request, exc: PriestRateLimitError
+    ) -> JSONResponse:
+        """Map a guide rate-limit refusal to a 429 with whole-second ``Retry-After``.
+
+        Registered alongside the generic ``RateLimitError`` handler; the subclass
+        wins, so confession limits keep their own message and no header.
+        """
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "rate_limited"},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+
+    @app.exception_handler(PriestUnavailableError)
+    async def priest_unavailable_handler(
+        request: Request, exc: PriestUnavailableError
+    ) -> JSONResponse:
+        """Map "the guide cannot serve this now" to a 503 carrying only its code."""
+        headers = (
+            {} if exc.retry_after is None else {"Retry-After": str(exc.retry_after)}
+        )
+        return JSONResponse(
+            status_code=503, content={"detail": exc.code}, headers=headers
+        )
 
     @app.exception_handler(AuthConfigurationError)
     async def auth_configuration_error_handler(
