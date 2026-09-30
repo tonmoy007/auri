@@ -37,6 +37,8 @@ export default function HomeScreen(): React.JSX.Element {
   const fadeToBlack = useRef(new Animated.Value(0)).current;
   const { status: guideStatus, reload: reloadGuideStatus } = usePriestStatus(false);
   const { showGuideMode, reload: reloadSettings } = useSettings();
+  // Set on the tap, cleared when the screen regains focus: a double tap must not stack two Guide screens.
+  const isOpeningGuideRef = useRef(false);
 
   // The fade-to-black overlay is mounted only while the booth entry
   // transition is actually running.
@@ -56,6 +58,7 @@ export default function HomeScreen(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       setIsEnteringBooth(false);
+      isOpeningGuideRef.current = false;
       fadeToBlack.setValue(0);
       // Settings may have changed the Guide toggle, and the server may have
       // switched the Guide on or off, while this screen sat under another.
@@ -82,10 +85,18 @@ export default function HomeScreen(): React.JSX.Element {
   }, [fadeToBlack, haptics]);
 
   const handleOpenGuide = useCallback(async () => {
+    if (isOpeningGuideRef.current) return;
+    isOpeningGuideRef.current = true;
     haptics.selectionChanged();
-    const acknowledged = guideStatus
-      ? await hasAcknowledgedPriestIntro(guideStatus.disclaimer_version)
-      : false;
+    let acknowledged = false;
+    try {
+      acknowledged = guideStatus
+        ? await hasAcknowledgedPriestIntro(guideStatus.disclaimer_version)
+        : false;
+    } catch (_error: unknown) {
+      // An unreadable store counts as not yet acknowledged: the intro is the safe screen to show.
+      acknowledged = false;
+    }
     router.push(acknowledged ? '/priest' : '/priest/intro');
   }, [guideStatus, haptics]);
 

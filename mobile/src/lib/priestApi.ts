@@ -22,7 +22,8 @@ export const PRIEST_ASK_TIMEOUT_MS = 35_000;
 export const PRIEST_STATUS_TIMEOUT_MS = 10_000;
 
 const MIN_RETRY_SECONDS = 1;
-const MAX_RETRY_SECONDS = 3600;
+/** The server's longest wait is a day (the daily rate limit); never report less than it says. */
+const MAX_RETRY_SECONDS = 86_400;
 const HTTP_TOO_MANY_REQUESTS = 429;
 const HTTP_UNPROCESSABLE = 422;
 const HTTP_UNAVAILABLE = 503;
@@ -74,12 +75,18 @@ async function errorFromResponse(response: Response): Promise<PriestApiError> {
   if (response.status === HTTP_UNPROCESSABLE) return new PriestApiError('validation');
   if (response.status !== HTTP_UNAVAILABLE) return new PriestApiError('unexpected');
   const detail = await readDetail(response);
-  return new PriestApiError((detail && UNAVAILABLE_DETAILS[detail]) || 'unavailable');
+  const code = (detail && UNAVAILABLE_DETAILS[detail]) || 'unavailable';
+  return new PriestApiError(code, parseRetryAfter(response.headers.get('Retry-After')));
+}
+
+/** An abort from fetch: by name, since some runtimes throw a DOMException that is not an Error. */
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError';
 }
 
 function classifyFailure(error: unknown, timedOut: boolean): PriestApiError {
   if (error instanceof PriestApiError) return error;
-  if (error instanceof Error && error.name === 'AbortError') {
+  if (isAbortError(error)) {
     return new PriestApiError(timedOut ? 'timeout' : 'cancelled');
   }
   if (error instanceof TypeError) return new PriestApiError('offline');
@@ -136,10 +143,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isAnswer(value: unknown): value is PriestAnswerResponse {
+  if (!isRecord(value) || typeof value['kind'] !== 'string') return false;
+  if (!(PRIEST_ANSWER_KINDS as readonly string[]).includes(value['kind'])) return false;
+  // A crisis reply is drawn from its kind alone: the card's words are fixed in
+  // the app, so no other field may keep it from showing.
+  if (value['kind'] === 'crisis') return true;
   return (
-    isRecord(value) &&
-    typeof value['kind'] === 'string' &&
-    (PRIEST_ANSWER_KINDS as readonly string[]).includes(value['kind']) &&
     Array.isArray(value['points']) &&
     Array.isArray(value['quotes']) &&
     Array.isArray(value['citations'])

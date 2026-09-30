@@ -4,8 +4,8 @@
 // the field for the user to read and edit; it never sends anything by itself.
 // There is no voice masking and no spoken reply anywhere in this feature.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AccessibilityInfo, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { colors } from '../theme/colors';
 import { borderRadius, spacing, typography } from '../theme';
 import { ShimmerText } from './LoadingStates';
@@ -15,9 +15,12 @@ import { useReducedMotion } from '../hooks/useReducedMotion';
 import { deleteRecordingFile } from '../lib/recordingFiles';
 import {
   canSubmitQuestion,
+  clampQuestion,
   classifyRecorderError,
+  createGenerationGuard,
   mergeTranscript,
   questionCounter,
+  voiceIssueForStart,
   voiceIssueMessage,
   type VoiceIssue,
 } from '../lib/priestInput';
@@ -34,6 +37,10 @@ interface PriestComposerProps {
   /** The client-side waiting line ("Searching the library…"). */
   stageText: string;
   maxChars: number;
+  /** Changes every time the conversation is cleared: stops recording and drops a late transcript. */
+  clearCount: number;
+  /** Told whether a recording or transcription is under way, so Retry can wait for it. */
+  onBusyChange?: (isBusy: boolean) => void;
 }
 
 /** Question input with counter, voice input, Send, and Cancel while a request is pending. */
@@ -45,8 +52,15 @@ export function PriestComposer({
   isPending,
   stageText,
   maxChars,
+  clearCount,
+  onBusyChange,
 }: PriestComposerProps): React.JSX.Element {
-  const recorder = useAudioRecorder();
+  // Voice is optional here: no microphone prompt or audio-session change until the mic is tapped.
+  const autoStopRef = useRef<(uri: string, durationMs: number) => void>();
+  const recorder = useAudioRecorder({
+    prepareOnMount: false,
+    onAutoStop: (uri, durationMs) => autoStopRef.current?.(uri, durationMs),
+  });
   const haptics = useHaptics();
   const reduceMotion = useReducedMotion();
   const [voiceIssue, setVoiceIssue] = useState<VoiceIssue | null>(null);
@@ -55,6 +69,11 @@ export function PriestComposer({
   const valueRef = useRef(value);
   valueRef.current = value;
   const isMountedRef = useRef(true);
+  // Stale once Clear is tapped: a transcript that returns after that is dropped.
+  const transcriptGuard = useMemo(() => createGenerationGuard(), []);
+  const seenClearCountRef = useRef(clearCount);
+  // Set on the tap itself, so a double tap cannot start two recordings.
+  const isMicActionRef = useRef(false);
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -62,6 +81,17 @@ export function PriestComposer({
       isMountedRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (seenClearCountRef.current === clearCount) return;
+    seenClearCountRef.current = clearCount;
+    transcriptGuard.bump();
+    setIsTranscribing(false);
+    setVoiceIssue(null);
+    if (recorder.isRecording) {
+      void recorder.stopRecording().then((uri) => deleteRecordingFile(uri));
+    }
+  }, [clearCount, recorder, transcriptGuard]);
 
   useEffect(() => {
     const issue = classifyRecorderError(recorder.error, recorder.hasPermission);
@@ -72,56 +102,77 @@ export function PriestComposer({
     if (recorder.isRecording) setVoiceIssue(null);
   }, [recorder.isRecording]);
 
+  // The message is drawn in place; a screen reader has to be told it appeared.
+  useEffect(() => {
+    if (voiceIssue) AccessibilityInfo.announceForAccessibility(voiceIssueMessage(voiceIssue));
+  }, [voiceIssue]);
+
   const transcribe = useCallback(
-    async (uri: string, durationMs: number) => {
+    async (uri: string, durationMs: number, notice: VoiceIssue | null = null) => {
+      const token = transcriptGuard.current();
       setIsTranscribing(true);
       try {
         // Local only: a spoken question must never be retried through a hosted provider.
         const transcript = await recorder.transcribeRecording(uri, durationMs, {
           localOnly: true,
         });
-        if (!isMountedRef.current) return;
+        if (!isMountedRef.current || !transcriptGuard.isCurrent(token)) return;
         if (transcript === null || !transcript.trim()) {
           setVoiceIssue('transcribe');
           return;
         }
-        setVoiceIssue(null);
+        setVoiceIssue(notice);
         onChangeText(mergeTranscript(valueRef.current, transcript, maxChars));
       } finally {
         void deleteRecordingFile(uri);
-        if (isMountedRef.current) setIsTranscribing(false);
+        if (isMountedRef.current && transcriptGuard.isCurrent(token)) setIsTranscribing(false);
       }
     },
-    [recorder, onChangeText, maxChars],
+    [recorder, onChangeText, maxChars, transcriptGuard],
   );
 
-  const handleMicPress = useCallback(async () => {
-    if (isTranscribing || isPending) return;
-    if (!recorder.isRecording) {
-      haptics.recordStart();
-      await recorder.startRecording();
-      return;
-    }
+  autoStopRef.current = (uri, durationMs) => {
     haptics.recordStop();
-    const durationMs = recorder.durationMs;
-    const uri = await recorder.stopRecording();
-    if (!uri) {
-      setVoiceIssue('record');
-      return;
+    void transcribe(uri, durationMs, 'limit');
+  };
+
+  const handleMicPress = useCallback(async () => {
+    if (isTranscribing || isPending || isMicActionRef.current) return;
+    isMicActionRef.current = true;
+    try {
+      if (!recorder.isRecording) {
+        haptics.recordStart();
+        setVoiceIssue(voiceIssueForStart(await recorder.startRecording()));
+        return;
+      }
+      haptics.recordStop();
+      const durationMs = recorder.durationMs;
+      const uri = await recorder.stopRecording();
+      if (!uri) {
+        setVoiceIssue('record');
+        return;
+      }
+      await transcribe(uri, durationMs);
+    } finally {
+      isMicActionRef.current = false;
     }
-    await transcribe(uri, durationMs);
   }, [isTranscribing, isPending, recorder, haptics, transcribe]);
 
   const handleChangeText = useCallback(
     (text: string) => {
       setVoiceIssue(null);
-      onChangeText(text);
+      onChangeText(clampQuestion(text, maxChars));
     },
-    [onChangeText],
+    [onChangeText, maxChars],
   );
 
   const counter = questionCounter(value, maxChars);
   const isBusy = recorder.isRecording || isTranscribing;
+
+  useEffect(() => {
+    onBusyChange?.(isBusy);
+  }, [isBusy, onBusyChange]);
+
   const canSend = !isPending && !isBusy && canSubmitQuestion(value, maxChars);
   const micLabel = recorder.isRecording ? 'Stop recording' : 'Start voice input';
   const waitingStyle = [styles.status, styles.statusFlex];
@@ -159,7 +210,12 @@ export function PriestComposer({
           onChangeText={handleChangeText}
           editable={!isPending}
           multiline
-          maxLength={maxChars}
+          autoCorrect={false}
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="sentences"
+          importantForAutofill="no"
+          textContentType="none"
           placeholder="Ask about what the library says"
           placeholderTextColor={colors.slate500}
           accessibilityLabel="Your question"

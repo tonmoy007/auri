@@ -121,6 +121,9 @@ export interface ErrorMessage {
 /**
  * Audio recording state for the useAudioRecorder hook.
  */
+/** How a request to start recording ended. */
+export type RecordingStartResult = 'started' | 'permission_denied' | 'failed';
+
 export interface AudioRecordingState {
   /** Whether recording is currently active */
   isRecording: boolean;

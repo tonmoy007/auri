@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import {
   canSubmitQuestion,
+  clampQuestion,
   classifyRecorderError,
+  createGenerationGuard,
   guideEntryAccessibilityLabel,
   guideEntryLabel,
   introAckValue,
@@ -11,7 +13,10 @@ import {
   parseShowGuideMode,
   questionCounter,
   resolveTradition,
+  retryRemainingSeconds,
   shouldShowGuideEntry,
+  traditionUnavailableNotice,
+  voiceIssueForStart,
   voiceIssueMessage,
 } from './priestInput';
 import type { PriestStatus } from '../types/priest';
@@ -257,6 +262,7 @@ describe('voice input text', () => {
       voiceIssueMessage('permission'),
       voiceIssueMessage('record'),
       voiceIssueMessage('transcribe'),
+      voiceIssueMessage('limit'),
     ];
 
     // Assert
@@ -264,7 +270,107 @@ describe('voice input text', () => {
       'Microphone access is off. You can type your question instead.',
       "Couldn't record that. You can type your question instead.",
       "Couldn't turn that into text. You can type your question instead.",
+      'Recording stopped at the time limit. Check the text before you send.',
     ]);
+  });
+
+  it('turns every recording start result into a voice issue, so a repeat failure is shown again', () => {
+    // Arrange / Act
+    const issues = [
+      voiceIssueForStart('started'),
+      voiceIssueForStart('permission_denied'),
+      voiceIssueForStart('failed'),
+    ];
+
+    // Assert
+    expect(issues).toEqual([null, 'permission', 'record']);
+  });
+});
+
+describe('clampQuestion', () => {
+  it('leaves text within the limit alone', () => {
+    // Arrange / Act
+    const clamped = clampQuestion('hello', 10);
+
+    // Assert
+    expect(clamped).toBe('hello');
+  });
+
+  it('cuts by characters, so an emoji counts as one like the counter does', () => {
+    // Arrange
+    const text = '😀'.repeat(6);
+
+    // Act
+    const clamped = clampQuestion(text, 5);
+
+    // Assert
+    expect(Array.from(clamped)).toHaveLength(5);
+    expect(questionCounter(clamped, 5).label).toBe('5/5');
+  });
+});
+
+describe('createGenerationGuard', () => {
+  it('treats a token from before a bump as stale', () => {
+    // Arrange
+    const guard = createGenerationGuard();
+    const before = guard.current();
+
+    // Act
+    guard.bump();
+
+    // Assert
+    expect([guard.isCurrent(before), guard.isCurrent(guard.current())]).toEqual([false, true]);
+  });
+});
+
+describe('retryRemainingSeconds', () => {
+  it('counts down from the server wait and rounds up', () => {
+    // Arrange
+    const startedAt = 1_000;
+
+    // Act
+    const remaining = [
+      retryRemainingSeconds(startedAt, 10, startedAt),
+      retryRemainingSeconds(startedAt, 10, startedAt + 2_500),
+      retryRemainingSeconds(startedAt, 10, startedAt + 10_000),
+      retryRemainingSeconds(startedAt, 10, startedAt + 99_000),
+    ];
+
+    // Assert
+    expect(remaining).toEqual([10, 8, 0, 0]);
+  });
+
+  it('is zero when the server gave no wait', () => {
+    // Arrange / Act
+    const remaining = retryRemainingSeconds(0, null, 5_000);
+
+    // Assert
+    expect(remaining).toBe(0);
+  });
+});
+
+describe('traditionUnavailableNotice', () => {
+  const offered = [{ id: 'buddhism', label: 'Buddhism' }];
+
+  it('is silent when there is no saved tradition or it is offered', () => {
+    // Arrange / Act
+    const notices = [
+      traditionUnavailableNotice(null, offered),
+      traditionUnavailableNotice('buddhism', offered),
+    ];
+
+    // Assert
+    expect(notices).toEqual([null, null]);
+  });
+
+  it('says the saved tradition is not available when the server does not offer it', () => {
+    // Arrange / Act
+    const notice = traditionUnavailableNotice('islam', offered);
+
+    // Assert
+    expect(notice).toBe(
+      "Your saved tradition (Islam) isn't available right now, so answers draw on all traditions.",
+    );
   });
 });
 

@@ -2,7 +2,7 @@
 // Shown before the first use of the Guide, and again whenever the server's
 // disclaimer version changes. "I understand" stores the accepted version.
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   SafeAreaView,
@@ -18,7 +18,8 @@ import { borderRadius, spacing, typography } from '../../theme';
 import { useHaptics } from '../../hooks/useHaptics';
 import { usePriestStatus } from '../../hooks/usePriestStatus';
 import { acknowledgePriestIntro } from '../../hooks/useSettings';
-import { INTRO_STATEMENTS, presentError } from '../../lib/priestPresentation';
+import { PriestCrisisCard } from '../../components/PriestCrisisCard';
+import { INTRO_STATEMENTS, presentError, presentHelpNow } from '../../lib/priestPresentation';
 
 const MIN_TOUCH_TARGET = 44;
 
@@ -27,21 +28,29 @@ export default function PriestIntroScreen(): React.JSX.Element {
   const { status, error, isLoading, reload } = usePriestStatus();
   const haptics = useHaptics();
   const [isSaving, setIsSaving] = useState(false);
+  const [saveFailed, setSaveFailed] = useState(false);
+  const helpBlock = useMemo(() => presentHelpNow(status?.crisis_contacts), [status]);
 
   const handleAccept = useCallback(async () => {
     if (!status) return;
     setIsSaving(true);
+    setSaveFailed(false);
     try {
       await acknowledgePriestIntro(status.disclaimer_version);
       haptics.success();
       router.replace('/priest');
+    } catch (_failure: unknown) {
+      // A storage failure must not crash or hang the screen; say so and let them retry.
+      setSaveFailed(true);
     } finally {
       setIsSaving(false);
     }
   }, [status, haptics]);
 
   const unavailable = status && !status.enabled ? presentError({ code: 'disabled', retryAfterSeconds: null }) : null;
-  const failure = error ? presentError(error) : unavailable;
+  const failure = error
+    ? presentError(error)
+    : (unavailable ?? (saveFailed ? presentError({ code: 'unexpected', retryAfterSeconds: null }) : null));
   const canAccept = status !== null && status.enabled && !isSaving;
 
   return (
@@ -73,7 +82,8 @@ export default function PriestIntroScreen(): React.JSX.Element {
         {failure ? (
           <View accessibilityRole="alert">
             <Text style={styles.failure}>{failure.message}</Text>
-            {failure.retryable ? (
+            <Text style={styles.helpLine}>{failure.helpLine}</Text>
+            {failure.retryable && !saveFailed ? (
               <TouchableOpacity
                 style={styles.secondaryButton}
                 onPress={() => void reload()}
@@ -87,6 +97,9 @@ export default function PriestIntroScreen(): React.JSX.Element {
         ) : null}
       </ScrollView>
       <View style={styles.footer}>
+        <View style={styles.help}>
+          <PriestCrisisCard block={helpBlock} variant="static" />
+        </View>
         <TouchableOpacity
           style={[styles.primaryButton, !canAccept && styles.primaryButtonDisabled]}
           onPress={() => void handleAccept()}
@@ -156,6 +169,14 @@ const styles = StyleSheet.create({
   },
   footer: {
     padding: spacing.lg,
+  },
+  help: {
+    marginBottom: spacing.md,
+  },
+  helpLine: {
+    marginTop: spacing.sm,
+    fontSize: typography.fontSize.sm,
+    color: colors.slate300,
   },
   primaryButton: {
     minHeight: MIN_TOUCH_TARGET,

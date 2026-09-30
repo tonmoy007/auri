@@ -6,10 +6,19 @@ import {
   REPHRASE_INVITATION,
   STAGE_SWITCH_MS,
   INTRO_STATEMENTS,
+  PRIVACY_LINE,
+  CRISIS_EMERGENCY_LINE,
+  GUIDE_TRADITION_NOTE,
+  HELP_NOW_HEADING,
+  errorAnnouncement,
+  formatWait,
   pendingStageAt,
   pendingStageText,
   presentAnswer,
+  presentCrisisContacts,
   presentError,
+  presentHelpNow,
+  retryLabel,
   telUrlFor,
   type DisplayBlock,
 } from './priestPresentation';
@@ -309,7 +318,7 @@ describe('presentAnswer: other kinds', () => {
       number: 2,
       title: 'Beta',
       snippet: 'Second snippet.',
-      accessibilityLabel: 'Source 2: Beta',
+      accessibilityLabel: 'Source 2: Beta. Second snippet.',
     });
   });
 
@@ -399,6 +408,54 @@ describe('presentAnswer: crisis', () => {
     expect(crisis?.contacts[0]?.telUrl).toBeNull();
   });
 
+  it('presents a crisis reply that has none of the other answer fields', () => {
+    // Arrange
+    const reply = { kind: 'crisis' } as unknown as PriestAnswerResponse;
+
+    // Act
+    const presentation = presentAnswer(reply);
+
+    // Assert
+    expect(presentation.kind).toBe('crisis');
+    expect(blockOfType(presentation.blocks, 'crisis')?.contacts).toEqual([]);
+  });
+
+  it('keeps the valid contacts when others are malformed', () => {
+    // Arrange
+    const reply = response({
+      kind: 'crisis',
+      contacts: [
+        null,
+        { label: 'Helpline', detail: '0800 123 456', dial: '0800123456' },
+        { label: 42, detail: 'x', dial: null },
+        { label: 'No detail', dial: null },
+        { label: '  ', detail: 'blank label', dial: null },
+        { label: 'Text only', detail: 'eap@example.test' },
+      ] as unknown as PriestAnswerResponse['contacts'],
+    });
+
+    // Act
+    const crisis = blockOfType(presentAnswer(reply).blocks, 'crisis');
+
+    // Assert
+    expect(crisis?.contacts.map((c) => c.label)).toEqual(['Helpline', 'Text only']);
+    expect(crisis?.contacts[1]?.telUrl).toBeNull();
+  });
+
+  it('treats contacts that are not a list as no contacts', () => {
+    // Arrange
+    const reply = response({
+      kind: 'crisis',
+      contacts: 'call me' as unknown as PriestAnswerResponse['contacts'],
+    });
+
+    // Act
+    const crisis = blockOfType(presentAnswer(reply).blocks, 'crisis');
+
+    // Assert
+    expect(crisis?.contacts).toEqual([]);
+  });
+
   it('announces that help contacts are shown', () => {
     // Arrange
     const reply = response({ kind: 'crisis' });
@@ -460,7 +517,7 @@ describe('presentError', () => {
     expect(error.retryable).toBe(true);
   });
 
-  it('puts the retry seconds in the rate-limit message', () => {
+  it('puts the wait in the rate-limit message', () => {
     // Arrange
     const info = { code: 'rate_limited' as const, retryAfterSeconds: 17 };
 
@@ -468,7 +525,7 @@ describe('presentError', () => {
     const error = presentError(info);
 
     // Assert
-    expect(error.message).toBe("Let's pause for a moment. Try again in 17 s.");
+    expect(error.message).toBe("Let's pause for a moment. Try again in 17 seconds.");
   });
 
   it('rounds fractional retry seconds up and never shows less than 1', () => {
@@ -481,9 +538,25 @@ describe('presentError', () => {
 
     // Assert
     expect(messages).toEqual([
-      "Let's pause for a moment. Try again in 3 s.",
-      "Let's pause for a moment. Try again in 1 s.",
+      "Let's pause for a moment. Try again in 3 seconds.",
+      "Let's pause for a moment. Try again in 1 second.",
     ]);
+  });
+
+  it.each([
+    [3600, "Let's pause for a moment. Try again in 1 hour."],
+    [86400, "Let's pause for a moment. Try again in 24 hours."],
+    [72000, "Let's pause for a moment. Try again in 20 hours."],
+    [90, "Let's pause for a moment. Try again in 2 minutes."],
+  ])('words a %s second rate limit in minutes or hours, never raw seconds', (seconds, message) => {
+    // Arrange
+    const info = { code: 'rate_limited' as const, retryAfterSeconds: seconds };
+
+    // Act
+    const error = presentError(info);
+
+    // Assert
+    expect(error.message).toBe(message);
   });
 
   it('uses a generic pause when the rate limit carries no seconds', () => {
@@ -540,6 +613,126 @@ describe('presentError', () => {
   });
 });
 
+describe('formatWait', () => {
+  it.each([
+    [1, '1 second'],
+    [59, '59 seconds'],
+    [60, '1 minute'],
+    [61, '2 minutes'],
+    [3599, '1 hour'],
+    [3600, '1 hour'],
+    [3601, '1 hour 1 minute'],
+    [5400, '1 hour 30 minutes'],
+    [86400, '24 hours'],
+  ])('words %s seconds as %s', (seconds, expected) => {
+    // Arrange / Act
+    const text = formatWait(seconds);
+
+    // Assert
+    expect(text).toBe(expected);
+  });
+
+  it('never shows less than one second', () => {
+    // Arrange / Act
+    const texts = [formatWait(0), formatWait(-5), formatWait(0.2)];
+
+    // Assert
+    expect(texts).toEqual(['1 second', '1 second', '1 second']);
+  });
+});
+
+describe('error help and retry data', () => {
+  it.each<PriestErrorCode>([
+    'offline',
+    'rate_limited',
+    'disabled',
+    'busy',
+    'unavailable',
+    'timeout',
+    'validation',
+    'cancelled',
+    'unexpected',
+  ])('adds the emergency line to %s', (code) => {
+    // Arrange
+    const info = { code, retryAfterSeconds: null };
+
+    // Act
+    const error = presentError(info);
+
+    // Assert
+    expect(error.helpLine).toBe(CRISIS_EMERGENCY_LINE);
+  });
+
+  it('carries the server wait for rate-limited and busy errors only', () => {
+    // Arrange / Act
+    const limited = presentError({ code: 'rate_limited', retryAfterSeconds: 30 });
+    const busy = presentError({ code: 'busy', retryAfterSeconds: 7 });
+    const offline = presentError({ code: 'offline', retryAfterSeconds: 9 });
+
+    // Assert
+    expect([limited.retryAfterSeconds, busy.retryAfterSeconds, offline.retryAfterSeconds]).toEqual([
+      30, 7, null,
+    ]);
+  });
+
+  it('announces the message followed by the emergency line', () => {
+    // Arrange
+    const error = presentError({ code: 'offline', retryAfterSeconds: null });
+
+    // Act
+    const text = errorAnnouncement(error);
+
+    // Assert
+    expect(text).toBe(`You're offline. Your question is still here. ${CRISIS_EMERGENCY_LINE}`);
+  });
+
+  it('labels the retry button with the remaining wait', () => {
+    // Arrange / Act
+    const labels = [retryLabel(0), retryLabel(45), retryLabel(7200)];
+
+    // Assert
+    expect(labels).toEqual(['Try again', 'Try again in 45 seconds', 'Try again in 2 hours']);
+  });
+});
+
+describe('presentHelpNow', () => {
+  it('builds the fixed help block with the same contact handling as the crisis card', () => {
+    // Arrange
+    const contacts = [
+      { label: 'Helpline', detail: '0800 123 456', dial: '0800123456' },
+      { label: 'Bad', detail: 'bad', dial: '1;2' },
+    ];
+
+    // Act
+    const block = presentHelpNow(contacts);
+
+    // Assert
+    expect(block.heading).toBe(HELP_NOW_HEADING);
+    expect(block.emergencyLine).toBe(CRISIS_EMERGENCY_LINE);
+    expect(block.contacts.map((c) => c.telUrl)).toEqual(['tel:0800123456', null]);
+  });
+
+  it('still shows the emergency line when no contacts are known', () => {
+    // Arrange / Act
+    const withNothing = presentHelpNow(undefined);
+
+    // Assert
+    expect(withNothing.contacts).toEqual([]);
+    expect(withNothing.emergencyLine).toBe(CRISIS_EMERGENCY_LINE);
+  });
+
+  it('shares contact filtering with presentCrisisContacts', () => {
+    // Arrange
+    const raw = [{ label: 'A', detail: 'a', dial: '911' }, 7];
+
+    // Act
+    const direct = presentCrisisContacts(raw);
+
+    // Assert
+    expect(presentHelpNow(raw).contacts).toEqual(direct);
+  });
+});
+
 describe('pending stage text', () => {
   it('starts on searching and switches to reflecting after two seconds', () => {
     // Arrange
@@ -563,12 +756,12 @@ describe('pending stage text', () => {
 });
 
 describe('intro statements', () => {
-  it('has the four statements in order', () => {
+  it('has the three statements in order; the crisis contacts are a separate fixed block', () => {
     // Arrange / Act
     const keys = INTRO_STATEMENTS.map((s) => s.key);
 
     // Assert
-    expect(keys).toEqual(['what', 'not', 'privacy', 'crisis']);
+    expect(keys).toEqual(['what', 'not', 'privacy']);
   });
 
   it('says what it is not: clergy, counselling, medical and legal advice', () => {
@@ -579,11 +772,45 @@ describe('intro statements', () => {
     expect(body).toBe('It is not clergy, not counselling, and not medical or legal advice.');
   });
 
-  it('says questions are not stored and not visible to the company', () => {
+  it('says where a question goes and who can see it while it is answered', () => {
     // Arrange / Act
     const body = INTRO_STATEMENTS.find((s) => s.key === 'privacy')?.body ?? '';
 
     // Assert
-    expect(body).toBe('Your questions are not stored, and your company cannot see them.');
+    expect(body).toBe(
+      'Auri does not save your questions. To answer, each question is sent to AI model servers ' +
+        'run for your organisation, and whoever runs them can see it while it is answered.',
+    );
+    expect(body).not.toContain('cannot see');
+  });
+
+  it('says the Guide is an AI, not clergy, and gives no medical or legal advice', () => {
+    // Arrange / Act
+    const what = INTRO_STATEMENTS.find((s) => s.key === 'what')?.body ?? '';
+
+    // Assert
+    expect(what).toContain('An AI');
+  });
+});
+
+describe('Guide settings copy', () => {
+  it('says the tradition is saved here and sent with each question', () => {
+    // Arrange / Act / Assert
+    expect(GUIDE_TRADITION_NOTE).toBe(
+      'Your choice is saved on this device and sent with each question to narrow the answer.',
+    );
+  });
+});
+
+describe('privacy copy', () => {
+  it('says what Auri does, not that nobody can see the question', () => {
+    expect(PRIVACY_LINE).toBe('Auri does not save Guide questions.');
+    expect(PRIVACY_LINE).not.toMatch(/cannot see|not stored/i);
+  });
+
+  it('tells the person whoever runs the model servers can see a question', () => {
+    const privacy = INTRO_STATEMENTS.find((item) => item.key === 'privacy');
+    expect(privacy?.body).toMatch(/whoever runs them can see it/i);
+    expect(privacy?.body).not.toMatch(/company cannot see/i);
   });
 });

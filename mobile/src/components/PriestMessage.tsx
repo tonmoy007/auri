@@ -37,9 +37,9 @@ function renderPoints(block: PointsBlock, open: OpenCitation): React.JSX.Element
         <View key={pointIndex} style={styles.point}>
           <Text style={styles.pointText}>{point.text}</Text>
           <View style={styles.chipRow}>
-            {point.chips.map((chip) => (
+            {point.chips.map((chip, chipIndex) => (
               <TouchableOpacity
-                key={chip.citationId}
+                key={`${chipIndex}-${chip.citationId}`}
                 style={styles.chipTarget}
                 onPress={() => open(chip.citationId)}
                 accessibilityRole="button"
@@ -84,9 +84,9 @@ function renderReflection(block: ReflectionBlock): React.JSX.Element {
 function renderExcerpts(block: ExcerptsBlock, open: OpenCitation): React.JSX.Element {
   return (
     <View style={styles.section}>
-      {block.items.map((item) => (
+      {block.items.map((item, itemIndex) => (
         <TouchableOpacity
-          key={item.citationId}
+          key={`${itemIndex}-${item.citationId}`}
           style={styles.excerpt}
           onPress={() => open(item.citationId)}
           accessibilityRole="button"

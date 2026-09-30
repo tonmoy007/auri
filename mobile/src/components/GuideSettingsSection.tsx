@@ -1,14 +1,14 @@
 // Auri — Settings: Guide section
 // The toggle that shows or hides the Guide on the home screen, and an optional
-// tradition to limit answers to. Both are stored on this device only; the
-// tradition leaves it solely as the per-request `tradition` field.
+// tradition to limit answers to. Both are saved on this device; the tradition
+// also goes out with each question as the per-request `tradition` field.
 
 import React, { useCallback } from 'react';
 import { StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../theme/colors';
 import { borderRadius, spacing, typography } from '../theme';
 import { useHaptics } from '../hooks/useHaptics';
-import { PRIVACY_LINE } from '../lib/priestPresentation';
+import { GUIDE_TRADITION_NOTE, PRIVACY_LINE } from '../lib/priestPresentation';
 import { TRADITION_IDS, TRADITION_LABELS, type TraditionId } from '../types/priest';
 
 const MIN_TOUCH_TARGET = 44;
@@ -78,7 +78,7 @@ export function GuideSettingsSection({
         })}
       </View>
       <Text style={styles.hint}>
-        {`${PRIVACY_LINE} The tradition you pick stays on this device.`}
+        {`${PRIVACY_LINE} ${GUIDE_TRADITION_NOTE}`}
       </Text>
     </View>
   );

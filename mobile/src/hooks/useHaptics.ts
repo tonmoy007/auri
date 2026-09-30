@@ -3,7 +3,7 @@
 // (start recording, confirm delete, ...) rather than the raw feedback style,
 // so the mapping from UX moment to feedback stays in one place.
 
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import * as Haptics from 'expo-haptics';
 
 interface UseHapticsReturn {
@@ -46,5 +46,10 @@ export function useHaptics(): UseHapticsReturn {
     void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
   }, []);
 
-  return { recordStart, recordStop, selectionChanged, success, warning };
+  // One stable object: callers list it in effect dependencies, and a fresh
+  // object each render would re-run those effects (and re-fire the haptic).
+  return useMemo(
+    () => ({ recordStart, recordStop, selectionChanged, success, warning }),
+    [recordStart, recordStop, selectionChanged, success, warning],
+  );
 }

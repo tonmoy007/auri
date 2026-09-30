@@ -119,6 +119,8 @@ export interface PriestStatus {
   traditions: TraditionOption[];
   disclaimer_version: string;
   max_question_chars: number;
+  /** Contacts for the always-visible help block, when the server sends them. */
+  crisis_contacts?: CrisisContactOut[] | null;
 }
 
 /** Why a Guide request failed, as the client tells failures apart. */
@@ -136,6 +138,6 @@ export type PriestErrorCode =
 /** The part of a Guide failure the presentation layer needs. */
 export interface PriestErrorInfo {
   code: PriestErrorCode;
-  /** Seconds from the server's Retry-After header; set only for `rate_limited`. */
+  /** Seconds from the server's Retry-After header; set for `rate_limited` and `busy`. */
   retryAfterSeconds: number | null;
 }

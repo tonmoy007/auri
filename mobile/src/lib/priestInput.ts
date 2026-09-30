@@ -3,8 +3,10 @@
 // Pure logic for the composer, voice input, the home-screen entry point and the
 // first-use acknowledgement. No React Native imports, so Vitest covers it.
 
+import type { RecordingStartResult } from '../types';
 import {
   TRADITION_IDS,
+  TRADITION_LABELS,
   type PriestStatus,
   type TraditionId,
   type TraditionOption,
@@ -61,6 +63,54 @@ export function resolveTradition(
   return offered.some((option) => option.id === known) ? known : null;
 }
 
+/** Cut text to `maxChars` characters (code points), the same unit the counter and the server use. */
+export function clampQuestion(text: string, maxChars: number): string {
+  const characters = Array.from(text);
+  return characters.length <= maxChars ? text : characters.slice(0, maxChars).join('');
+}
+
+/** A notice when the saved tradition is not offered, so the user knows the filter is off. */
+export function traditionUnavailableNotice(
+  preference: string | null,
+  offered: TraditionOption[],
+): string | null {
+  const known = TRADITION_IDS.find((id) => id === preference);
+  if (!known || offered.some((option) => option.id === known)) return null;
+  return `Your saved tradition (${TRADITION_LABELS[known]}) isn't available right now, so answers draw on all traditions.`;
+}
+
+const MS_PER_SECOND = 1000;
+
+/** Whole seconds still to wait before a retry, counting down from the server's wait. */
+export function retryRemainingSeconds(
+  startedAtMs: number,
+  retryAfterSeconds: number | null,
+  nowMs: number,
+): number {
+  if (retryAfterSeconds === null) return 0;
+  const remainingMs = startedAtMs + retryAfterSeconds * MS_PER_SECOND - nowMs;
+  return Math.max(0, Math.ceil(remainingMs / MS_PER_SECOND));
+}
+
+/**
+ * A token that goes stale when bumped. An async result checks the token it
+ * started with, so a transcript that lands after Clear is dropped.
+ */
+export function createGenerationGuard(): {
+  current: () => number;
+  bump: () => void;
+  isCurrent: (token: number) => boolean;
+} {
+  let generation = 0;
+  return {
+    current: () => generation,
+    bump: () => {
+      generation += 1;
+    },
+    isCurrent: (token) => token === generation,
+  };
+}
+
 /** Put a transcript into the composer text for review; never sends anything. */
 export function mergeTranscript(existing: string, transcript: string, maxChars: number): string {
   const spoken = transcript.trim();
@@ -70,7 +120,7 @@ export function mergeTranscript(existing: string, transcript: string, maxChars: 
   return Array.from(joined).slice(0, maxChars).join('');
 }
 
-export type VoiceIssue = 'permission' | 'record' | 'transcribe';
+export type VoiceIssue = 'permission' | 'record' | 'transcribe' | 'limit';
 
 const PERMISSION_ERROR_PATTERN = /permission/i;
 
@@ -86,12 +136,20 @@ export function classifyRecorderError(
 
 const TYPE_INSTEAD = 'You can type your question instead.';
 
+/** What a failed start means to the user, read straight from the result so a repeat failure shows again. */
+export function voiceIssueForStart(result: RecordingStartResult): VoiceIssue | null {
+  if (result === 'permission_denied') return 'permission';
+  return result === 'failed' ? 'record' : null;
+}
+
 export function voiceIssueMessage(issue: VoiceIssue): string {
   switch (issue) {
     case 'permission':
       return `Microphone access is off. ${TYPE_INSTEAD}`;
     case 'record':
       return `Couldn't record that. ${TYPE_INSTEAD}`;
+    case 'limit':
+      return 'Recording stopped at the time limit. Check the text before you send.';
     default:
       return `Couldn't turn that into text. ${TYPE_INSTEAD}`;
   }

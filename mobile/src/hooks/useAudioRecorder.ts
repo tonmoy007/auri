@@ -4,7 +4,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
-import type { AudioRecordingState, VoiceMask } from '../types';
+import type { AudioRecordingState, RecordingStartResult, VoiceMask } from '../types';
 import { configureForPlayback, configureForRecording } from '../lib/audioSession';
 import {
   AUDIO_CONFIG,
@@ -125,6 +125,17 @@ function normalizeMetering(db: number): number {
   return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
 }
 
+export interface UseAudioRecorderOptions {
+  /**
+   * Ask for the microphone and switch the audio session to recording as soon as
+   * the hook mounts (the booth does). Turn it off for a screen where voice is
+   * optional: nothing then happens until the user starts a recording.
+   */
+  prepareOnMount?: boolean;
+  /** Called with the file when the maximum duration stops the recording by itself. */
+  onAutoStop?: (uri: string, durationMs: number) => void;
+}
+
 /**
  * Custom hook for audio recording functionality.
  * Manages the full recording lifecycle:
@@ -134,7 +145,10 @@ function normalizeMetering(db: number): number {
  * - Duration tracking
  * - Error handling
  */
-export function useAudioRecorder() {
+export function useAudioRecorder({
+  prepareOnMount = true,
+  onAutoStop,
+}: UseAudioRecorderOptions = {}) {
   const [state, setState] = useState<AudioRecordingState>({
     isRecording: false,
     audioUri: null,
@@ -157,9 +171,14 @@ export function useAudioRecorder() {
   // whatever it writes then has to be deleted on the spot.
   const isMountedRef = useRef(true);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Whether this hook has put the audio session into recording mode and not yet
+  // handed it back, so unmounting can restore playback.
+  const isSessionRecordingRef = useRef(false);
+  const onAutoStopRef = useRef(onAutoStop);
+  onAutoStopRef.current = onAutoStop;
 
   /**
-   * Request microphone permission on mount.
+   * Request microphone permission on mount (unless `prepareOnMount` is off).
    * Also configures the audio mode for recording.
    */
   useEffect(() => {
@@ -171,6 +190,7 @@ export function useAudioRecorder() {
 
         if (granted) {
           await configureForRecording();
+          isSessionRecordingRef.current = true;
         }
       } catch (_error: unknown) {
         setState((prev) => ({
@@ -181,23 +201,43 @@ export function useAudioRecorder() {
       }
     };
 
-    void setupAudio();
+    if (prepareOnMount) void setupAudio();
 
     // Cleanup: stop recording if component unmounts, and delete the files it
     // made. The review screen sits on top of the booth in the stack, so the
     // booth only unmounts once that flow is over.
     return () => {
       isMountedRef.current = false;
-      if (recordingRef.current) {
-        void recordingRef.current.stopAndUnloadAsync();
-        recordingRef.current = null;
-      }
-      void deleteRecordingFile(recordingFileRef.current);
+      const recording = recordingRef.current;
+      recordingRef.current = null;
+      const recordingFile = recordingFileRef.current;
+      const restorePlayback = isSessionRecordingRef.current;
+      isSessionRecordingRef.current = false;
+      // Stop first, then delete: deleting a file the recorder is still
+      // finalising would race it. Leave the audio session as playback wants it.
+      void (async () => {
+        if (recording) {
+          try {
+            await recording.stopAndUnloadAsync();
+          } catch {
+            // Never started, or already unloaded: nothing left to stop.
+          }
+        }
+        await deleteRecordingFile(recordingFile);
+        if (restorePlayback) {
+          try {
+            await configureForPlayback();
+          } catch {
+            // The next screen that plays audio sets the mode itself.
+          }
+        }
+      })();
       void deleteRecordingFile(maskedFileRef.current);
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
     };
+    // Mount-only by design: the option picks the mode once, it is not reactive.
   }, []);
 
   /**
@@ -225,18 +265,26 @@ export function useAudioRecorder() {
    * Start recording audio.
    * Must have permission and not already be recording.
    */
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (): Promise<RecordingStartResult> => {
     try {
       if (!state.hasPermission) {
         const { granted } = await Audio.requestPermissionsAsync();
         if (!granted) {
           setState((prev) => ({
             ...prev,
+            hasPermission: false,
             error: 'Microphone permission denied',
           }));
-          return;
+          return 'permission_denied';
         }
         setState((prev) => ({ ...prev, hasPermission: true }));
+      }
+
+      // Recording mode is set here, not only on mount, so a screen that does not
+      // prepare on mount still gets it when the user taps the mic.
+      if (!isSessionRecordingRef.current) {
+        await configureForRecording();
+        isSessionRecordingRef.current = true;
       }
 
       // Unload any previous recording
@@ -280,7 +328,7 @@ export function useAudioRecorder() {
       if (!isMountedRef.current) {
         // The booth was left while the recorder was being prepared.
         await discardAbandonedRecording(recording);
-        return;
+        return 'failed';
       }
 
       recordingRef.current = recording;
@@ -307,16 +355,23 @@ export function useAudioRecorder() {
         const elapsed = Date.now() - startTime;
         setState((prev) => ({ ...prev, durationMs: elapsed }));
 
-        // Auto-stop at max duration
+        // Auto-stop at max duration, handing the file to the caller so the
+        // recording is not lost without a word.
         if (elapsed >= MAX_RECORDING_DURATION_MS) {
-          void stopRecording();
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+          }
+          void stopRecording().then((uri) => {
+            if (uri) onAutoStopRef.current?.(uri, elapsed);
+          });
         }
       }, 100);
 
       await recording.startAsync();
       if (!isMountedRef.current) {
         await discardAbandonedRecording(recording);
-        return;
+        return 'failed';
       }
       setState((prev) => ({
         ...prev,
@@ -326,12 +381,14 @@ export function useAudioRecorder() {
         durationMs: 0,
         amplitude: 0,
       }));
+      return 'started';
     } catch (_error: unknown) {
       setState((prev) => ({
         ...prev,
         isRecording: false,
         error: 'Failed to start recording',
       }));
+      return 'failed';
     }
   }, [state.hasPermission, discardAbandonedRecording]);
 
@@ -361,6 +418,7 @@ export function useAudioRecorder() {
       // review screen's "play masked audio" inherits a session still set up
       // to capture rather than play.
       await configureForPlayback();
+      isSessionRecordingRef.current = false;
 
       if (!uri) {
         throw new Error('Recording produced no audio file');
@@ -411,7 +469,18 @@ export function useAudioRecorder() {
   const transcribeRecording = useCallback(async (uri: string, durationMs: number, options: SpeechOptions = {}): Promise<string | null> => {
     setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
 
-    const deviceTokenHash = await hashDeviceToken();
+    let deviceTokenHash: string;
+    try {
+      deviceTokenHash = await hashDeviceToken();
+    } catch (_error: unknown) {
+      // A failed identity read must not escape: the caller shows its own message.
+      setState((prev) => ({
+        ...prev,
+        isUploading: false,
+        uploadError: 'Failed to upload recording',
+      }));
+      return null;
+    }
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {

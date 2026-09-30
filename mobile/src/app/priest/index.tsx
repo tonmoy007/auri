@@ -3,7 +3,7 @@
 // The conversation lives in memory only: leaving the screen or tapping Clear
 // discards it. A dark slate screen with no 3D canvas, to keep it light.
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   FlatList,
@@ -23,21 +23,29 @@ import { PriestComposer } from '../../components/PriestComposer';
 import { PriestMessage } from '../../components/PriestMessage';
 import { usePriestConversation, type ChatMessage } from '../../hooks/usePriestConversation';
 import { usePriestStatus } from '../../hooks/usePriestStatus';
+import { PriestCrisisCard } from '../../components/PriestCrisisCard';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
+import { useRetryCountdown } from '../../hooks/useRetryCountdown';
 import { hasAcknowledgedPriestIntro, useSettings } from '../../hooks/useSettings';
-import { resolveTradition } from '../../lib/priestInput';
+import {
+  canSubmitQuestion,
+  resolveTradition,
+  traditionUnavailableNotice,
+} from '../../lib/priestInput';
 import {
   EMPTY_CONVERSATION_TEXT,
   PRIVACY_LINE,
   pendingStageText,
   presentError,
+  presentHelpNow,
+  retryLabel,
   type CitationPresentation,
   type ErrorPresentation,
 } from '../../lib/priestPresentation';
 import type { PriestErrorInfo, PriestStatus } from '../../types/priest';
 
 const MIN_TOUCH_TARGET = 44;
-type Gate = 'checking' | 'needs_intro' | 'ok';
+type Gate = 'checking' | 'needs_intro' | 'ok' | 'failed';
 
 function renderMessage(
   item: ChatMessage,
@@ -55,25 +63,40 @@ function statusFailure(
   return null;
 }
 
-function renderActionButton(label: string, onPress: () => void): React.JSX.Element {
+function renderActionButton(
+  label: string,
+  onPress: () => void,
+  disabled = false,
+): React.JSX.Element {
   return (
     <TouchableOpacity
       style={styles.errorAction}
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={{ disabled }}
     >
-      <Text style={styles.errorActionText}>{label}</Text>
+      <Text style={[styles.errorActionText, disabled && styles.errorActionTextDisabled]}>
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
 
-function renderErrorBanner(error: ErrorPresentation, onRetry: () => void): React.JSX.Element {
+interface RetryControl {
+  onRetry: () => void;
+  label: string;
+  disabled: boolean;
+}
+
+function renderErrorBanner(error: ErrorPresentation, retry: RetryControl): React.JSX.Element {
   return (
     <View style={styles.errorBanner} accessibilityRole="alert" accessibilityLiveRegion="polite">
       <Text style={styles.errorText}>{error.message}</Text>
+      <Text style={styles.helpLine}>{error.helpLine}</Text>
       {error.offersBack ? renderActionButton('Go back', () => router.back()) : null}
-      {error.retryable ? renderActionButton('Try again', onRetry) : null}
+      {error.retryable ? renderActionButton(retry.label, retry.onRetry, retry.disabled) : null}
     </View>
   );
 }
@@ -89,6 +112,7 @@ function renderStatusFallback(
       {failure ? (
         <View accessibilityRole="alert">
           <Text style={styles.failureText}>{failure.message}</Text>
+          <Text style={[styles.helpLine, styles.failureHelpLine]}>{failure.helpLine}</Text>
           {failure.retryable
             ? renderActionButton('Try again', onRetry)
             : renderActionButton('Go back', () => router.back())}
@@ -103,34 +127,62 @@ export default function PriestScreen(): React.JSX.Element {
   const { status, error: statusError, isLoading, reload } = usePriestStatus();
   const { guideTradition } = useSettings();
   const tradition = resolveTradition(guideTradition, status?.traditions ?? []);
-  const conversation = usePriestConversation(tradition);
+  const maxChars = status?.max_question_chars ?? 0;
+  const conversation = usePriestConversation(tradition, maxChars);
   const reduceMotion = useReducedMotion();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const [gate, setGate] = useState<Gate>('checking');
+  const [gateAttempt, setGateAttempt] = useState(0);
   const [openCitation, setOpenCitation] = useState<CitationPresentation | null>(null);
+  const [isVoiceBusy, setIsVoiceBusy] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const helpBlock = useMemo(() => presentHelpNow(status?.crisis_contacts), [status]);
+  const retryWait = useRetryCountdown(
+    conversation.errorAt,
+    conversation.error?.retryAfterSeconds ?? null,
+  );
 
   // A new disclaimer version, or a first visit that skipped the home screen's
   // check (a deep link), sends the user through the intro first.
   useEffect(() => {
     if (!status || !status.enabled) return undefined;
     let cancelled = false;
-    void hasAcknowledgedPriestIntro(status.disclaimer_version).then((acknowledged) => {
-      if (cancelled) return;
-      setGate(acknowledged ? 'ok' : 'needs_intro');
-      if (!acknowledged) router.replace('/priest/intro');
-    });
+    hasAcknowledgedPriestIntro(status.disclaimer_version)
+      .then((acknowledged) => {
+        if (cancelled) return;
+        setGate(acknowledged ? 'ok' : 'needs_intro');
+        if (!acknowledged) router.replace('/priest/intro');
+      })
+      .catch(() => {
+        // A failed storage read must not leave the spinner running for ever.
+        if (!cancelled) setGate('failed');
+      });
     return () => {
       cancelled = true;
     };
-  }, [status]);
+  }, [status, gateAttempt]);
+
+  const handleRetry = useCallback(() => {
+    // The same rules as the Send button: not while recording, not an unsendable
+    // question, not before the wait the server asked for is over.
+    const canRetry =
+      !isVoiceBusy && retryWait === 0 && canSubmitQuestion(conversation.draft, maxChars);
+    if (canRetry) conversation.send();
+  }, [isVoiceBusy, retryWait, conversation, maxChars]);
 
   const scrollToEnd = useCallback(() => {
     listRef.current?.scrollToEnd({ animated: !reduceMotion });
   }, [reduceMotion]);
 
-  const failure = statusFailure(statusError, status);
+  const failure =
+    gate === 'failed' && !statusError
+      ? presentError({ code: 'unexpected', retryAfterSeconds: null })
+      : statusFailure(statusError, status);
   const isReady = status !== null && status.enabled && gate === 'ok';
   const hasContent = conversation.messages.length > 0 || conversation.draft.length > 0;
+  const canRetryNow =
+    !isVoiceBusy && retryWait === 0 && canSubmitQuestion(conversation.draft, maxChars);
+  const traditionNotice = traditionUnavailableNotice(guideTradition, status?.traditions ?? []);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -159,6 +211,23 @@ export default function PriestScreen(): React.JSX.Element {
         </TouchableOpacity>
       </View>
 
+      <View style={styles.helpRow}>
+        <TouchableOpacity
+          style={styles.helpButton}
+          onPress={() => setShowHelp((shown) => !shown)}
+          accessibilityRole="button"
+          accessibilityLabel={showHelp ? 'Hide help' : 'Need help now?'}
+          accessibilityState={{ expanded: showHelp }}
+        >
+          <Text style={styles.helpButtonText}>{showHelp ? 'Hide help' : 'Need help now?'}</Text>
+        </TouchableOpacity>
+      </View>
+      {showHelp ? (
+        <View style={styles.helpPanel}>
+          <PriestCrisisCard block={helpBlock} variant="static" />
+        </View>
+      ) : null}
+
       {isReady && status ? (
         <KeyboardAvoidingView
           style={styles.flex}
@@ -180,7 +249,14 @@ export default function PriestScreen(): React.JSX.Element {
               </View>
             }
           />
-          {conversation.error ? renderErrorBanner(conversation.error, conversation.send) : null}
+          {conversation.error
+            ? renderErrorBanner(conversation.error, {
+                onRetry: handleRetry,
+                label: retryLabel(retryWait),
+                disabled: !canRetryNow,
+              })
+            : null}
+          {traditionNotice ? <Text style={styles.traditionNotice}>{traditionNotice}</Text> : null}
           <PriestComposer
             value={conversation.draft}
             onChangeText={conversation.setDraft}
@@ -189,13 +265,21 @@ export default function PriestScreen(): React.JSX.Element {
             isPending={conversation.isPending}
             stageText={pendingStageText(conversation.stage)}
             maxChars={status.max_question_chars}
+            clearCount={conversation.clearCount}
+            onBusyChange={setIsVoiceBusy}
           />
         </KeyboardAvoidingView>
       ) : (
         renderStatusFallback(
           failure,
           isLoading || (status?.enabled === true && gate === 'checking'),
-          () => void reload(),
+          () => {
+            if (gate === 'failed') {
+              setGate('checking');
+              setGateAttempt((attempt) => attempt + 1);
+            }
+            void reload();
+          },
         )
       )}
 
@@ -286,6 +370,41 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.sm,
     fontWeight: typography.fontWeight.semibold,
     color: colors.candleGlow,
+  },
+  errorActionTextDisabled: {
+    color: colors.slate600,
+  },
+  helpLine: {
+    marginTop: spacing.sm,
+    fontSize: typography.fontSize.sm,
+    color: colors.slate300,
+  },
+  failureHelpLine: {
+    textAlign: 'center',
+  },
+  helpRow: {
+    alignItems: 'flex-end',
+    paddingHorizontal: spacing.md,
+  },
+  helpButton: {
+    minHeight: MIN_TOUCH_TARGET,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
+  },
+  helpButtonText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.slate300,
+    textDecorationLine: 'underline',
+  },
+  helpPanel: {
+    paddingHorizontal: spacing.md,
+    paddingBottom: spacing.sm,
+  },
+  traditionNotice: {
+    marginHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+    fontSize: typography.fontSize.xs,
+    color: colors.slate400,
   },
   center: {
     flex: 1,

@@ -4,7 +4,7 @@
 // `tel:` link built from a strictly validated number); nothing goes over the
 // network from here.
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { colors } from '../theme/colors';
 import { borderRadius, spacing, typography } from '../theme';
@@ -16,19 +16,32 @@ const BORDER_WIDTH = 2;
 
 interface PriestCrisisCardProps {
   block: CrisisBlock;
+  /**
+   * `reply` is a crisis answer: it is announced and buzzes once when it appears.
+   * `static` is the always-available help block: no alert, no haptic.
+   */
+  variant?: 'reply' | 'static';
 }
 
 /**
  * Crisis card: fixed heading and text, the contacts, and a call button for each
- * contact that has a safe number. Fires a warning haptic once when it appears.
+ * contact that has a safe number. A crisis reply fires a warning haptic once per
+ * mounted card, however often the screen around it re-renders.
  */
-export function PriestCrisisCard({ block }: PriestCrisisCardProps): React.JSX.Element {
-  const haptics = useHaptics();
+export function PriestCrisisCard({
+  block,
+  variant = 'reply',
+}: PriestCrisisCardProps): React.JSX.Element {
+  const { warning } = useHaptics();
   const [dialFailure, setDialFailure] = useState<string | null>(null);
+  const hasBuzzedRef = useRef(false);
+  const isReply = variant === 'reply';
 
   useEffect(() => {
-    haptics.warning();
-  }, [haptics]);
+    if (!isReply || hasBuzzedRef.current) return;
+    hasBuzzedRef.current = true;
+    warning();
+  }, [isReply, warning]);
 
   const handleCall = useCallback((telUrl: string, detail: string) => {
     setDialFailure(null);
@@ -36,13 +49,17 @@ export function PriestCrisisCard({ block }: PriestCrisisCardProps): React.JSX.El
   }, []);
 
   return (
-    <View style={styles.card} accessibilityRole="alert" accessibilityLiveRegion="assertive">
+    <View
+      style={styles.card}
+      accessibilityRole={isReply ? 'alert' : undefined}
+      accessibilityLiveRegion={isReply ? 'assertive' : undefined}
+    >
       <Text style={styles.heading} accessibilityRole="header">
         {block.heading}
       </Text>
       <Text style={styles.body}>{block.body}</Text>
-      {block.contacts.map((contact) => (
-        <View key={`${contact.label}-${contact.detail}`} style={styles.contactRow}>
+      {block.contacts.map((contact, index) => (
+        <View key={`${index}-${contact.label}-${contact.detail}`} style={styles.contactRow}>
           <View style={styles.contactText}>
             <Text style={styles.contactLabel}>{contact.label}</Text>
             <Text style={styles.contactDetail} selectable>

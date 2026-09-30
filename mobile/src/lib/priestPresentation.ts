@@ -10,7 +10,6 @@
 // depend on text the server, or a model behind it, produced.
 
 import {
-  type CrisisContactOut,
   type PriestAnswerResponse,
   type PriestCitation,
   type PriestErrorInfo,
@@ -37,7 +36,12 @@ export const CRISIS_EMERGENCY_LINE =
   'If you are in immediate danger, contact your local emergency number.';
 export const EMPTY_CONVERSATION_TEXT =
   "Ask a question and I'll share what Auri's study library says, with its sources.";
-export const PRIVACY_LINE = 'Guide questions are not stored.';
+export const PRIVACY_LINE = 'Auri does not save Guide questions.';
+export const HELP_NOW_HEADING = 'If you are in immediate danger';
+export const HELP_NOW_BODY =
+  'Reach out to someone you trust or to a local crisis line. You do not have to carry this alone.';
+export const GUIDE_TRADITION_NOTE =
+  'Your choice is saved on this device and sent with each question to narrow the answer.';
 
 export const INTRO_STATEMENTS: readonly { key: string; heading: string; body: string }[] = [
   {
@@ -53,12 +57,9 @@ export const INTRO_STATEMENTS: readonly { key: string; heading: string; body: st
   {
     key: 'privacy',
     heading: 'Privacy',
-    body: 'Your questions are not stored, and your company cannot see them.',
-  },
-  {
-    key: 'crisis',
-    heading: 'If you need help now',
-    body: CRISIS_EMERGENCY_LINE,
+    body:
+      'Auri does not save your questions. To answer, each question is sent to AI model servers ' +
+      'run for your organisation, and whoever runs them can see it while it is answered.',
   },
 ];
 
@@ -190,15 +191,33 @@ function presentQuotes(reply: PriestAnswerResponse): DisplayBlock | null {
   };
 }
 
-function presentContact(contact: CrisisContactOut): CrisisContactPresentation {
-  const telUrl = telUrlFor(contact.dial);
-  const spoken = `${contact.label}, ${contact.detail}`;
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function presentContact(label: string, detail: string, dial: unknown): CrisisContactPresentation {
+  const telUrl = typeof dial === 'string' ? telUrlFor(dial) : null;
+  const spoken = `${label}, ${detail}`;
   return {
-    label: contact.label,
-    detail: contact.detail,
+    label,
+    detail,
     telUrl,
     accessibilityLabel: telUrl ? `Call ${spoken}` : spoken,
   };
+}
+
+/**
+ * Present crisis contacts from anything the server sent. Each entry is checked
+ * on its own, so one malformed contact never hides the others (or the card).
+ */
+export function presentCrisisContacts(contacts: unknown): CrisisContactPresentation[] {
+  if (!Array.isArray(contacts)) return [];
+  return contacts.flatMap((entry: unknown) => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const { label, detail, dial } = entry as Record<string, unknown>;
+    if (!isNonEmptyString(label) || !isNonEmptyString(detail)) return [];
+    return [presentContact(label, detail, dial)];
+  });
 }
 
 function presentCrisis(reply: PriestAnswerResponse): AnswerPresentation {
@@ -210,11 +229,22 @@ function presentCrisis(reply: PriestAnswerResponse): AnswerPresentation {
         heading: CRISIS_HEADING,
         body: CRISIS_BODY,
         emergencyLine: CRISIS_EMERGENCY_LINE,
-        contacts: (reply.contacts ?? []).map(presentContact),
+        contacts: presentCrisisContacts(reply.contacts),
       },
     ],
     citations: [],
     announcement: 'Important: support contacts are shown.',
+  };
+}
+
+/** The always-available help block: fixed words, and the contacts when they are known. */
+export function presentHelpNow(contacts: unknown): CrisisBlock {
+  return {
+    type: 'crisis',
+    heading: HELP_NOW_HEADING,
+    body: HELP_NOW_BODY,
+    emergencyLine: CRISIS_EMERGENCY_LINE,
+    contacts: presentCrisisContacts(contacts),
   };
 }
 
@@ -249,7 +279,9 @@ function presentExcerpts(
       number: c.number,
       title: c.title,
       snippet: c.snippet,
-      accessibilityLabel: c.accessibilityLabel,
+      // The button's label replaces its children for a screen reader, so it
+      // has to carry the passage as well as the source.
+      accessibilityLabel: `${c.accessibilityLabel}. ${c.snippet}`,
     })),
   };
   return {
@@ -315,19 +347,41 @@ export interface ErrorPresentation {
   retryable: boolean;
   /** Whether the screen should offer a way back instead of a retry. */
   offersBack: boolean;
+  /** Shown with every failure, so a person in distress is never left without a way to help. */
+  helpLine: string;
+  /** How long the server asked the user to wait before trying again, if it said. */
+  retryAfterSeconds: number | null;
 }
 
 const RATE_LIMIT_PREFIX = "Let's pause for a moment.";
+const SECONDS_PER_MINUTE = 60;
+const MINUTES_PER_HOUR = 60;
+
+function plural(count: number, unit: string): string {
+  return `${count} ${unit}${count === 1 ? '' : 's'}`;
+}
+
+/** A wait in words: seconds under a minute, then minutes, then hours (rounded up, never understated). */
+export function formatWait(seconds: number): string {
+  const whole = Math.max(1, Math.ceil(seconds));
+  if (whole < SECONDS_PER_MINUTE) return plural(whole, 'second');
+  const totalMinutes = Math.ceil(whole / SECONDS_PER_MINUTE);
+  const hours = Math.floor(totalMinutes / MINUTES_PER_HOUR);
+  const minutes = totalMinutes % MINUTES_PER_HOUR;
+  if (hours === 0) return plural(minutes, 'minute');
+  if (minutes === 0) return plural(hours, 'hour');
+  return `${plural(hours, 'hour')} ${plural(minutes, 'minute')}`;
+}
 
 function rateLimitMessage(seconds: number | null): string {
   if (seconds === null) return `${RATE_LIMIT_PREFIX} Please try again shortly.`;
-  return `${RATE_LIMIT_PREFIX} Try again in ${Math.max(1, Math.ceil(seconds))} s.`;
+  return `${RATE_LIMIT_PREFIX} Try again in ${formatWait(seconds)}.`;
 }
 
-const STATIC_ERRORS: Record<
-  Exclude<PriestErrorInfo['code'], 'rate_limited'>,
-  ErrorPresentation
-> = {
+type StaticErrorCode = Exclude<PriestErrorInfo['code'], 'rate_limited'>;
+type StaticError = Pick<ErrorPresentation, 'message' | 'retryable' | 'offersBack'>;
+
+const STATIC_ERRORS: Record<StaticErrorCode, StaticError> = {
   offline: {
     message: "You're offline. Your question is still here.",
     retryable: true,
@@ -377,9 +431,25 @@ export function presentError(info: PriestErrorInfo): ErrorPresentation {
       message: rateLimitMessage(info.retryAfterSeconds),
       retryable: true,
       offersBack: false,
+      helpLine: CRISIS_EMERGENCY_LINE,
+      retryAfterSeconds: info.retryAfterSeconds,
     };
   }
-  return STATIC_ERRORS[info.code];
+  return {
+    ...STATIC_ERRORS[info.code],
+    helpLine: CRISIS_EMERGENCY_LINE,
+    retryAfterSeconds: info.code === 'busy' ? info.retryAfterSeconds : null,
+  };
+}
+
+/** What a screen reader says for a failure: the message, then where to find help. */
+export function errorAnnouncement(error: ErrorPresentation): string {
+  return `${error.message} ${error.helpLine}`;
+}
+
+/** The retry button's text: plain, or with the wait that is left. */
+export function retryLabel(remainingSeconds: number): string {
+  return remainingSeconds > 0 ? `Try again in ${formatWait(remainingSeconds)}` : 'Try again';
 }
 
 // ── Waiting ─────────────────────────────────────────────────────────────

@@ -220,7 +220,9 @@ describe('askPriest: failures', () => {
 
   it.each([
     ['0', 1],
-    ['99999', 3600],
+    ['3700', 3700],
+    ['86400', 86400],
+    ['999999', 86400],
   ])('clamps Retry-After %s to %s', async (header, expected) => {
     // Arrange
     stubFetch(async () =>
@@ -232,6 +234,52 @@ describe('askPriest: failures', () => {
 
     // Assert
     expect(error.retryAfterSeconds).toBe(expected);
+  });
+
+  it('keeps the Retry-After of a busy 503 so the retry can wait for it', async () => {
+    // Arrange
+    stubFetch(async () =>
+      jsonResponse({ detail: 'priest_busy' }, { status: 503, headers: { 'Retry-After': '7' } }),
+    );
+
+    // Act
+    const error = await failureOf(askPriest({ question: QUESTION, tradition: null }));
+
+    // Assert
+    expect([error.code, error.retryAfterSeconds]).toEqual(['busy', 7]);
+  });
+
+  it('leaves retry seconds null for a busy 503 without Retry-After', async () => {
+    // Arrange
+    stubFetch(async () => jsonResponse({ detail: 'priest_busy' }, { status: 503 }));
+
+    // Act
+    const error = await failureOf(askPriest({ question: QUESTION, tradition: null }));
+
+    // Assert
+    expect([error.code, error.retryAfterSeconds]).toEqual(['busy', null]);
+  });
+
+  it('accepts a crisis reply whose list fields are missing', async () => {
+    // Arrange
+    stubFetch(async () => jsonResponse({ kind: 'crisis', contacts: [null] }));
+
+    // Act
+    const answer = await askPriest({ question: QUESTION, tradition: null });
+
+    // Assert
+    expect(answer.kind).toBe('crisis');
+  });
+
+  it('still rejects a non-crisis reply whose list fields are missing', async () => {
+    // Arrange
+    stubFetch(async () => jsonResponse({ kind: 'answer' }));
+
+    // Act
+    const error = await failureOf(askPriest({ question: QUESTION, tradition: null }));
+
+    // Assert
+    expect(error.code).toBe('unexpected');
   });
 
   it.each([
@@ -333,6 +381,30 @@ describe('askPriest: timeout and cancel', () => {
     expect(signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     await pending;
+  });
+
+  it('recognises an abort error that is not an Error instance (a runtime DOMException)', async () => {
+    // Arrange
+    stubFetch(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () =>
+            reject({ name: 'AbortError', message: 'Aborted' }),
+          );
+        }),
+    );
+    const controller = new AbortController();
+    const outcome = failureOf(
+      askPriest({ question: QUESTION, tradition: null }, { signal: controller.signal }),
+    );
+
+    // Act
+    await vi.advanceTimersByTimeAsync(10);
+    controller.abort();
+    const error = await outcome;
+
+    // Assert
+    expect(error.code).toBe('cancelled');
   });
 
   it('reports cancelled, not timeout, when the caller aborts', async () => {
