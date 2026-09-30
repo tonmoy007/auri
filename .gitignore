@@ -60,3 +60,6 @@ Thumbs.db
 
 # OMC runtime state
 .omc/
+
+# Priest mode: a dev-machine copy of the study vault or its index must never be committed
+data/priest/
