@@ -28,7 +28,14 @@ describe('visibleTabsFor', () => {
   })
 
   it('shows an administrator the admin tabs and the privacy page, not the HR-only tabs', () => {
-    expect(labelsFor(userWith('admin'))).toEqual(['Privacy', 'Config', 'Status', 'Build', 'Audit'])
+    expect(labelsFor(userWith('admin'))).toEqual([
+      'Privacy',
+      'Config',
+      'Status',
+      'Build',
+      'Guide',
+      'Audit',
+    ])
   })
 
   it('shows nobody signed in no tabs', () => {
@@ -40,10 +47,18 @@ describe('visibleTabsFor', () => {
   })
 
   it('keeps the developer tabs away from every role except admin', () => {
-    const developerTabs = ['Config', 'Status', 'Build', 'Audit']
+    const developerTabs = ['Config', 'Status', 'Build', 'Guide', 'Audit']
     for (const role of ['hr', 'moderator'] as const) {
       expect(labelsFor(userWith(role)).filter((label) => developerTabs.includes(label))).toEqual([])
     }
+  })
+
+  it('gives the Guide tab to administrators alone, never HR or a moderator', () => {
+    const guide = TAB_ACCESS.find((tab) => tab.value === 'priest')
+
+    expect(guide).toEqual({ value: 'priest', label: 'Guide', roles: ['admin'] })
+    expect(labelsFor(userWith('hr'))).not.toContain('Guide')
+    expect(labelsFor(userWith('moderator'))).not.toContain('Guide')
   })
 
   it('never lists a tab twice or with an empty role list', () => {

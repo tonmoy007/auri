@@ -10,6 +10,8 @@ export interface ConfigResponse {
   voice_masks: ConfigEntry[]
   build: ConfigEntry[]
   analytics: ConfigEntry[]
+  crisis: ConfigEntry[]
+  priest: ConfigEntry[]
 }
 
 export type BuildStatusValue = 'idle' | 'running' | 'success' | 'failed'
@@ -336,6 +338,92 @@ export interface ConfessionSummaryPage {
   offset: number
 }
 
+/** Facts about one built index. Counts and hashes only, never note text. */
+export interface PriestManifest {
+  version: string
+  created_at: string
+  embed_model: string
+  embed_digest: string
+  dim: number
+  chunk_count: number
+  note_count: number
+  /** Notes left out of the index, counted by reason. */
+  exclusions: Record<string, number>
+  unresolved_links: number
+  warnings: string[]
+  build_seconds: number
+  cleaner_version: string
+  chunker_version: string
+}
+
+export interface PriestIndexInfo {
+  active_version: string | null
+  manifest: PriestManifest | null
+  versions: string[]
+  /** The embedding model the next build will use. */
+  configured_embed_model: string
+}
+
+export type PriestReindexState = 'idle' | 'running' | 'succeeded' | 'failed'
+
+export interface PriestReindexStatus {
+  state: PriestReindexState
+  started_at: string | null
+  finished_at: string | null
+  pid: number | null
+  notes_total: number
+  notes_indexed: number
+  chunks: number
+  exclusions: Record<string, number>
+  error_code: string | null
+}
+
+export interface PriestReindexStarted {
+  state: 'running'
+  started_at: string | null
+}
+
+export interface PriestEndpointHealth {
+  configured: boolean
+  /** `null` when it was not probed, for example because it is not configured. */
+  reachable: boolean | null
+  kind: string
+  host: string
+}
+
+export interface PriestHealth {
+  primary: PriestEndpointHealth
+  fallback: PriestEndpointHealth
+  embedder: { reachable: boolean | null; model: string }
+}
+
+export interface PriestOutcomeCount {
+  kind: string
+  /** `null` when the count was suppressed, which is not the same as zero. */
+  count: number | null
+  suppressed: boolean
+}
+
+export interface PriestLatency {
+  stage: string
+  /** Seconds. */
+  p50: number | null
+  p95: number | null
+}
+
+/** Counts and latencies since the process started. It never carries any text. */
+export interface PriestUsage {
+  since: string
+  min_cohort: number
+  outcomes: PriestOutcomeCount[]
+  latency: PriestLatency[]
+}
+
+export interface PriestReport {
+  available: boolean
+  summary: Record<string, unknown> | null
+}
+
 /**
  * Issues an authenticated request against a path under `/api/v1`.
  *
@@ -370,6 +458,28 @@ export const adminApi = {
     }),
 
   getBuildStatus: (request: Requester) => request<BuildStatus>('/admin/build-apk/status'),
+}
+
+export const priestAdminApi = {
+  getIndex: (request: Requester) => request<PriestIndexInfo>('/admin/priest/index'),
+
+  startReindex: (request: Requester) =>
+    request<PriestReindexStarted>('/admin/priest/reindex', { method: 'POST' }),
+
+  getReindexStatus: (request: Requester) =>
+    request<PriestReindexStatus>('/admin/priest/reindex/status'),
+
+  activate: (request: Requester, version: string) =>
+    request<{ active_version: string }>('/admin/priest/activate', {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    }),
+
+  getHealth: (request: Requester) => request<PriestHealth>('/admin/priest/health'),
+
+  getUsage: (request: Requester) => request<PriestUsage>('/admin/priest/usage'),
+
+  getReport: (request: Requester) => request<PriestReport>('/admin/priest/report'),
 }
 
 export const auditApi = {

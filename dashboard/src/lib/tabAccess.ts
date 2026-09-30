@@ -25,6 +25,7 @@ export const TAB_ACCESS: TabAccess[] = [
   { value: 'config', label: 'Config', roles: ['admin'] },
   { value: 'status', label: 'Status', roles: ['admin'] },
   { value: 'build', label: 'Build', roles: ['admin'] },
+  { value: 'priest', label: 'Guide', roles: ['admin'] },
   { value: 'audit', label: 'Audit', roles: ['admin'] },
 ]
 

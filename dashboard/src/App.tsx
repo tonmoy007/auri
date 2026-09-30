@@ -7,6 +7,7 @@ import { ConnectionBar } from '@/components/ConnectionBar'
 import { DeliveryPanel } from '@/components/DeliveryPanel'
 import { DirectoryPanel } from '@/components/DirectoryPanel'
 import { InsightsPanel } from '@/components/InsightsPanel'
+import { PriestPanel } from '@/components/PriestPanel'
 import { PrivacyPanel } from '@/components/PrivacyPanel'
 import { QueuePanel } from '@/components/QueuePanel'
 import { RepliesPanel } from '@/components/RepliesPanel'
@@ -181,6 +182,20 @@ function App() {
                   onReset={handleReset}
                 />
                 <ConfigTable
+                  title="Crisis Contacts"
+                  description="Helpline and employee-assistance contacts shown in the fixed crisis reply, for confessions and the Guide."
+                  entries={config.crisis}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="Guide Settings"
+                  description="Models, limits and retrieval thresholds for the Guide. The chat server address and key are set in the environment, not here."
+                  entries={config.priest}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
                   title="Voice Masks"
                   description="SoX effect chain per mask, as a JSON list of arguments."
                   entries={config.voice_masks}
@@ -238,6 +253,10 @@ function App() {
 
           <TabsContent value="privacy">
             <PrivacyPanel />
+          </TabsContent>
+
+          <TabsContent value="priest">
+            <PriestPanel />
           </TabsContent>
 
           <TabsContent value="audit">
