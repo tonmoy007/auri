@@ -14,6 +14,8 @@ from app.api.v1.health import router as health_router
 from app.api.v1.hr import router as hr_router
 from app.api.v1.hr_themes import router as hr_themes_router
 from app.api.v1.moderation import router as moderation_router
+from app.api.v1.priest import router as priest_router
+from app.api.v1.priest_admin import router as priest_admin_router
 from app.api.v1.privacy import router as privacy_router
 from app.api.v1.stt import router as stt_router
 from app.api.v1.tts import router as tts_router
@@ -29,6 +31,8 @@ router.include_router(confessions_router)
 router.include_router(hr_router)
 router.include_router(hr_themes_router)
 router.include_router(privacy_router)
+router.include_router(priest_router)
+router.include_router(priest_admin_router)
 router.include_router(departments_router)
 router.include_router(moderation_router)
 router.include_router(delivery_router)

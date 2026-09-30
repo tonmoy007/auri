@@ -47,6 +47,15 @@ STAFF_ROUTES: dict[StaffRoute, tuple[set[UserRole], bool]] = {
     ("POST", "/api/v1/moderation/{confession_id}/acknowledge"): (QUEUE, True),
     ("POST", "/api/v1/moderation/{confession_id}/approve"): (QUEUE, True),
     ("POST", "/api/v1/moderation/{confession_id}/reject"): (QUEUE, True),
+    # Priest mode operator surface (13.22): admin only. Reindex starts a build and
+    # health makes network calls, so an authorised call is not probed.
+    ("GET", "/api/v1/admin/priest/index"): (ADMIN, True),
+    ("POST", "/api/v1/admin/priest/reindex"): (ADMIN, False),
+    ("GET", "/api/v1/admin/priest/reindex/status"): (ADMIN, True),
+    ("POST", "/api/v1/admin/priest/activate"): (ADMIN, True),
+    ("GET", "/api/v1/admin/priest/health"): (ADMIN, False),
+    ("GET", "/api/v1/admin/priest/usage"): (ADMIN, True),
+    ("GET", "/api/v1/admin/priest/report"): (ADMIN, True),
     ("GET", "/api/v1/auth/me"): (ANY_STAFF, True),
     ("POST", "/api/v1/auth/logout"): (ANY_STAFF, True),
     ("POST", "/api/v1/admin/build-apk"): (ADMIN, False),
@@ -88,6 +97,10 @@ OPEN_ROUTES: set[StaffRoute] = {
     ("POST", "/api/v1/stt"),
     ("POST", "/api/v1/tts"),
     ("POST", "/api/v1/voice/mask"),
+    # The Guide: scoped by the device header like the confessor's own routes, and it
+    # returns no staff data. /ask is gated by the kill switch and a per-device limit.
+    ("GET", "/api/v1/priest/status"),
+    ("POST", "/api/v1/priest/ask"),
 }
 
 
