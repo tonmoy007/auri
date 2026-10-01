@@ -5,8 +5,8 @@
 // apps. The screen draws a cover over the conversation whenever the app is not
 // active. On iOS the switcher first reports `inactive`, in time for the cover to be
 // drawn before the picture. On Android there is no `inactive` and the picture can
-// be taken before JavaScript runs, so the cover is best effort there; a native
-// flag (FLAG_SECURE) would be needed to be sure.
+// be taken before JavaScript runs, so the screen also sets FLAG_SECURE through
+// expo-screen-capture, which blanks the picture natively.
 
 /** The states React Native's AppState reports. */
 export type AppStateName = 'active' | 'background' | 'inactive' | 'unknown' | 'extension';

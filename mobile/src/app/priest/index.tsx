@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { router, Stack } from 'expo-router';
+import { usePreventScreenCapture } from 'expo-screen-capture';
 import { colors } from '../../theme/colors';
 import { borderRadius, spacing, typography } from '../../theme';
 import { CitationSheet } from '../../components/CitationSheet';
@@ -131,7 +132,10 @@ export default function PriestScreen(): React.JSX.Element {
   const maxChars = status?.max_question_chars ?? 0;
   const conversation = usePriestConversation(tradition, maxChars);
   const reduceMotion = useReducedMotion();
-  // Hides the question from the app-switcher thumbnail (plan 16.6).
+  // Keeps the question out of the app-switcher thumbnail (plan 16.6). On Android
+  // FLAG_SECURE blanks the snapshot and blocks screenshots while this screen is
+  // open; on iOS it blocks screen recording, and the cover below hides the snapshot.
+  usePreventScreenCapture('guide-conversation');
   const isCovered = useAppSwitcherCover();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const [gate, setGate] = useState<Gate>('checking');
