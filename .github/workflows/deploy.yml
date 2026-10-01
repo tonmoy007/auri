@@ -1,8 +1,18 @@
 name: Deploy
 
+# Runs only after CI has passed on a push to main, and builds the exact commit CI
+# tested. It used to trigger on the push itself, in parallel with CI, so a merge
+# could build and deploy before its checks finished (or after they failed).
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
+
+# One deploy at a time; a newer green commit waits for the running one.
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -23,12 +33,22 @@ jobs:
     permissions:
       contents: read
       packages: write
+    # workflow_run fires for every CI completion; build only a green push run.
+    if: ${{ github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' }}
     outputs:
       api_tag: ${{ steps.meta-api.outputs.tags }}
       bot_tag: ${{ steps.meta-bot.outputs.tags }}
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Under workflow_run the default checkout is main's latest commit,
+          # which may be newer than the one CI just passed.
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Short SHA of the tested commit
+        id: tested
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -46,9 +66,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}-api
           tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=ref,event=branch
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.tested.outputs.short_sha }}
+            type=raw,value=main
 
       - name: Generate image metadata (Bot)
         id: meta-bot
@@ -56,9 +75,8 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}-bot
           tags: |
-            type=sha,prefix=,suffix=,format=short
-            type=ref,event=branch
-            type=semver,pattern={{version}}
+            type=raw,value=${{ steps.tested.outputs.short_sha }}
+            type=raw,value=main
 
       - name: Build and push API image
         uses: docker/build-push-action@v5
@@ -92,8 +110,6 @@ jobs:
     if: ${{ vars.DEPLOY_ENABLED == 'true' }}
 
     steps:
-      - uses: actions/checkout@v4
-
       - name: Set up SSH
         run: |
           mkdir -p ~/.ssh
@@ -136,7 +152,7 @@ jobs:
           message: |
             🚀 *Auri Deploy*
             Status: ${{ needs.deploy.result || 'skipped' }}
-            Ref: ${{ github.ref_name }}
-            Commit: ${{ github.sha }}
+            Ref: main
+            Commit: ${{ github.event.workflow_run.head_sha }}
             Actor: ${{ github.actor }}
             See: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

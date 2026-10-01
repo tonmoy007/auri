@@ -896,6 +896,41 @@ def test_an_apostrophe_inside_a_word_does_not_end_a_straight_quotation() -> None
     assert spans == ["it's fine and we can go"]
 
 
+# Privacy review row 56: a stray straight quote mark can be closed by a later
+# plural possessive, so prose like the sentence below reads as a long quotation
+# and fails V3 (one regeneration). It is kept that way on purpose: the same
+# shape is a genuine quotation ending in a plural noun ("...never to their
+# fruits' and that helps"), and no rule can tell the two apart. A false alarm
+# costs a regeneration; a missed invented quotation breaks grounding.
+POSSESSIVE_AFTER_STRAY_MARK = "The scholars 'agreed long ago that all of the companions' views on grief were sound."
+
+
+def test_a_stray_mark_closed_by_a_plural_possessive_is_still_checked() -> None:
+    # Arrange
+    raw = _point(POSSESSIVE_AFTER_STRAY_MARK)
+
+    # Act
+    outcome = _check(raw)
+
+    # Assert — strict on purpose: treated as a quotation, and not in the source
+    assert "V3" in outcome.codes
+
+
+def test_a_quotation_ending_in_a_plural_noun_before_lower_case_prose_is_checked() -> (
+    None
+):
+    # Arrange
+    from app.priest.answer_validator import quoted_spans
+
+    text = "It is said 'you have a right to your actions but never to their fruits' and so on."
+
+    # Act
+    spans = quoted_spans(text)
+
+    # Assert
+    assert spans == ["you have a right to your actions but never to their fruits"]
+
+
 @pytest.mark.parametrize(
     "claim",
     [
