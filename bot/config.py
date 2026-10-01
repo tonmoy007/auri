@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import Field, HttpUrl, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class BotSettings(BaseSettings):
-    """Configuration for the Telegram confession bot."""
+    """Configuration for the Telegram confession bot.
+
+    ``AURI_ENV_FILE`` names the env file to read (default ``.env``); empty means none.
+    """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.environ.get("AURI_ENV_FILE", ".env") or None,
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
