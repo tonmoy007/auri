@@ -1,6 +1,6 @@
 .PHONY: help install-backend install-mobile dev-backend dev-agent dev-bot dev-mobile
 .PHONY: docker-up docker-down docker-build db-migrate db-rollback
-.PHONY: lint test test-e2e clean
+.PHONY: lint test test-e2e clean ci ci-python ci-dashboard ci-mobile
 
 ## —— Auri Makefile ———————————————————————————————————————————————————————————
 help: ## Show this help
@@ -74,6 +74,26 @@ test: ## Run all Python tests
 
 test-e2e: ## Run end-to-end tests
 	pytest tests/e2e/ -v
+
+## —— CI rehearsal ———————————————————————————————————————————————————————————————
+# The same commands .github/workflows/ci.yml runs, so a push can be rehearsed.
+# Install Python packages with: pip install -r backend/requirements.txt \
+#   -r bot/requirements.txt ruff mypy pytest pytest-asyncio pytest-cov httpx \
+#   aiosqlite -c backend/constraints.txt
+
+ci: ci-python ci-dashboard ci-mobile ## Run every CI check locally
+
+ci-python: ## CI's Python lint, type check and tests (no .env, test environment)
+	ruff check backend/ bot/
+	ruff format --check backend/ bot/
+	mypy backend/ bot/ --ignore-missing-imports
+	ENVIRONMENT=test pytest backend/ bot/ -q -m "not live_llm"
+
+ci-dashboard: ## CI's dashboard job
+	cd dashboard && npm ci && npx tsc -p tsconfig.app.json --noEmit && npm run lint && npm test && npm run build
+
+ci-mobile: ## CI's mobile lint, type check and tests
+	cd mobile && npm ci && npx eslint . --ext .ts,.tsx && npx tsc --noEmit && npx vitest run --passWithNoTests
 
 ## —— Cleanup ————————————————————————————————————————————————————————————————————
 
