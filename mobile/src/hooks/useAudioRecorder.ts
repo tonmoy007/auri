@@ -14,6 +14,8 @@ import {
   getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { expoDownloadPort } from '../lib/maskedDownload';
+import { downloadMaskedAudio, maskedDownloadUrl, maskUploadUrl } from '../lib/maskedDownloadCore';
 import { deleteRecordingFile } from '../lib/recordingFiles';
 import { speechToTextPath, type SpeechOptions } from '../lib/speechRoute';
 
@@ -134,6 +136,40 @@ export interface UseAudioRecorderOptions {
   prepareOnMount?: boolean;
   /** Called with the file when the maximum duration stops the recording by itself. */
   onAutoStop?: (uri: string, durationMs: number) => void;
+}
+
+/**
+ * Upload *uri* for masking and return the one-time download id.
+ *
+ * `fetch` carries no timeout of its own, so without the abort the request could
+ * hang and leave the booth stuck on "Processing…" with no way forward.
+ */
+async function requestMaskedDownload(
+  uri: string,
+  mask: VoiceMask,
+  durationMs: number,
+  deviceTokenHash: string,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('audio', { uri, name: 'confession.aac', type: 'audio/aac' } as unknown as Blob);
+  formData.append('mask', mask);
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
+  try {
+    const response = await fetch(maskUploadUrl(getApiBaseUrl()), {
+      method: 'POST',
+      headers: { 'X-Device-Token-Hash': deviceTokenHash },
+      body: formData,
+      signal: abort.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Voice masking failed (${response.status})`);
+    }
+    const body = (await response.json()) as { download_id: string };
+    return body.download_id;
+  } finally {
+    clearTimeout(abortTimer);
+  }
 }
 
 /**
@@ -527,51 +563,27 @@ export function useAudioRecorder({
    * the caller fall back to playing the original (unmasked) recording
    * instead of losing playback entirely.
    *
-   * Uses `fetch` + base64 rather than the STT upload's XHR/blob approach:
-   * RN's `fetch().blob()` handling is unreliable on this stack (new
-   * architecture/Fabric), and the backend returns base64 JSON specifically
-   * to sidestep that — see `backend/app/api/v1/voice.py`.
+   * The server holds the masked WAV for one download (plan 16.4) and
+   * expo-file-system streams it straight to the cache, rather than receiving
+   * it as base64 JSON held in memory (about 33.6 MB for five minutes). RN's
+   * `fetch().blob()` stays avoided: it is unreliable on this stack.
    */
   const maskRecording = useCallback(
     async (uri: string, mask: VoiceMask, durationMs: number): Promise<string | null> => {
       try {
         const deviceTokenHash = await hashDeviceToken();
-        const formData = new FormData();
-        formData.append('audio', {
-          uri,
-          name: 'confession.aac',
-          type: 'audio/aac',
-        } as unknown as Blob);
-        formData.append('mask', mask);
-
-        // `fetch` carries no timeout of its own, so without this the masking
-        // request could hang indefinitely and leave the booth stuck on
-        // "Processing…" with no way forward.
-        const abort = new AbortController();
-        const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
-        let response: Response;
-        try {
-          response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
-            method: 'POST',
-            headers: { 'X-Device-Token-Hash': deviceTokenHash },
-            body: formData,
-            signal: abort.signal,
-          });
-        } finally {
-          clearTimeout(abortTimer);
-        }
-        if (!response.ok) {
-          throw new Error(`Voice masking failed (${response.status})`);
-        }
-        const body = (await response.json()) as { audio_base64: string };
-
+        const downloadId = await requestMaskedDownload(uri, mask, durationMs, deviceTokenHash);
         const maskedUri = `${FileSystem.cacheDirectory}masked_${Date.now()}.wav`;
         // Tracked before the write, so a write that fails part-way is still cleaned up.
         maskedFileRef.current = maskedUri;
-        await FileSystem.writeAsStringAsync(maskedUri, body.audio_base64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!isMountedRef.current) {
+        const saved = await downloadMaskedAudio(
+          expoDownloadPort,
+          maskedDownloadUrl(getApiBaseUrl(), downloadId),
+          maskedUri,
+          { 'X-Device-Token-Hash': deviceTokenHash },
+          uploadTimeoutMsFor(durationMs),
+        );
+        if (!saved || !isMountedRef.current) {
           void deleteRecordingFile(maskedUri);
           return null;
         }

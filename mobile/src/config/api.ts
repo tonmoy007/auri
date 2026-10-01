@@ -83,6 +83,8 @@ export const ENDPOINTS = {
   stt: '/api/v1/stt',
   /** Apply a voice mask to a recorded confession */
   voiceMask: '/api/v1/voice/mask',
+  /** Fetch a masked recording once, by the id the mask endpoint returned */
+  voiceMasked: (id: string): string => `/api/v1/voice/masked/${encodeURIComponent(id)}`,
   /** Synthesize an AI agent voice response */
   tts: '/api/v1/tts',
   /** List configured recipient departments for the Forward flow */
@@ -143,6 +145,9 @@ export function uploadTimeoutMsFor(durationMs: number): number {
 
 /**
  * Maximum audio recording duration in milliseconds.
+ *
+ * Keep equal to the backend's `MAX_RECORDING_SECONDS`: the server refuses a longer
+ * recording with a 413 (plan 16.5; decision in docs/adr/recording-limit.md).
  */
 export const MAX_RECORDING_DURATION_MS = 300_000; // 5 minutes
 

@@ -100,6 +100,8 @@ OPEN_ROUTES: set[StaffRoute] = {
     ("GET", "/api/v1/stt/jobs/{job_id}"),
     ("POST", "/api/v1/tts"),
     ("POST", "/api/v1/voice/mask"),
+    # A masked recording, fetched once by the device that uploaded it (plan 16.4).
+    ("GET", "/api/v1/voice/masked/{download_id}"),
     # The Guide: scoped by the device header like the confessor's own routes, and it
     # returns no staff data. /ask is gated by the kill switch and a per-device limit.
     ("GET", "/api/v1/priest/status"),
