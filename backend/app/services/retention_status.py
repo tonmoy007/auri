@@ -45,6 +45,8 @@ async def record_run(
         emptied_to_shell=result.emptied_to_shell,
         expired_replies=result.expired_replies,
         expired_devices=result.expired_devices,
+        flagged_removed=result.flagged_removed,
+        unacknowledged_crisis_removed=result.unacknowledged_crisis_removed,
     )
     session.add(run)
     await session.flush()
