@@ -19,6 +19,7 @@ from typing import Final
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response, status
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
+from starlette.routing import BaseRoute, NoMatchFound
 
 from app.config import settings
 
@@ -85,10 +86,42 @@ def _route_label(request: Request) -> str:
     Returns:
         The route template, or ``UNMATCHED_ROUTE_LABEL``.
     """
-    template = getattr(request.scope.get("route"), "path", None)
-    if isinstance(template, str) and template:
-        return template
+    route = request.scope.get("route")
+    template = getattr(route, "path", None)
+    if route is not None and isinstance(template, str) and template:
+        return _included_prefix(request, route) + template
     return UNMATCHED_ROUTE_LABEL
+
+
+def _included_prefix(request: Request, route: BaseRoute) -> str:
+    """Return the include prefix that newer FastAPI leaves off the matched route.
+
+    FastAPI used to bake an included router's prefix (``/api/v1``) into each
+    route's ``path``. Newer releases keep the route's own path and apply the
+    prefix while routing, so the template alone would drop it and make
+    ``/api/v1/hr/...`` and ``/api/v1/admin/...`` routes collide with unprefixed
+    ones. The prefix is whatever precedes the route's own path in the request
+    URL; it came from routing, so it is one of a fixed set and safe as a label.
+
+    Args:
+        request: The request, after routing has populated its scope.
+        route: The matched route object from the scope.
+
+    Returns:
+        The prefix, or an empty string when the route's path is already complete.
+    """
+    try:
+        own_path = str(
+            route.url_path_for(
+                getattr(route, "name", ""), **request.scope.get("path_params", {})
+            )
+        )
+    except NoMatchFound:
+        return ""
+    request_path = request.scope.get("path", "")
+    if own_path and request_path.endswith(own_path):
+        return request_path[: len(request_path) - len(own_path)]
+    return ""
 
 
 def _method_label(request: Request) -> str:
