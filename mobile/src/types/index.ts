@@ -143,6 +143,11 @@ export interface AudioRecordingState {
   uploadProgress: number;
   /** Error message if the upload/transcription failed after all retries. */
   uploadError: string | null;
+  /**
+   * Which step a transcription is on: sending the audio, or waiting for the
+   * server's background job (plan 16.2). `null` when none is running.
+   */
+  transcriptionPhase: 'uploading' | 'transcribing' | null;
 }
 
 /**

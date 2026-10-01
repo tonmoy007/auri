@@ -81,6 +81,8 @@ export const ENDPOINTS = {
   deleteConfession: (id: string): string => `/api/v1/confessions/${id}`,
   /** Transcribe a recorded confession to text */
   stt: '/api/v1/stt',
+  /** Poll a background transcription started with `?mode=job` */
+  sttJob: (id: string): string => `/api/v1/stt/jobs/${encodeURIComponent(id)}`,
   /** Apply a voice mask to a recorded confession */
   voiceMask: '/api/v1/voice/mask',
   /** Fetch a masked recording once, by the id the mask endpoint returned */

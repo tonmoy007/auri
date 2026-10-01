@@ -88,6 +88,35 @@ describe('downloadMaskedAudio', () => {
     expect(fake.cancel).toHaveBeenCalledTimes(1)
   })
 
+  it('cancels a download when the user cancels', async () => {
+    // Arrange
+    const fake = port(new Promise(() => undefined))
+    const abort = new AbortController()
+
+    // Act
+    const pending = downloadMaskedAudio(fake.port, 'u', 'f', HEADERS, 1000, abort.signal)
+    abort.abort()
+    const ok = await pending
+
+    // Assert
+    expect(ok).toBe(false)
+    expect(fake.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not start a download that was already cancelled', async () => {
+    // Arrange
+    const fake = port(Promise.resolve({ status: 200 }))
+    const abort = new AbortController()
+    abort.abort()
+
+    // Act
+    const ok = await downloadMaskedAudio(fake.port, 'u', 'f', HEADERS, 1000, abort.signal)
+
+    // Assert
+    expect(ok).toBe(false)
+    expect(fake.start).not.toHaveBeenCalled()
+  })
+
   it('reports failure when the download errors', async () => {
     // Arrange
     const fake = port(Promise.reject(new Error('offline')))

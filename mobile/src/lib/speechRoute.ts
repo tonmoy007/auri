@@ -13,3 +13,11 @@ export interface SpeechOptions {
 export function speechToTextPath(base: string, options: SpeechOptions = {}): string {
   return options.localOnly ? `${base}?local_only=true` : base;
 }
+
+/**
+ * The speech-to-text path that starts a background job (plan 16.2) instead of
+ * holding the request open until the transcript is ready.
+ */
+export function transcriptionJobPath(base: string, options: SpeechOptions = {}): string {
+  return options.localOnly ? `${base}?mode=job&local_only=true` : `${base}?mode=job`;
+}

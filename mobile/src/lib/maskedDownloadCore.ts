@@ -29,8 +29,8 @@ export function maskedDownloadUrl(baseUrl: string, downloadId: string): string {
 
 /**
  * Download to *fileUri*; `true` only for a 200. A download still running after
- * *timeoutMs* is cancelled and reported as failed, so the booth never hangs on
- * "Processing…".
+ * *timeoutMs*, or when *signal* aborts (the user cancelled), is cancelled and
+ * reported as failed, so the booth never hangs on "Processing…".
  */
 export async function downloadMaskedAudio(
   port: DownloadPort,
@@ -38,15 +38,20 @@ export async function downloadMaskedAudio(
   fileUri: string,
   headers: Record<string, string>,
   timeoutMs: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
+  if (signal?.aborted) return false;
   const { result, cancel } = port.start(url, fileUri, headers);
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const timedOut = new Promise<'timeout'>((resolve) => {
-    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  let onAbort: (() => void) | undefined;
+  const stopped = new Promise<'stop'>((resolve) => {
+    timer = setTimeout(() => resolve('stop'), timeoutMs);
+    onAbort = () => resolve('stop');
+    signal?.addEventListener('abort', onAbort);
   });
   try {
-    const outcome = await Promise.race([result, timedOut]);
-    if (outcome === 'timeout') {
+    const outcome = await Promise.race([result, stopped]);
+    if (outcome === 'stop') {
       await cancel();
       return false;
     }
@@ -55,5 +60,6 @@ export async function downloadMaskedAudio(
     return false;
   } finally {
     clearTimeout(timer);
+    if (onAbort) signal?.removeEventListener('abort', onAbort);
   }
 }
