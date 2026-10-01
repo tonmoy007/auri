@@ -7,6 +7,7 @@ can detect schema changes automatically.
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -34,8 +35,10 @@ target_metadata = Base.metadata
 
 # ── Migration modes ────────────────────────────────────────────────────────
 
-# Convert the sync URL from alembic.ini to an async URL for asyncpg.
-SYNC_URL = config.get_main_option("sqlalchemy.url")
+# DATABASE_URL (the variable the app itself reads) wins over alembic.ini, so CI
+# and a deployed container can migrate their own database without editing the
+# ini file. A plain postgresql:// URL is converted to the asyncpg driver.
+SYNC_URL = os.environ.get("DATABASE_URL") or config.get_main_option("sqlalchemy.url")
 ASYNC_URL = (
     SYNC_URL.replace("postgresql://", "postgresql+asyncpg://") if SYNC_URL else ""
 )
@@ -46,7 +49,7 @@ def run_migrations_offline() -> None:
 
     The generated SQL can be executed later against any database.
     """
-    url = config.get_main_option("sqlalchemy.url")
+    url = SYNC_URL
     context.configure(
         url=url,
         target_metadata=target_metadata,

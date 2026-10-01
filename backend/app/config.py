@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -10,11 +12,13 @@ class Settings(BaseSettings):
     """Pydantic ``BaseSettings`` model for all Auri backend configuration.
 
     Values are read from environment variables first, falling back to a
-    ``.env`` file located in the project root (one level above ``app/``).
+    ``.env`` file in the working directory. ``AURI_ENV_FILE`` names a different
+    file; set it empty to read no file at all (the test suite does, so a
+    developer's ``.env`` cannot make a test pass that fails in CI).
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=os.environ.get("AURI_ENV_FILE", ".env") or None,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
