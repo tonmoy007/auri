@@ -2,6 +2,23 @@
 
 Generated 2026-09-30T19:23:49Z from 50 gold questions. Recall is over in-scope notes; BM25, dense and hybrid are compared.
 
+## Rerun 2026-10-01, after the review fixes (commit d4db828 and later)
+
+All three indexes were rebuilt (cleaner version 2, same 581 notes and 6,698 chunks) and the evaluation was rerun with the current code: hybrid scored on the 6 chunks the app returns, gated on the configured floors (dense 0.547, BM25 18.8). Full tables: `data/priest/index-*/reports/retrieval_20261001T092142Z.json` (not committed).
+
+| index | embed model | hybrid recall@6 (app's 6 chunks) | hybrid deep recall@6 (30 chunks, old method) | hybrid MRR | configured F1 | calibrated F1 (in-sample) |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | nomic-embed-text | 0.758 | 0.804 | 0.667 | 0.182 | 0.706 |
+| 2 | mxbai-embed-large | 0.779 | not recorded here | 0.680 | 0.824 | 0.824 |
+| 3 | bge-large | 0.779 | 0.817 | 0.700 | 0.842 | 0.842 |
+
+- **Gate [A] (recall@6 >= 0.85 and configured F1 >= 0.85) is not met by any embedder.** The working gate recorded earlier (0.80) is also not met at the app's real top 6: bge-large is at 0.779. The earlier 0.817 was scored on a deeper list than the app returns.
+- **With bge-large, dense retrieval alone is better than the hybrid at the app's top 6** (recall@6 0.821, MRR 0.760, against 0.779 and 0.700 for the hybrid; BM25 alone is 0.683). Fusing in BM25 costs recall at this depth. Changing the fusion (a dense-weighted fusion, or a larger candidate pool before the two-per-note cap) is a design decision not made here.
+- **Not-covered detection holds up with the pinned floors for bge-large** (precision 0.889, recall 0.8, F1 0.842 on the gold set, where it is in-sample). The pinned floors do not suit nomic-embed-text (F1 0.182), which is not the pinned model.
+- Hybrid missed at recall@6 with bge-large: g23, g27, g28, g30, g37. Only g23 is missed by all three embedders.
+
+The tables below are the earlier (2026-09-30) run, kept for comparison.
+
 **These figures are historical.** They were produced before commit d4db828, which changed both the app and this evaluation: the app's "covered" decision is now the best cosine, or the best BM25 score over the chunks actually returned using a note's best 4 matching terms (it was the best raw scores before any cap), and `backend/scripts/eval_priest_retrieval.py` now scores the hybrid at the app's chunk-level `top_k` (the tables below were not scored that way) and gates on the configured F1. The recall, MRR and F1 figures below must be regenerated on a machine with enough memory (user action); no new numbers are given here.
 
 **The calibrated F1 is in-sample.** The calibrated floors are fitted on the same 50 questions (10 of them out-of-scope negatives) that the F1 is then scored on, so it describes this data and is not a forecast of how the floors will do on new questions. The "configured" rows use the floors from the settings at the time and are the ones the gate should judge.
