@@ -15,6 +15,7 @@ import hashlib
 import os
 import re
 import stat
+import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Final
@@ -298,14 +299,18 @@ def _open_regular(path: str) -> int | None:
     return fd
 
 
-def _load_note(root: str, rel_path: str) -> VaultNote | None:
+def _load_note(root: str, disk_path: str) -> VaultNote | None:
     """Read one allowed note, turning a read or parse failure into an exclusion.
 
-    Returns ``None`` for a file that is not a regular file when opened.
+    The file is opened by its name on disk, but reported under the composed
+    (NFC) form of that name: a vault synced from macOS can store "Kisā" as "a"
+    plus a combining macron, and the index, citations and gold set must agree on
+    one spelling. Returns ``None`` for a file that is not a regular file when opened.
     """
-    fd = _open_regular(os.path.join(root, rel_path))
+    fd = _open_regular(os.path.join(root, disk_path))
     if fd is None:
         return None
+    rel_path = unicodedata.normalize("NFC", disk_path)
     with os.fdopen(fd, "rb") as handle:
         raw = handle.read(MAX_NOTE_BYTES + 1)
     if len(raw) > MAX_NOTE_BYTES:
