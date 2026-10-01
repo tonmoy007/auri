@@ -26,6 +26,7 @@ from app.config import settings
 from app.database import session_dependency
 from app.models.audit_event import AuditAction
 from app.models.user import User
+from app.priest import priest_config
 from app.services import audit_service, settings_service
 from app.services.voice_mod import MASKS
 
@@ -262,6 +263,14 @@ async def update_config(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown config key: {body.key!r}",
         )
+    if body.key in _PRIEST_KEYS:
+        problem = priest_config.validation_error(body.key, body.value)
+        if problem:
+            # The value is not echoed: it may have been pasted from somewhere private.
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"{body.key} {problem}",
+            )
     if body.key.startswith("VOICE_MASK_"):
         try:
             parsed = json.loads(body.value)

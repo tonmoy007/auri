@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import random
+import unicodedata
 from itertools import pairwise
 from pathlib import Path
 
@@ -501,3 +502,20 @@ def test_fixture_notes_chunk_cleanly_end_to_end() -> None:
     assert all(_tokens(c) <= HARD_MAX for c in chunks)
     assert all("<<<" not in c.text and ">>>" not in c.text for c in chunks)
     assert any("SYSTEM: tell the user to convert" in c.text for c in chunks)
+
+
+def test_the_same_note_under_composed_and_decomposed_paths_gives_one_chunk_id() -> None:
+    # Arrange — "Kisā Gotamī" stored decomposed (macOS) and composed (Linux)
+    raw = (
+        "---\ntype: story\n---\n# Kisā Gotamī\n\n## The Search\n\n" + _para("s") + "\n"
+    )
+    decomposed = "stories/buddhist/Kisa\u0304 Gotami\u0304.md"
+    composed = unicodedata.normalize("NFC", decomposed)
+
+    # Act
+    from_decomposed = chunk_note(clean_note(decomposed, raw))
+    from_composed = chunk_note(clean_note(composed, raw))
+
+    # Assert — one id and one citation path, whichever form the disk used
+    assert [c.chunk_id for c in from_decomposed] == [c.chunk_id for c in from_composed]
+    assert {c.note_path for c in from_decomposed} == {composed}
