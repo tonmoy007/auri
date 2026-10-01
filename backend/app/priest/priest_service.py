@@ -73,6 +73,7 @@ from app.priest.schemas import (
     PriestQuote,
     TraditionId,
 )
+from app.priest.slots import LiveSlots
 from app.priest.types import Chunk, RetrievalResult
 from app.services.deidentify import strip_pii_regex
 
@@ -98,6 +99,16 @@ _DRAFT_SCHEMA: Final = PriestDraft.model_json_schema()
 _MODERATION_POOL: Final = ThreadPoolExecutor(
     max_workers=4, thread_name_prefix="priest-moderation"
 )
+# Deferral replies skip the rate limiter (never a 429 instead of help), so their
+# moderation check gets a separate pool and a hard cap with no queue: a flood of
+# deferral-phrased questions can neither starve the pass path's moderation, where a
+# crisis verdict matters most, nor pile work onto Ollama. Past the cap a deferral goes
+# out unmoderated, as before this check existed.
+DEFERRAL_CHECKS: Final = 2
+_DEFERRAL_POOL: Final = ThreadPoolExecutor(
+    max_workers=DEFERRAL_CHECKS, thread_name_prefix="priest-deferral-moderation"
+)
+_DEFERRAL_SLOTS: Final = threading.BoundedSemaphore(DEFERRAL_CHECKS)
 # What a moderation call may raise; any of them counts as "policy", never "crisis".
 _MODERATION_ERRORS: Final = (
     AuriError,
@@ -299,8 +310,11 @@ class PriestService:
         self._chain = chain
         self._moderator = moderator
         self._clock = clock
-        self._slots = asyncio.Semaphore(
-            max_concurrency or priest_config.max_concurrency()
+        # The limit is read on every request, so a dashboard change applies at once.
+        self._slots = LiveSlots(
+            (lambda: max_concurrency)
+            if max_concurrency
+            else priest_config.max_concurrency
         )
         self._busy_wait = busy_wait_seconds
         self._moderation_cap = moderation_cap_seconds
@@ -337,7 +351,7 @@ class PriestService:
         if run.decision.kind == "crisis":
             return self._finish(run, self._crisis_response(run))
         if run.decision.kind == "deferral":
-            return self._finish(run, self._deferral_response(run))
+            return self._finish(run, await self._deferral_or_crisis(run))
         if safety_router.is_unsupported_script(run.original):
             return self._finish(run, self._english_only_response(run))
         await self._acquire(request_id)
@@ -349,7 +363,7 @@ class PriestService:
                 request_id, exc.code, outcome, exc.retry_after
             ) from None
         finally:
-            self._slots.release()
+            await self._slots.release()
 
     def _prepare(
         self,
@@ -421,6 +435,38 @@ class PriestService:
                 type(exc).__name__,
             )
         return ModerationSeverity.policy
+
+    async def _deferral_or_crisis(self, run: _Run) -> PriestAnswerResponse:
+        """The fixed deferral, unless moderation hears a crisis in the question.
+
+        The router's lexicons decide a deferral; moderation is the backstop that
+        the pass path always had and this path did not (privacy review row 43).
+        """
+        severity = await self._moderate_deferral(run.original)
+        if severity is ModerationSeverity.crisis:
+            return self._crisis_response(run)
+        return self._deferral_response(run)
+
+    async def _moderate_deferral(self, text: str) -> ModerationSeverity:
+        """Moderate a deferral question if a check slot is free; never queue for one."""
+        if not _DEFERRAL_SLOTS.acquire(blocking=False):
+            logger.info("priest deferral moderation skipped: all checks busy")
+            return ModerationSeverity.none
+        # The slot is returned when the thread really finishes, not when we stop
+        # waiting for it, so a hung moderator still counts against the cap.
+        job = _DEFERRAL_POOL.submit(self._moderator, text)
+        job.add_done_callback(lambda _job: _DEFERRAL_SLOTS.release())
+        try:
+            return await asyncio.wait_for(
+                asyncio.wrap_future(job), timeout=self._moderation_cap
+            )
+        except TimeoutError:
+            logger.warning("priest deferral moderation timed out; deferring")
+        except _MODERATION_ERRORS as exc:
+            logger.warning(
+                "priest deferral moderation failed (%s); deferring", type(exc).__name__
+            )
+        return ModerationSeverity.none
 
     async def _within_deadline(self, run: _Run) -> PriestAnswerResponse | None:
         """Run the pipeline; ``None`` means there is nothing to show (index problem)."""

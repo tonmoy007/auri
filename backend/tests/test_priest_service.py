@@ -309,6 +309,67 @@ async def test_a_medical_question_is_deferred_with_fixed_text_and_no_calls() -> 
 
 
 @pytest.mark.asyncio
+async def test_a_deferral_question_is_moderated_and_a_crisis_verdict_wins() -> None:
+    # Arrange — the router defers it as medical, moderation hears a crisis in it
+    moderator, seen = moderator_returning(ModerationSeverity.crisis)
+    retriever, chain = FakeRetriever(), FakeChain([answer_json()])
+    service = make_service(retriever=retriever, chain=chain, moderator=moderator)
+
+    # Act
+    response = await ask(service, MEDICAL_QUESTION)
+
+    # Assert — the fixed crisis reply, and still no retrieval or generation
+    assert response.kind is AnswerKind.crisis
+    assert len(seen) == 1
+    assert (retriever.calls, chain.calls) == ([], [])
+
+
+@pytest.mark.asyncio
+async def test_a_deferral_still_defers_when_moderation_fails() -> None:
+    # Arrange
+    def broken(text: str) -> ModerationSeverity:
+        raise RuntimeError("ollama is down")
+
+    service = make_service(moderator=broken)
+
+    # Act
+    response = await ask(service, MEDICAL_QUESTION)
+
+    # Assert
+    assert response.kind is AnswerKind.deferral
+
+
+@pytest.mark.asyncio
+async def test_deferral_checks_never_queue_when_moderation_is_saturated() -> None:
+    # Arrange — two deferral checks stuck on a hung moderator fill the cap
+    release = threading.Event()
+    asked: list[str] = []
+
+    def hung(text: str) -> ModerationSeverity:
+        asked.append(text)
+        release.wait(timeout=10)
+        return ModerationSeverity.none
+
+    service = make_service(moderator=hung, moderation_cap_seconds=0.5)
+    stuck = [
+        asyncio.create_task(ask(service, MEDICAL_QUESTION, request_id=f"req-{n}"))
+        for n in range(2)
+    ]
+    await asyncio.sleep(0.1)
+
+    # Act — a third deferral question while both checks are taken
+    try:
+        third = await ask(service, MEDICAL_QUESTION, request_id="req-3")
+    finally:
+        release.set()
+        await asyncio.gather(*stuck)
+
+    # Assert — answered with the deferral at once, without a third moderation call
+    assert third.kind is AnswerKind.deferral
+    assert len(asked) == 2
+
+
+@pytest.mark.asyncio
 async def test_an_abuse_deferral_carries_the_configured_contacts(
     set_setting: Callable[[str, object], None],
 ) -> None:
@@ -557,17 +618,18 @@ async def test_a_slow_moderator_is_capped_and_counts_as_policy() -> None:
 
 
 @pytest.mark.asyncio
-async def test_moderation_is_not_started_for_a_question_the_router_already_settled() -> (
+async def test_moderation_is_not_started_for_a_crisis_the_router_already_settled() -> (
     None
 ):
-    # Arrange
+    # Arrange — a deferral is moderated since plan 14.3; a router crisis never waits
     moderator, asked = moderator_returning(ModerationSeverity.none)
     service = make_service(moderator=moderator)
 
     # Act
-    await ask(service, MEDICAL_QUESTION)
+    response = await ask(service, CRISIS_QUESTION)
 
     # Assert
+    assert response.kind is AnswerKind.crisis
     assert asked == []
 
 
@@ -706,6 +768,54 @@ async def test_a_saturated_service_raises_busy_with_retry_after() -> None:
     # Assert
     assert (raised.value.code, raised.value.retry_after) == ("priest_busy", 5)
     assert metrics.snapshot().outcomes == {"busy": 1}
+    gate.set()
+    assert (await first).kind is AnswerKind.answer
+
+
+@pytest.mark.asyncio
+async def test_a_raised_concurrency_limit_applies_without_a_restart(
+    set_setting: Callable[[str, object], None],
+) -> None:
+    # Arrange — limit 1, one question holding the only slot, then the admin raises it
+    set_setting("PRIEST_MAX_CONCURRENCY", 1)
+    gate = asyncio.Event()
+    chain = FakeChain([answer_json(), answer_json()], gate=gate)
+    service = make_service(chain=chain, busy_wait_seconds=0.05)
+    first = asyncio.create_task(ask(service))
+    await asyncio.sleep(0.05)
+    set_setting("PRIEST_MAX_CONCURRENCY", 2)
+
+    # Act
+    second = asyncio.create_task(
+        ask(service, "What is the Kisa Gotami story about?", request_id="req-2")
+    )
+    await asyncio.sleep(0.05)
+    gate.set()
+    results = [await first, await second]
+
+    # Assert — the second question got the new slot instead of "busy"
+    assert [r.kind for r in results] == [AnswerKind.answer, AnswerKind.answer]
+
+
+@pytest.mark.asyncio
+async def test_a_lowered_concurrency_limit_applies_without_a_restart(
+    set_setting: Callable[[str, object], None],
+) -> None:
+    # Arrange — limit 2, one question in flight, then the admin lowers it to 1
+    set_setting("PRIEST_MAX_CONCURRENCY", 2)
+    gate = asyncio.Event()
+    chain = FakeChain([answer_json()], gate=gate)
+    service = make_service(chain=chain, busy_wait_seconds=0.05)
+    first = asyncio.create_task(ask(service))
+    await asyncio.sleep(0.05)
+    set_setting("PRIEST_MAX_CONCURRENCY", 1)
+
+    # Act
+    with pytest.raises(PriestUnavailableError) as raised:
+        await ask(service, "What is the Kisa Gotami story about?", request_id="req-2")
+
+    # Assert — the running question is untouched; the new one is busy
+    assert raised.value.code == "priest_busy"
     gate.set()
     assert (await first).kind is AnswerKind.answer
 

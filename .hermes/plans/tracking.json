@@ -199,17 +199,17 @@
       }
     },
     "14": {
-      "status": "pending",
+      "status": "in_progress",
       "tasks": {
         "14.1": "pending",
         "14.2": "pending",
-        "14.3": "pending",
-        "14.4": "pending",
-        "14.5": "pending",
-        "14.6": "pending",
+        "14.3": "completed",
+        "14.4": "completed",
+        "14.5": "completed",
+        "14.6": "completed",
         "14.7": "pending",
         "14.8": "pending",
-        "14.9": "pending",
+        "14.9": "completed",
         "14.10": "blocked",
         "14.11": "pending"
       }
