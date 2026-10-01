@@ -118,15 +118,15 @@ async def test_keeps_forwarded_confession_within_retention_window(
 
 
 @pytest.mark.asyncio
-async def test_never_purges_pending_confession_regardless_of_age(
+async def test_purges_pending_confession_past_retention_window(
     session: AsyncSession,
 ) -> None:
-    # Arrange — regression: pending confessions are still awaiting action,
-    # must never be purged no matter how old
-    ancient_pending = _make_confession(
-        ConfessionStatus.pending, NOW - timedelta(hours=1000)
+    # Arrange — owner decision 2026-10-01 (plan 14.10): pending confessions follow
+    # RETENTION_HOURS like everything else; they used to be kept for ever
+    stale_pending = _make_confession(
+        ConfessionStatus.pending, NOW - timedelta(hours=RETENTION_HOURS + 1)
     )
-    session.add(ancient_pending)
+    session.add(stale_pending)
     await session.commit()
 
     # Act
@@ -134,19 +134,38 @@ async def test_never_purges_pending_confession_regardless_of_age(
     await session.commit()
 
     # Assert
-    assert deleted_count == 0
+    assert deleted_count == 1
 
 
 @pytest.mark.asyncio
-async def test_never_purges_flagged_confession_regardless_of_age(
+async def test_purges_flagged_confession_past_retention_window(
     session: AsyncSession,
 ) -> None:
-    # Arrange — regression: flagged confessions await moderator review,
-    # must never be purged out from under the moderation queue
-    ancient_flagged = _make_confession(
-        ConfessionStatus.flagged, NOW - timedelta(hours=1000)
+    # Arrange — plan 14.10: a flagged item nobody acted on is not kept for ever;
+    # its removal is counted on the run record instead (see the counter tests)
+    stale_flagged = _make_confession(
+        ConfessionStatus.flagged, NOW - timedelta(hours=RETENTION_HOURS + 1)
     )
-    session.add(ancient_flagged)
+    session.add(stale_flagged)
+    await session.commit()
+
+    # Act
+    deleted_count = await purge_stale_confessions(session, NOW, RETENTION_HOURS)
+    await session.commit()
+
+    # Assert
+    assert deleted_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_pending_confession_inside_the_window_is_kept(
+    session: AsyncSession,
+) -> None:
+    # Arrange
+    fresh_pending = _make_confession(
+        ConfessionStatus.pending, NOW - timedelta(hours=RETENTION_HOURS - 1)
+    )
+    session.add(fresh_pending)
     await session.commit()
 
     # Act
@@ -187,13 +206,14 @@ async def test_purges_only_stale_rows_among_a_mixed_set(
     deleted_count = await purge_stale_confessions(session, NOW, RETENTION_HOURS)
     await session.commit()
 
-    # Assert
-    assert deleted_count == 2
+    # Assert — every stale row goes, whatever its status (plan 14.10); only the
+    # forwarded one inside the window is left
+    assert deleted_count == 4
     remaining_statuses = sorted(
         c.status.value
         for c in (await session.execute(select(Confession))).scalars().all()
     )
-    assert remaining_statuses == ["flagged", "forwarded", "pending"]
+    assert remaining_statuses == ["forwarded"]
 
 
 # ── Replies outlive the confession (11.16) ───────────────────────────────
@@ -323,11 +343,15 @@ async def test_a_withdrawn_replied_confession_is_deleted_with_its_reply(
 
 
 @pytest.mark.asyncio
-async def test_a_replied_pending_confession_is_never_touched(
+async def test_a_stale_replied_pending_confession_is_emptied_to_a_shell(
     session: AsyncSession,
 ) -> None:
-    # Arrange
-    session.add(_replied(NOW - timedelta(days=90), status=ConfessionStatus.pending))
+    # Arrange — plan 14.10: like a forwarded one, its reply is kept for the device
+    session.add(
+        _replied(
+            NOW - timedelta(hours=RETENTION_HOURS + 1), status=ConfessionStatus.pending
+        )
+    )
     await session.commit()
 
     # Act
@@ -335,8 +359,9 @@ async def test_a_replied_pending_confession_is_never_touched(
     row = await _only_row(session)
 
     # Assert
-    assert result == RetentionResult(0, 0, 0)
-    assert row.purged_at is None
+    assert result.emptied_to_shell == 1
+    assert (row.transcript, row.hr_reply) == ("", "we heard you")
+    assert row.purged_at is not None
 
 
 @pytest.mark.asyncio
@@ -623,3 +648,94 @@ async def test_device_records_are_left_alone_unless_a_window_is_given(
     # Assert
     assert result.expired_devices == 0
     assert await _device_hashes(session) == ["old"]
+
+
+# -- removal counters on the run record (plan 14.10: "the purge is audited") ---
+
+
+@pytest.mark.asyncio
+async def test_a_run_counts_the_flagged_items_it_removed(session: AsyncSession) -> None:
+    # Arrange — two stale flagged items, one stale forwarded, one fresh flagged
+    stale = NOW - timedelta(hours=RETENTION_HOURS + 1)
+    session.add_all(
+        [
+            _make_confession(ConfessionStatus.flagged, stale, device_hash="f1" * 16),
+            _make_confession(ConfessionStatus.flagged, stale, device_hash="f2" * 16),
+            _make_confession(ConfessionStatus.forwarded, stale, device_hash="w1" * 16),
+            _make_confession(ConfessionStatus.flagged, NOW, device_hash="f3" * 16),
+        ]
+    )
+    await session.commit()
+
+    # Act
+    result = await run_retention(session, NOW, RETENTION_HOURS, REPLY_RETENTION_DAYS)
+
+    # Assert
+    assert result.flagged_removed == 2
+    assert result.deleted == 3
+
+
+@pytest.mark.asyncio
+async def test_a_run_counts_crisis_items_removed_before_anyone_acknowledged_them(
+    session: AsyncSession,
+) -> None:
+    # Arrange — a crisis nobody acknowledged, one that was acknowledged, both stale
+    stale = NOW - timedelta(hours=RETENTION_HOURS + 1)
+    unseen = _make_confession(ConfessionStatus.flagged, stale, device_hash="c1" * 16)
+    unseen.severity = "crisis"
+    seen = _make_confession(ConfessionStatus.flagged, stale, device_hash="c2" * 16)
+    seen.severity = "crisis"
+    seen.acknowledged_at = stale
+    seen.acknowledged_by = uuid.uuid4()
+    session.add_all([unseen, seen])
+    await session.commit()
+
+    # Act
+    result = await run_retention(session, NOW, RETENTION_HOURS, REPLY_RETENTION_DAYS)
+
+    # Assert
+    assert result.unacknowledged_crisis_removed == 1
+    assert result.flagged_removed == 2
+
+
+@pytest.mark.asyncio
+async def test_emptying_then_expiring_a_flagged_shell_counts_it_once(
+    session: AsyncSession,
+) -> None:
+    # Arrange — a stale replied flagged item: emptied now, expired a month later
+    session.add(
+        _replied(
+            NOW - timedelta(hours=RETENTION_HOURS + 1), status=ConfessionStatus.flagged
+        )
+    )
+    await session.commit()
+    month_later = NOW + timedelta(days=REPLY_RETENTION_DAYS + 2)
+
+    # Act
+    first = await run_retention(session, NOW, RETENTION_HOURS, REPLY_RETENTION_DAYS)
+    second = await run_retention(
+        session, month_later, RETENTION_HOURS, REPLY_RETENTION_DAYS
+    )
+
+    # Assert — the content left once, so it is counted once
+    assert (first.emptied_to_shell, first.flagged_removed) == (1, 1)
+    assert (second.expired_replies, second.flagged_removed) == (1, 0)
+
+
+@pytest.mark.asyncio
+async def test_the_run_record_keeps_the_removal_counters(session: AsyncSession) -> None:
+    # Arrange
+    from app.models.retention_run import RetentionRun
+    from app.services.retention_status import record_run
+
+    result = RetentionResult(
+        3, 1, 0, flagged_removed=2, unacknowledged_crisis_removed=1
+    )
+
+    # Act
+    await record_run(session, NOW, result, RETENTION_HOURS, REPLY_RETENTION_DAYS)
+    await session.commit()
+    stored = (await session.execute(select(RetentionRun))).scalars().one()
+
+    # Assert
+    assert (stored.flagged_removed, stored.unacknowledged_crisis_removed) == (2, 1)

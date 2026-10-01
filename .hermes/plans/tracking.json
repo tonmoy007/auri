@@ -210,8 +210,9 @@
         "14.7": "pending",
         "14.8": "pending",
         "14.9": "completed",
-        "14.10": "blocked",
-        "14.11": "pending"
+        "14.10": "completed",
+        "14.11": "pending",
+        "14.12": "completed"
       }
     },
     "15": {

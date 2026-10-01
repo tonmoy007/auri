@@ -244,11 +244,29 @@ async def test_the_limits_are_listed_alongside_the_guarantees(
         "db_access",
         "audit_kept",
         "content_identifies",
-        "not_removed",
+        "unreviewed_removed",
         "reply_outlives",
         "job_dependent",
         "logs",
     }
+
+
+@pytest.mark.asyncio
+async def test_the_panel_says_unreviewed_items_are_removed_on_the_same_schedule(
+    api_client: AsyncClient, make_staff: StaffFactory
+) -> None:
+    # Arrange — plan 14.10: pending and flagged items follow RETENTION_HOURS now
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    body = await _overview(api_client, headers)
+    limits = {f["id"]: f["statement"] for f in body["limits"]}
+
+    # Assert
+    assert "kept until its author or a moderator acts" not in " ".join(limits.values())
+    assert "until it is forwarded or withdrawn" not in limits["reply_outlives"]
+    assert "held for review" in limits["unreviewed_removed"]
+    assert "acknowledged" in limits["unreviewed_removed"]
 
 
 @pytest.mark.asyncio
@@ -848,6 +866,34 @@ async def test_the_last_run_reports_device_records_removed_under_the_same_rule(
     # Assert — the latest run is the one with 2, which is below the cohort
     assert run["expired_devices"]["suppressed"] is True
     assert run["expired_devices"]["count"] is None
+
+
+@pytest.mark.asyncio
+async def test_the_last_run_reports_flagged_and_unseen_crisis_removals(
+    api_client: AsyncClient, db_session: AsyncSession, make_staff: StaffFactory
+) -> None:
+    # Arrange — cohort is 3: 4 flagged removed is shown, 1 unseen crisis is withheld
+    await record_run(
+        db_session,
+        NOW - timedelta(minutes=30),
+        RetentionResult(4, 0, 0, flagged_removed=4, unacknowledged_crisis_removed=1),
+        24,
+        30,
+    )
+    await db_session.commit()
+    _, headers = await make_staff(UserRole.hr)
+
+    # Act
+    run = (await _overview(api_client, headers))["retention"]["last_run"]
+
+    # Assert
+    assert run["flagged_removed"] == {
+        "label": "flagged_removed",
+        "count": 4,
+        "suppressed": False,
+    }
+    assert run["unacknowledged_crisis_removed"]["suppressed"] is True
+    assert run["unacknowledged_crisis_removed"]["count"] is None
 
 
 @pytest.mark.asyncio
