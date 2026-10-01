@@ -12,6 +12,7 @@ import hashlib
 import os
 import shutil
 import threading
+import unicodedata
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -556,3 +557,24 @@ def test_fixture_vault_holds_no_symlinks_or_denied_files() -> None:
 
     # Assert
     assert found == []
+
+
+# -- path normalisation (plan 14.6, privacy review row 50) ---------------------
+
+NFD_NAME = "Kisā Gotamī.md"  # "Kisā Gotamī" as macOS may store it
+NFC_NAME = unicodedata.normalize("NFC", NFD_NAME)
+
+
+def test_a_decomposed_file_name_is_reported_in_composed_form(vault: Path) -> None:
+    # Arrange
+    (vault / "stories" / "buddhist" / NFD_NAME).write_text(
+        "---\ntype: story\n---\n# Kisā Gotamī\n\n## The Search\n\nShe walked all day.\n",
+        encoding="utf-8",
+    )
+
+    # Act
+    rel_paths = [note.rel_path for note in iter_vault_notes(vault)]
+
+    # Assert — readable from the decomposed name, reported in the composed one
+    assert f"stories/buddhist/{NFC_NAME}" in rel_paths
+    assert f"stories/buddhist/{NFD_NAME}" not in rel_paths
