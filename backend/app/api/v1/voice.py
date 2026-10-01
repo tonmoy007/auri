@@ -24,6 +24,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.exceptions import RateLimitError, VoiceModulationError
+from app.services.audio_probe import enforce_recording_limit
 from app.services.voice_mod import VoiceModulator
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,7 @@ async def mask_voice(
     try:
         with os.fdopen(fd, "wb") as tmp_file:
             tmp_file.write(body)
+        await enforce_recording_limit(tmp_path)
 
         modulator = VoiceModulator()
         try:

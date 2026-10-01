@@ -32,6 +32,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.exceptions import RateLimitError, STTError
+from app.services.audio_probe import enforce_recording_limit
 from app.services.stt import WhisperTranscriber
 from app.services.stt_jobs import JobStore, JobStoreFull
 
@@ -159,24 +160,19 @@ async def _run_job(
 
 
 def _start_job(
-    device: str,
-    body: bytes,
-    filename: str | None,
-    local_only: bool,
-    clock: ClockDependency,
+    device: str, path: Path, local_only: bool, clock: ClockDependency
 ) -> str:
     """Open a job and start it; a 503 with Retry-After when too many are waiting."""
     try:
         job_id = stt_jobs.create(device, clock())
     except JobStoreFull:
+        path.unlink(missing_ok=True)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Too many recordings are being transcribed; try again shortly",
             headers={"Retry-After": str(JOB_RETRY_AFTER_SECONDS)},
         ) from None
-    task = asyncio.create_task(
-        _run_job(job_id, _write_temp(body, filename), local_only, clock)
-    )
+    task = asyncio.create_task(_run_job(job_id, path, local_only, clock))
     stt_jobs.track(task)
     return job_id
 
@@ -211,15 +207,17 @@ async def transcribe_audio(
     audio instead, unless ``local_only`` is set.
     """
     _check_stt_rate_limit(x_device_token_hash, clock())
-    body = await _read_upload(audio)
+    tmp_path = _write_temp(await _read_upload(audio), audio.filename)
+    try:
+        await enforce_recording_limit(tmp_path)
+    except HTTPException:
+        tmp_path.unlink(missing_ok=True)
+        raise
     if mode == "job":
-        job_id = _start_job(
-            x_device_token_hash, body, audio.filename, local_only, clock
-        )
+        job_id = _start_job(x_device_token_hash, tmp_path, local_only, clock)
         response.status_code = status.HTTP_202_ACCEPTED
         return JobAcceptedResponse(job_id=job_id, status="pending")
 
-    tmp_path = _write_temp(body, audio.filename)
     try:
         transcript = await _transcribe(tmp_path, local_only)
     except Exception as exc:

@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     STT_MAX_UPLOAD_BYTES: int = (
         25 * 1024 * 1024
     )  # 25MB, matches OpenAI Whisper API's cap
+    # The longest recording the server accepts; the app stops at the same limit
+    # (mobile MAX_RECORDING_DURATION_MS). Owner decision 2026-10-01: 5 minutes.
+    MAX_RECORDING_SECONDS: int = Field(default=300, ge=1)
 
     # ── LLM ──────────────────────────────────────────────────────────────
     # Provider priority for LLMService(provider="auto"): Ollama, then Gemini,
