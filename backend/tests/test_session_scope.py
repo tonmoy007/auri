@@ -25,13 +25,13 @@ from app.main import app
 from app.models.confession import Confession, ConfessionStatus
 from app.services import login_throttle
 from fastapi.dependencies.models import Dependant
-from fastapi.routing import APIRoute
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from tests.confession_seeding import add_confession
 from tests.conftest import TEST_SESSION_SECRET, SettingPatcher
+from tests.route_listing import flattened_routes
 
 DEVICE = "device-hash-of-the-confessor-0001"
 BOT_KEY = "moderation-key-for-tests"
@@ -57,8 +57,8 @@ def test_every_session_dependency_is_function_scoped() -> None:
     # Arrange — a dependency left at the default scope commits after the response
     declarations = [
         declaration
-        for route in app.routes
-        if isinstance(route, APIRoute)
+        for route in flattened_routes(app)
+        if route.dependant is not None
         for declaration in _session_dependencies(route.dependant)
     ]
 

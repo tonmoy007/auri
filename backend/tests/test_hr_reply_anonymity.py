@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 
 import pytest
 import pytest_asyncio
@@ -18,12 +19,12 @@ from app.main import app
 from app.models.confession import Confession, ConfessionStatus
 from app.models.department import Department
 from app.models.user import User, UserRole
-from fastapi.routing import APIRoute
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.confession_seeding import add_confession, stamp_moderation
 from tests.conftest import StaffFactory
+from tests.route_listing import flattened_routes
 
 CONFESSIONS_PATH = "/api/v1/confessions"
 HR_PATH = "/api/v1/hr/confessions"
@@ -89,7 +90,7 @@ def _naive_utc(iso_timestamp: str) -> datetime:
     return datetime.fromisoformat(iso_timestamp).replace(tzinfo=None)
 
 
-def _confessor_routes() -> dict[tuple[str, str], APIRoute]:
+def _confessor_routes() -> dict[tuple[str, str], Any]:
     """Index the confessor's routes by (method, path)."""
     wanted = {
         ("POST", CONFESSIONS_PATH),
@@ -99,9 +100,8 @@ def _confessor_routes() -> dict[tuple[str, str], APIRoute]:
     }
     return {
         (method, route.path): route
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        for method in route.methods
+        for route in flattened_routes(app)
+        for method in (route.methods or set())
         if (method, route.path) in wanted
     }
 

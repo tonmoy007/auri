@@ -37,6 +37,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from tests.conftest import SettingPatcher
+from tests.route_listing import flattened_routes
 
 try:
     import app.priest.priest_service  # noqa: F401
@@ -156,7 +157,7 @@ class Env:
 async def env(set_setting: SettingPatcher) -> AsyncIterator[Env]:
     """A fresh app with the priest router, a fake service and a fresh limiter."""
     app = create_app()
-    if not any(getattr(r, "path", None) == ASK for r in app.routes):
+    if not any(getattr(r, "path", None) == ASK for r in flattened_routes(app)):
         app.include_router(priest_router, prefix="/api/v1")
     service = FakeService()
     limiter = PriestRateLimiter()

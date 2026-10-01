@@ -14,10 +14,10 @@ import uuid
 import pytest
 from app.main import app
 from app.models.user import UserRole
-from fastapi.routing import APIRoute
 from httpx import AsyncClient
 
 from tests.conftest import SettingPatcher, StaffFactory
+from tests.route_listing import flattened_routes
 
 ADMIN = {UserRole.admin}
 HR = {UserRole.hr, UserRole.admin}
@@ -107,9 +107,8 @@ OPEN_ROUTES: set[StaffRoute] = {
 def _defined_routes() -> set[StaffRoute]:
     return {
         (method, route.path)
-        for route in app.routes
-        if isinstance(route, APIRoute)
-        for method in route.methods - {"HEAD", "OPTIONS"}
+        for route in flattened_routes(app)
+        for method in (route.methods or set()) - {"HEAD", "OPTIONS"}
     }
 
 
