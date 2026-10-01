@@ -58,3 +58,17 @@ class RetentionRun(Base):
         server_default="0",
         comment="Device rate-limit records deleted after their window passed",
     )
+    flagged_removed: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Flagged confessions removed at retention, reviewed or not (plan 14.10)",
+    )
+    unacknowledged_crisis_removed: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        server_default="0",
+        comment="Crisis items removed before any staff member acknowledged them",
+    )

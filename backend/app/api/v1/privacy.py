@@ -44,6 +44,8 @@ class RetentionRunResponse(BaseModel):
     emptied_to_shell: BucketResponse
     expired_replies: BucketResponse
     expired_devices: BucketResponse
+    flagged_removed: BucketResponse
+    unacknowledged_crisis_removed: BucketResponse
 
     model_config = {"from_attributes": True}
 

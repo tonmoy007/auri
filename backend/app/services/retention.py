@@ -3,12 +3,15 @@
 Per the plan's Data Privacy Design: audio is already deleted immediately
 after STT/TTS (backend/app/api/v1/stt.py, tts.py never write to a
 persistent path), so the only retained data is the confession DB row
-itself. Confessions in ``forwarded`` or ``deleted`` status have already
-been delivered or discarded — nothing further reads them — so they are
-removed after ``settings.RETENTION_HOURS``. ``pending`` and ``flagged`` rows
-are never touched here: they are still awaiting action.
+itself. Every confession is removed ``settings.RETENTION_HOURS`` after its
+last change, whatever its status. ``pending`` and ``flagged`` rows used to be
+kept until someone acted on them, which in practice meant for ever; since plan
+14.10 (owner decision 2026-10-01) they follow the same window, and each run
+records how many flagged items, and how many crisis items nobody had
+acknowledged, it removed.
 
-**Replies outlive the confession.** A forwarded confession can carry an HR
+**Replies outlive the confession.** A confession (other than a withdrawn one)
+can carry an HR
 reply the confessor has not read yet. When such a row falls due it is not
 deleted: it is emptied to a *reply-only shell* — transcript, summary,
 category, sentiment, department, counselor text, severity and the reviewer
@@ -54,26 +57,22 @@ from app.models.user import AnonymousUser
 
 logger = logging.getLogger(__name__)
 
-_PURGEABLE_STATUSES = (ConfessionStatus.forwarded, ConfessionStatus.deleted)
+
+def _not_withdrawn() -> ColumnElement[bool]:
+    """A confession the confessor did not withdraw: its reply is worth keeping."""
+    return Confession.status != ConfessionStatus.deleted
 
 
 def _withdrawn_or_unreplied_due(cutoff: datetime) -> ColumnElement[bool]:
     """Rows to delete outright: stale, and with no reply worth keeping."""
-    keeps_reply = and_(
-        Confession.status == ConfessionStatus.forwarded,
-        Confession.hr_reply.is_not(None),
-    )
-    return and_(
-        Confession.status.in_(_PURGEABLE_STATUSES),
-        Confession.updated_at < cutoff,
-        ~keeps_reply,
-    )
+    keeps_reply = and_(_not_withdrawn(), Confession.hr_reply.is_not(None))
+    return and_(Confession.updated_at < cutoff, ~keeps_reply)
 
 
 def _emptying_due(cutoff: datetime) -> ColumnElement[bool]:
-    """Rows to empty to a shell: stale, forwarded, replied, not yet emptied."""
+    """Rows to empty to a shell: stale, not withdrawn, replied, not yet emptied."""
     return and_(
-        Confession.status == ConfessionStatus.forwarded,
+        _not_withdrawn(),
         Confession.hr_reply.is_not(None),
         Confession.purged_at.is_(None),
         Confession.updated_at < cutoff,
@@ -83,7 +82,7 @@ def _emptying_due(cutoff: datetime) -> ColumnElement[bool]:
 def _expiry_due(reply_cutoff: datetime, stale_cutoff: datetime) -> ColumnElement[bool]:
     """Rows whose reply is past retention and that are emptied or stale anyway."""
     return and_(
-        Confession.status == ConfessionStatus.forwarded,
+        _not_withdrawn(),
         Confession.hr_replied_at.is_not(None),
         Confession.hr_replied_at < reply_cutoff,
         or_(Confession.purged_at.is_not(None), Confession.updated_at < stale_cutoff),
@@ -98,6 +97,8 @@ class RetentionResult:
     emptied_to_shell: int
     expired_replies: int
     expired_devices: int = 0
+    flagged_removed: int = 0
+    unacknowledged_crisis_removed: int = 0
 
 
 @dataclass(frozen=True)
@@ -298,6 +299,41 @@ async def purge_stale_devices(
     )
 
 
+async def _count_removals(
+    session: AsyncSession,
+    now: datetime,
+    retention_hours: int,
+    reply_retention_days: int,
+) -> tuple[int, int]:
+    """Count the flagged and unacknowledged-crisis rows this run will remove.
+
+    Only rows whose content is still present count, so a shell emptied in one run
+    and expired in a later one is counted once, when its content left.
+    """
+    cutoff = now - timedelta(hours=retention_hours)
+    reply_cutoff = now - timedelta(days=reply_retention_days)
+    leaving = and_(
+        Confession.purged_at.is_(None),
+        or_(
+            _withdrawn_or_unreplied_due(cutoff),
+            _emptying_due(cutoff),
+            _expiry_due(reply_cutoff, cutoff),
+        ),
+    )
+    flagged = await _count(
+        session, and_(leaving, Confession.status == ConfessionStatus.flagged)
+    )
+    unseen_crisis = await _count(
+        session,
+        and_(
+            leaving,
+            Confession.severity == ModerationSeverity.crisis.value,
+            Confession.acknowledged_at.is_(None),
+        ),
+    )
+    return flagged, unseen_crisis
+
+
 async def run_retention(
     session: AsyncSession,
     now: datetime,
@@ -323,6 +359,9 @@ async def run_retention(
     Returns:
         What the run did, by kind.
     """
+    flagged, unseen_crisis = await _count_removals(
+        session, now, retention_hours, reply_retention_days
+    )
     expired = await expire_old_replies(
         session, now, reply_retention_days, retention_hours
     )
@@ -338,6 +377,8 @@ async def run_retention(
         emptied_to_shell=emptied,
         expired_replies=expired,
         expired_devices=devices,
+        flagged_removed=flagged,
+        unacknowledged_crisis_removed=unseen_crisis,
     )
 
 
