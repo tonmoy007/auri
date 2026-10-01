@@ -54,6 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models.confession import Confession, ConfessionStatus, ModerationSeverity
 from app.models.user import AnonymousUser
+from app.services.insight_rollup import fold_leaving
 
 logger = logging.getLogger(__name__)
 
@@ -299,20 +300,17 @@ async def purge_stale_devices(
     )
 
 
-async def _count_removals(
-    session: AsyncSession,
-    now: datetime,
-    retention_hours: int,
-    reply_retention_days: int,
-) -> tuple[int, int]:
-    """Count the flagged and unacknowledged-crisis rows this run will remove.
+def _content_leaving(
+    now: datetime, retention_hours: int, reply_retention_days: int
+) -> ColumnElement[bool]:
+    """Rows whose content this run will delete or empty, matched once each.
 
-    Only rows whose content is still present count, so a shell emptied in one run
-    and expired in a later one is counted once, when its content left.
+    Only rows whose content is still present match, so a shell emptied in one run
+    and expired in a later one matches once, when its content left.
     """
     cutoff = now - timedelta(hours=retention_hours)
     reply_cutoff = now - timedelta(days=reply_retention_days)
-    leaving = and_(
+    return and_(
         Confession.purged_at.is_(None),
         or_(
             _withdrawn_or_unreplied_due(cutoff),
@@ -320,6 +318,12 @@ async def _count_removals(
             _expiry_due(reply_cutoff, cutoff),
         ),
     )
+
+
+async def _count_removals(
+    session: AsyncSession, leaving: ColumnElement[bool]
+) -> tuple[int, int]:
+    """Count the flagged and unacknowledged-crisis rows among those *leaving*."""
     flagged = await _count(
         session, and_(leaving, Confession.status == ConfessionStatus.flagged)
     )
@@ -359,9 +363,10 @@ async def run_retention(
     Returns:
         What the run did, by kind.
     """
-    flagged, unseen_crisis = await _count_removals(
-        session, now, retention_hours, reply_retention_days
-    )
+    leaving = _content_leaving(now, retention_hours, reply_retention_days)
+    flagged, unseen_crisis = await _count_removals(session, leaving)
+    # Before anything is deleted or emptied: Insights keeps only these counts.
+    await fold_leaving(session, leaving)
     expired = await expire_old_replies(
         session, now, reply_retention_days, retention_hours
     )

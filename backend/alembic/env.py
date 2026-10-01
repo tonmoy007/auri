@@ -26,6 +26,7 @@ from app.models.audit_event import AuditEvent  # noqa: F401
 from app.models.base import Base
 from app.models.confession import Confession  # noqa: F401
 from app.models.department import Department  # noqa: F401
+from app.models.insight_count import InsightDailyCount  # noqa: F401
 from app.models.retention_run import RetentionRun  # noqa: F401
 from app.models.user import AnonymousUser, User  # noqa: F401
 
