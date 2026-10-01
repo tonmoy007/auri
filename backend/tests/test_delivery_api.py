@@ -16,9 +16,13 @@ import pytest_asyncio
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from app.models.confession import ModerationSeverity
+from app.models.department import Department
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+
+pytestmark = pytest.mark.usefixtures("no_model_calls")
 
 DEVICE_HASH = "a" * 32
 DELIVERY_KEY = "test-delivery-secret"
@@ -38,6 +42,12 @@ async def client(monkeypatch) -> AsyncIterator[AsyncClient]:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     session_factory = async_sessionmaker(bind=engine, expire_on_commit=False)
+
+    # Forward validation reads the departments table (11.10), so the target
+    # department has to exist before a confession can be forwarded to it.
+    async with session_factory() as seed_session:
+        seed_session.add(Department(name="HR", telegram_chat_id="1", is_active=True))
+        await seed_session.commit()
 
     async def override_get_session() -> AsyncIterator:
         async with session_factory() as session:
@@ -73,7 +83,10 @@ async def _create_forwarded_confession(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         created = (await client.post("/api/v1/confessions", json=payload)).json()
 
@@ -153,7 +166,10 @@ async def test_queue_excludes_pending_and_flagged_confessions(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         pending = (await client.post("/api/v1/confessions", json=payload)).json()
 
@@ -231,7 +247,10 @@ async def test_mark_delivered_returns_404_for_pending_confession(
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=False),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
     ):
         pending = (await client.post("/api/v1/confessions", json=payload)).json()
 
@@ -242,3 +261,67 @@ async def test_mark_delivered_returns_404_for_pending_confession(
 
     # Assert
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_the_queue_caps_the_transcript_it_hands_the_bot(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange — "deidentified text" is 17 characters
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 5)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert — the rest never leaves the backend
+    assert item["transcript"] == "deide"
+    assert item["transcript_truncated"] is True
+
+
+@pytest.mark.asyncio
+async def test_a_short_transcript_is_handed_over_whole(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 1000)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert
+    assert item["transcript"] == "deidentified text"
+    assert item["transcript_truncated"] is False
+
+
+@pytest.mark.asyncio
+async def test_a_cap_of_zero_sends_no_transcript_at_all(
+    client: AsyncClient, monkeypatch
+) -> None:
+    # Arrange — summary-only delivery
+    monkeypatch.setattr(delivery_module.settings, "DELIVERY_TRANSCRIPT_CHARS", 0)
+    await _create_forwarded_confession(client)
+
+    # Act
+    (item,) = (await client.get("/api/v1/delivery/queue", headers=AUTH_HEADERS)).json()
+
+    # Assert
+    assert item["transcript"] == ""
+    assert item["ai_summary"] == "A summary."
+
+
+def test_the_transcript_cap_cannot_exceed_what_a_telegram_message_can_carry() -> None:
+    # Arrange / Act / Assert — Telegram refuses a message over 4096 characters, and the
+    # bot would retry a refused one on every poll, for ever
+    from app.config import Settings
+    from pydantic import ValidationError
+
+    assert (
+        Settings(
+            _env_file=None, DELIVERY_TRANSCRIPT_CHARS=2500
+        ).DELIVERY_TRANSCRIPT_CHARS
+        == 2500
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, DELIVERY_TRANSCRIPT_CHARS=2501)

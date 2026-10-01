@@ -21,24 +21,51 @@ def _delivery_headers(settings: BotSettings) -> dict[str, str]:
     return {"X-Delivery-Api-Key": settings.delivery_api_key or ""}
 
 
+def delivery_dedupe_key(item: dict) -> str:
+    """Return the key identifying *item*'s current delivery state.
+
+    Keyed on ``updated_at`` as well as the confession id: a deliberate
+    resend (11.11) clears ``delivered_at``, which bumps ``updated_at``, so
+    the item gets a new key and is sent again — while a fast repeat poll of
+    the unchanged row still dedupes against the previous send.
+    """
+    return f"{item['id']}:{item.get('updated_at', '')}"
+
+
+# Matches the backend bound on DELIVERY_TRANSCRIPT_CHARS: the largest transcript that
+# still leaves a whole message under Telegram's 4096-character limit.
+MAX_TRANSCRIPT_CHARS = 2500
+
+
 def _format_delivery_message(item: dict) -> str:
     """Render a forwarded confession as a recipient-facing Telegram message.
 
     Only de-identified fields are ever included — no device token, no raw
-    audio, nothing that could re-identify the sender.
+    audio, no name. The footer says only that: it must not promise the sender
+    is unidentifiable, because the backend keeps a device code and a transcript
+    can point to its speaker on its own.
     """
     category = item.get("category") or "uncategorized"
     summary = item.get("ai_summary") or "(no summary generated)"
+    # The backend already applied DELIVERY_TRANSCRIPT_CHARS; this only marks a cut.
     transcript = item.get("transcript") or ""
-    if len(transcript) > 1000:
-        transcript = transcript[:1000] + "…"
+    truncated = bool(item.get("transcript_truncated"))
+    if len(transcript) > MAX_TRANSCRIPT_CHARS:
+        # A backend that ignored its cap must not make Telegram refuse the message
+        # (it would be retried on every poll, for ever).
+        transcript, truncated = transcript[:MAX_TRANSCRIPT_CHARS], True
+    if transcript and truncated:
+        transcript += "…"
+    transcript_section = f"*Transcript:*\n{transcript}\n\n" if transcript else ""
 
     return (
         "🕯️ *A teammate shared an anonymous confession*\n\n"
         f"*Category:* {category}\n"
         f"*Summary:* {summary}\n\n"
-        f"*Transcript:*\n{transcript}\n\n"
-        "_The sender's identity is never stored or shared._"
+        f"{transcript_section}"
+        "_Sent anonymously: no sender name or device details are attached. "
+        "The words themselves can still point to someone, so please handle "
+        "them with care._"
     )
 
 
@@ -55,6 +82,9 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
     if not settings.delivery_enabled:
         return
 
+    # The backend resolves routing from the departments table and sends it
+    # with each item; the bot's own DEPARTMENT_CHAT_IDS map is now only a
+    # fallback for a backend that predates the directory (11.10).
     chat_ids = settings.department_chat_id_map()
     delivered_ids: set[str] = context.bot_data.setdefault("delivered_ids", set())
 
@@ -73,11 +103,14 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
 
     for item in queue:
         confession_id = item["id"]
-        if confession_id in delivered_ids:
+        dedupe_key = delivery_dedupe_key(item)
+        if dedupe_key in delivered_ids:
             continue
 
         department = item.get("recipient_dept")
-        chat_id = chat_ids.get(department) if department else None
+        chat_id = item.get("recipient_chat_id") or (
+            chat_ids.get(department) if department else None
+        )
         if chat_id is None:
             logger.error(
                 "no Telegram chat configured for department %r "
@@ -120,4 +153,4 @@ async def poll_delivery_queue(context: ContextTypes.DEFAULT_TYPE) -> None:
             )
             continue
 
-        delivered_ids.add(confession_id)
+        delivered_ids.add(dedupe_key)

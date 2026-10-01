@@ -52,11 +52,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await msg.reply_text(
         f"🕯️ *Welcome to Auri, {user.first_name}!*\n\n"
         "I'm the anonymous delivery arm of Auri — the AI confession booth.\n\n"
-        "🔹 Speak your truth in the booth, then forward anonymously here.\n"
+        "🔹 Speak your truth in the booth, then forward it to a department.\n"
         f"🔹 Open the booth: [{settings.web_url}]({settings.web_url})\n"
         "🔹 Use /help to learn what I can do.\n\n"
-        "Your identity is never stored. Your voice is masked. "
-        "What you share stays between you and whoever you send it to.",
+        "You are never asked for your name, and your voice is masked. "
+        "The people who handle a confession can read what is forwarded, and "
+        "what you say can still point to you, so share only what you are "
+        "comfortable with them reading.",
         parse_mode="Markdown",
     )
 
@@ -72,9 +74,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/start — Welcome & link to the booth\n"
         "/help — This message\n"
         "/confess — How to make a confession\n"
-        "/forward — Confirm receipt of a forwarded confession\n\n"
-        "Confessions arrive here automatically when you forward them from the Auri app. "
-        "You don't need to do anything special — just wait for them to appear.",
+        "/forward — How forwarding works\n\n"
+        "Confessions are forwarded from the Auri booth, not from this chat. When a "
+        "department is chosen, the confession is posted to that department's chat.",
         parse_mode="Markdown",
     )
 
@@ -89,10 +91,14 @@ async def confess(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "📜 *How to Confess*\n\n"
         "1. Open the Auri booth at the link from /start\n"
         "2. Pick a voice mask (Warm, Robotic, Ethereal, Deep, or Random)\n"
-        "3. Speak your truth — AI transcribes and strips any identifying info\n"
-        "4. Choose: forward anonymously, send to a specific person, or delete forever\n"
-        "5. If you forward, the message arrives here in this chat\n\n"
-        "Your identity stays anonymous. Your original voice is never stored.",
+        "3. Speak your truth — AI transcribes it and replaces details it recognises "
+        "(it can miss some)\n"
+        "4. Choose: forward to a department, or delete it\n"
+        "5. If you forward, the department's chat receives a summary and up to the "
+        "first 1,000 characters of the transcript\n\n"
+        "You are never asked for your name. A code for your phone is kept so you "
+        "can see your own history, and what you say can still point to you, so "
+        "leave out anything you would not want traced back.",
         parse_mode="Markdown",
     )
 
@@ -104,10 +110,10 @@ async def forward(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.debug("forward: update has no effective_message, ignoring")
         return
     await msg.reply_text(
-        "✅ *Confession Received*\n\n"
-        "Your anonymous message has been delivered. "
-        "The recipient will see it without knowing who sent it.\n\n"
-        "If you need to send another, open the booth again from /start.",
+        "📬 *Nothing was sent from this chat*\n\n"
+        "Confessions are forwarded from the booth, where you choose a department; "
+        "when one is delivered it is posted to that department's chat.\n\n"
+        "To forward one, open the booth from /start.",
         parse_mode="Markdown",
     )
 
@@ -141,9 +147,9 @@ async def handle_confession_message(
     )
 
     await msg.reply_text(
-        "📬 *Delivery Confirmed*\n\n"
-        "This confession has been safely delivered to its recipient.\n"
-        "The sender remains anonymous.",
+        "📬 *Message received*\n\n"
+        "This chat is not the booth, so nothing was forwarded. "
+        "To confess, open the booth from /start.",
         parse_mode="Markdown",
     )
 

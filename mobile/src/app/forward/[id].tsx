@@ -135,7 +135,7 @@ export default function ForwardScreen(): React.JSX.Element {
       <View style={styles.header}>
         <Text style={styles.title}>Choose a department</Text>
         <Text style={styles.subtitle}>
-          Your identity stays hidden — only the team context is shared.
+          Your name is never attached. A summary and up to the first 1,000 characters of the transcript are posted to the department's chat.
         </Text>
       </View>
 

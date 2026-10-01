@@ -11,7 +11,12 @@ from unittest.mock import Mock, patch
 
 import pytest
 from app.config import settings
-from app.exceptions import CategorizationError, CounselingError, SummarizationError
+from app.exceptions import (
+    CategorizationError,
+    CounselingError,
+    SentimentError,
+    SummarizationError,
+)
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
 
@@ -57,6 +62,30 @@ def test_categorize_strips_whitespace_and_lowercases_llm_response() -> None:
 
     # Assert
     assert category == "health"
+
+
+def test_classify_sentiment_normalises_a_valid_label() -> None:
+    # Arrange
+    service = LLMService(provider="openai")
+
+    # Act
+    with patch.object(LLMService, "_call_openai", return_value=" Negative \n"):
+        sentiment = service.classify_sentiment("some confession text")
+
+    # Assert
+    assert sentiment == "negative"
+
+
+def test_classify_sentiment_rejects_a_label_outside_the_known_set() -> None:
+    # Arrange — an invented label would silently create a phantom chart bucket
+    service = LLMService(provider="openai")
+
+    # Act / Assert
+    with (
+        patch.object(LLMService, "_call_openai", return_value="devastated"),
+        pytest.raises(SentimentError),
+    ):
+        service.classify_sentiment("some confession text")
 
 
 def test_categorize_raises_categorization_error_on_empty_llm_response() -> None:
@@ -253,6 +282,38 @@ def test_call_ollama_parses_reply_text_from_chat_message_response() -> None:
     assert result == "local reply"
 
 
+def test_call_ollama_caps_the_context_window_so_the_model_stays_small() -> None:
+    # Arrange — without a cap Ollama reserves memory for the model's whole context: a
+    # 3B model was seen holding 9.9 GB, enough to starve the machine it ran on
+    service = LLMService(provider="ollama")
+    mock_response = Mock()
+    mock_response.json.return_value = {"message": {"content": "ok"}}
+
+    # Act
+    with patch("httpx.post", return_value=mock_response) as post:
+        service._call_ollama("a prompt")
+
+    # Assert
+    assert post.call_args.kwargs["json"]["options"]["num_ctx"] == 4096
+
+
+def test_the_context_cap_can_be_changed_from_the_config() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    mock_response = Mock()
+    mock_response.json.return_value = {"message": {"content": "ok"}}
+
+    # Act
+    with (
+        patch("app.services.llm.settings.OLLAMA_NUM_CTX", 2048),
+        patch("httpx.post", return_value=mock_response) as post,
+    ):
+        service._call_ollama("a prompt")
+
+    # Assert
+    assert post.call_args.kwargs["json"]["options"]["num_ctx"] == 2048
+
+
 def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
     # Arrange
     instruction = "Assign exactly one category to the confession"
@@ -267,3 +328,120 @@ def test_build_delimited_prompt_wraps_content_and_treats_it_as_data() -> None:
     assert instruction in prompt
     assert content in prompt
     assert "untrusted" in prompt.lower()
+
+
+def test_complete_fences_untrusted_content_and_strips_the_reply() -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    seen: list[str] = []
+
+    def fake_ollama(_self: LLMService, prompt: str) -> str:
+        seen.append(prompt)
+        return "  the reply  \n"
+
+    # Act
+    with patch.object(LLMService, "_call_ollama", new=fake_ollama):
+        reply = service.complete("Do the task.", "untrusted words")
+
+    # Assert
+    assert reply == "the reply"
+    assert seen[0].startswith("Do the task.")
+    assert (
+        "<<<BEGIN_USER_CONTENT>>>\nuntrusted words\n<<<END_USER_CONTENT>>>" in seen[0]
+    )
+
+
+# ── Credentials and content never reach the logs (11.19) ─────────────────
+
+
+def test_gemini_key_is_sent_in_a_header_never_in_the_url() -> None:
+    # Arrange
+    service = LLMService(provider="gemini")
+    captured: dict[str, object] = {}
+
+    def fake_post(url: str, **kwargs: object) -> Mock:
+        captured.update(url=url, **kwargs)
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": "ok"}]}}]
+        }
+        return response
+
+    # Act
+    with (
+        patch("httpx.post", side_effect=fake_post),
+        patch(
+            "app.services.llm.get_config",
+            side_effect=lambda _n, d: "g-key-1234" if _n == "GEMINI_API_KEY" else d,
+        ),
+    ):
+        service._call_gemini("hello")
+
+    # Assert
+    assert "g-key-1234" not in str(captured["url"])
+    assert "params" not in captured
+    assert captured["headers"] == {"x-goog-api-key": "g-key-1234"}
+
+
+def test_a_failed_gemini_call_logs_nothing_that_contains_the_key(caplog) -> None:
+    # Arrange — an httpx error's text embeds the request URL
+    service = LLMService(provider="gemini")
+
+    def failing_post(
+        url: str, params: dict[str, str] | None = None, **kwargs: object
+    ) -> Mock:
+        query = "&".join(f"{k}={v}" for k, v in (params or {}).items())
+        raise RuntimeError(f"boom calling {url}" + (f"?{query}" if query else ""))
+
+    # Act
+    with (
+        caplog.at_level("WARNING"),
+        patch("httpx.post", side_effect=failing_post),
+        patch(
+            "app.services.llm.get_config",
+            side_effect=lambda _n, d: "g-key-1234" if _n == "GEMINI_API_KEY" else d,
+        ),
+    ):
+        service._call_gemini("hello")
+
+    # Assert
+    assert "boom calling" in caplog.text
+    assert "g-key-1234" not in caplog.text
+
+
+def test_an_unparseable_moderation_answer_is_logged_by_length_not_content(
+    caplog,
+) -> None:
+    # Arrange — moderation reads the ORIGINAL transcript, so its output can echo it
+    service = LLMService(provider="ollama")
+    echoed = "the person said their manager Dana touched them"
+
+    # Act
+    with (
+        caplog.at_level("WARNING"),
+        patch.object(LLMService, "_call_ollama", return_value=echoed),
+    ):
+        severity = service.moderate("original words")
+
+    # Assert
+    assert severity.value == "policy"
+    assert "Dana" not in caplog.text
+    assert f"{len(echoed)} chars" in caplog.text
+
+
+def test_an_unusable_sentiment_answer_is_logged_by_length_not_content(caplog) -> None:
+    # Arrange
+    service = LLMService(provider="ollama")
+    echoed = "this reads like a private detail about Dana"
+
+    # Act
+    with (
+        caplog.at_level("ERROR"),
+        patch.object(LLMService, "_call_ollama", return_value=echoed),
+        pytest.raises(SentimentError),
+    ):
+        service.classify_sentiment("a confession")
+
+    # Assert
+    assert "Dana" not in caplog.text
+    assert f"{len(echoed)} chars" in caplog.text

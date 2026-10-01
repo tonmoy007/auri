@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 import enum
+import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, Index, String, Text
+from sqlalchemy import (
+    Boolean,
+    ColumnElement,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Text,
+)
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -18,6 +29,20 @@ class ConfessionStatus(str, enum.Enum):
     forwarded = "forwarded"
     deleted = "deleted"
     flagged = "flagged"
+
+
+class ModerationSeverity(str, enum.Enum):
+    """Why a confession was held back, in order of urgency.
+
+    ``moderate()`` used to answer a single yes/no, which queued a suicide
+    note behind a swearing complaint. Splitting the answer is what lets the
+    crisis path exist at all.
+    """
+
+    none = "none"
+    policy = "policy"
+    harassment = "harassment"
+    crisis = "crisis"
 
 
 class Confession(Base):
@@ -33,6 +58,9 @@ class Confession(Base):
         Index("ix_confessions_device_token_hash", "device_token_hash"),
         Index("ix_confessions_status", "status"),
         Index("ix_confessions_created_at", "created_at"),
+        Index("ix_confessions_severity", "severity"),
+        Index("ix_confessions_hr_replied_at", "hr_replied_at"),
+        Index("ix_confessions_purged_at", "purged_at"),
     )
 
     device_token_hash: Mapped[str] = mapped_column(
@@ -61,6 +89,11 @@ class Confession(Base):
         nullable=True,
         comment="Categorisation label produced by LLM (e.g. 'health', 'faith', 'relationships')",
     )
+    sentiment: Mapped[str | None] = mapped_column(
+        String(16),
+        nullable=True,
+        comment="Aggregate-reporting tone label: negative, neutral or positive",
+    )
     pii_stripped: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
@@ -83,8 +116,67 @@ class Confession(Base):
         nullable=True,
         comment="When the bot confirmed Telegram delivery to the recipient department",
     )
+    severity: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default=ModerationSeverity.none.value,
+        comment="A ModerationSeverity value from the safety check",
+    )
+    acknowledged_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Staff account that explicitly acknowledged a crisis item",
+    )
+    acknowledged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When a crisis item was acknowledged; null means nobody has looked yet",
+    )
+    reviewed_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Staff account that approved or rejected this item; null for the anonymous Telegram path",
+    )
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the moderation decision was made",
+    )
     counselor_response: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,
         comment="LLM-generated compassionate reflection returned to the confessor after submission",
     )
+    hr_reply: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Organisation's reply to the confessor, written by HR. The author is recorded only in audit_events (hr_reply.write)",
+    )
+    hr_replied_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the first HR reply was saved; null means no reply",
+    )
+    hr_reply_edited_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the HR reply text last changed after the first save; null if never edited",
+    )
+    purged_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When retention emptied this row down to a reply-only shell; null means it still holds its confession",
+    )
+
+
+def content_present() -> ColumnElement[bool]:
+    """SQL predicate: the row still holds its confession, not a reply-only shell.
+
+    Retention keeps a replied confession's reply (and the device hash needed to
+    show it to its confessor) after the confession itself is emptied. Every
+    query that serves staff, reports or delivery must add this so an emptied
+    row is never counted, listed, or re-delivered.
+    """
+    return Confession.purged_at.is_(None)

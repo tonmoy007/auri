@@ -69,6 +69,35 @@ async def set_config(session: AsyncSession, key: str, value: str) -> None:
     _cache[key] = value
 
 
+async def stage_config(session: AsyncSession, key: str, value: str) -> None:
+    """Upsert *key*=*value* in the session without committing or touching the cache.
+
+    For a caller that commits it together with an audit row; it then calls
+    :func:`cache_config` once that commit has succeeded.
+    """
+    stmt = insert(AppSetting).values(key=key, value=value)
+    stmt = stmt.on_conflict_do_update(
+        index_elements=[AppSetting.key], set_={"value": value}
+    )
+    await session.execute(stmt)
+
+
+async def stage_clear(session: AsyncSession, key: str) -> None:
+    """Delete *key*'s override in the session, without committing or touching the cache."""
+    result = await session.execute(select(AppSetting).where(AppSetting.key == key))
+    row = result.scalar_one_or_none()
+    if row is not None:
+        await session.delete(row)
+
+
+def cache_config(key: str, value: str | None) -> None:
+    """Make *key* live in the cache (``None`` drops the override); call after the commit."""
+    if value is None:
+        _cache.pop(key, None)
+    else:
+        _cache[key] = value
+
+
 async def clear_config(session: AsyncSession, key: str) -> None:
     """Remove *key*'s DB override, reverting it to the ``Settings()`` default."""
     result = await session.execute(select(AppSetting).where(AppSetting.key == key))

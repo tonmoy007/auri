@@ -16,9 +16,12 @@ import pytest_asyncio
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
+from app.models.confession import ModerationSeverity
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
+
+pytestmark = pytest.mark.usefixtures("no_model_calls")
 
 DEVICE_HASH = "a" * 32
 MODERATION_KEY = "test-moderation-secret"
@@ -73,7 +76,10 @@ async def _create_flagged_confession(client: AsyncClient) -> dict:
         ),
         patch("app.api.v1.confessions.LLMService.categorize", return_value="other"),
         patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
-        patch("app.api.v1.confessions.LLMService.moderate", return_value=True),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.crisis,
+        ),
     ):
         response = await client.post("/api/v1/confessions", json=payload)
     return response.json()
@@ -91,12 +97,14 @@ async def test_flagged_confession_is_created_with_flagged_status(
 
 
 @pytest.mark.asyncio
-async def test_queue_rejects_missing_moderation_key(client: AsyncClient) -> None:
+async def test_queue_rejects_a_request_with_no_credentials(client: AsyncClient) -> None:
     # Act
     response = await client.get("/api/v1/moderation/queue")
 
-    # Assert
-    assert response.status_code == 422  # missing required header
+    # Assert — the queue now accepts either a service key or a staff
+    # session, so absent credentials are a refusal (403), not a malformed
+    # request (the old 422 from a required header).
+    assert response.status_code == 403
 
 
 @pytest.mark.asyncio

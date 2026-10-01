@@ -87,6 +87,10 @@ export const ENDPOINTS = {
   tts: '/api/v1/tts',
   /** List configured recipient departments for the Forward flow */
   departments: '/api/v1/departments',
+  /** Whether the Guide is on, and what the app needs to draw its entry point */
+  priestStatus: '/api/v1/priest/status',
+  /** Ask the Guide a question */
+  priestAsk: '/api/v1/priest/ask',
 } as const;
 
 /**
@@ -108,9 +112,34 @@ export const WS_EVENTS = {
 } as const;
 
 /**
- * Request timeout in milliseconds.
+ * Request timeout in milliseconds, for requests whose cost is fixed.
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
+
+/** Slower-than-realtime factor allowed before a transcription is called dead. */
+const AUDIO_PROCESSING_TIMEOUT_FACTOR = 4;
+
+/** Ceiling, so a pathological case still fails rather than hanging forever. */
+const MAX_AUDIO_PROCESSING_TIMEOUT_MS = 20 * 60_000;
+
+/**
+ * Timeout for a request whose server-side work scales with how much audio
+ * was recorded (transcription, voice masking).
+ *
+ * A flat 30s was applied to transcription regardless of length, but
+ * transcribing runs slower than realtime. Measured against this stack's
+ * `base` Whisper model: 15s of speech took 9.5s (0.63x), 30s took 79s
+ * (2.64x), and 5 minutes took 570s (1.9x). So the flat budget was already
+ * unreachable for a *thirty second* confession, and hopeless for the
+ * 5-minute recording MAX_RECORDING_DURATION_MS explicitly allows.
+ *
+ * The multiplier carries headroom over the measured worst case; the floor
+ * covers upload and model load for short clips.
+ */
+export function uploadTimeoutMsFor(durationMs: number): number {
+  const scaled = durationMs * AUDIO_PROCESSING_TIMEOUT_FACTOR;
+  return Math.min(Math.max(scaled, REQUEST_TIMEOUT_MS), MAX_AUDIO_PROCESSING_TIMEOUT_MS);
+}
 
 /**
  * Maximum audio recording duration in milliseconds.

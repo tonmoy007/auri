@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 
 import structlog
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -14,9 +16,16 @@ from pydantic import BaseModel
 from app.api.v1 import router as api_v1_router
 from app.config import parse_comma_separated_list, settings
 from app.database import async_session_factory, engine
-from app.exceptions import RateLimitError
+from app.exceptions import (
+    AuthConfigurationError,
+    PriestUnavailableError,
+    RateLimitError,
+)
 from app.observability import init_sentry, mount_metrics
+from app.priest.rate_limiter import PriestRateLimitError
+from app.services.department_service import seed_from_env_if_empty
 from app.services.settings_service import load_cache as load_config_cache
+from app.services.user_service import bootstrap_admin
 
 # ── Logging initialisation ───────────────────────────────────────────────
 
@@ -37,6 +46,8 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
+
+PRIEST_PATH_PREFIX = "/api/v1/priest"
 
 
 class RootHealthResponse(BaseModel):
@@ -84,6 +95,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "Could not load live config overrides (DB may not be ready)", error=str(exc)
         )
 
+    try:
+        async with async_session_factory() as session:
+            await seed_from_env_if_empty(session)
+    except Exception as exc:  # noqa: BLE001 — seeding the department directory is a first-run convenience; a failure here (DB not ready) must not take the API down, and it retries on the next start
+        logger.warning("Could not seed the department directory", error=str(exc))
+
+    try:
+        async with async_session_factory() as session:
+            await bootstrap_admin(
+                session,
+                settings.ADMIN_BOOTSTRAP_EMAIL,
+                settings.ADMIN_BOOTSTRAP_PASSWORD,
+            )
+    except Exception as exc:  # noqa: BLE001 — bootstrapping the first staff account is a convenience for a fresh deployment; a failure here (DB not ready, malformed env credentials) must not take the API down, and it retries on the next start
+        logger.warning("Could not bootstrap the first admin", error=str(exc))
+
     yield
 
     logger.info("Shutting down Auri backend")
@@ -129,6 +156,61 @@ def create_app() -> FastAPI:
     ) -> JSONResponse:
         """Map a domain ``RateLimitError`` to an HTTP 429 response."""
         return JSONResponse(status_code=429, content={"detail": str(exc)})
+
+    @app.exception_handler(PriestRateLimitError)
+    async def priest_rate_limit_handler(
+        request: Request, exc: PriestRateLimitError
+    ) -> JSONResponse:
+        """Map a guide rate-limit refusal to a 429 with whole-second ``Retry-After``.
+
+        Registered alongside the generic ``RateLimitError`` handler; the subclass
+        wins, so confession limits keep their own message and no header.
+        """
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "rate_limited"},
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        )
+
+    @app.exception_handler(PriestUnavailableError)
+    async def priest_unavailable_handler(
+        request: Request, exc: PriestUnavailableError
+    ) -> JSONResponse:
+        """Map "the guide cannot serve this now" to a 503 carrying only its code."""
+        headers = (
+            {} if exc.retry_after is None else {"Retry-After": str(exc.retry_after)}
+        )
+        return JSONResponse(
+            status_code=503, content={"detail": exc.code}, headers=headers
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        """Report only where and what for a Guide request; other routes keep FastAPI's.
+
+        FastAPI echoes the rejected value under ``input``. For the Guide that value is
+        a person's question, and a gateway or APM that records response bodies would
+        keep it.
+        """
+        if not request.url.path.startswith(PRIEST_PATH_PREFIX):
+            return await request_validation_exception_handler(request, exc)
+        detail = [{"loc": e["loc"], "type": e["type"]} for e in exc.errors()]
+        return JSONResponse(status_code=422, content={"detail": detail})
+
+    @app.exception_handler(AuthConfigurationError)
+    async def auth_configuration_error_handler(
+        request: Request, exc: AuthConfigurationError
+    ) -> JSONResponse:
+        """Map a missing session secret to a 503, not a generic 500.
+
+        Sessions cannot be issued at all in this state — that is deliberate
+        (see app/services/auth_tokens.py), and the operator needs to see
+        *why* rather than a stack trace.
+        """
+        logger.error("staff sessions unavailable", error=str(exc))
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     # ── Routers ───────────────────────────────────────────────────────────
     app.include_router(api_v1_router)

@@ -2,17 +2,20 @@
 // Custom hook wrapping expo-av for audio recording with permission management
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { Audio } from 'expo-av';
 import * as FileSystem from 'expo-file-system';
-import type { AudioRecordingState, VoiceMask } from '../types';
+import type { AudioRecordingState, RecordingStartResult, VoiceMask } from '../types';
+import { configureForPlayback, configureForRecording } from '../lib/audioSession';
 import {
   AUDIO_CONFIG,
   ENDPOINTS,
   MAX_RECORDING_DURATION_MS,
-  REQUEST_TIMEOUT_MS,
+  uploadTimeoutMsFor,
   getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { deleteRecordingFile } from '../lib/recordingFiles';
+import { speechToTextPath, type SpeechOptions } from '../lib/speechRoute';
 
 /** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
 const METERING_FLOOR_DB = -60;
@@ -22,6 +25,20 @@ const METERING_UPDATE_INTERVAL_MS = 100;
 const MAX_UPLOAD_RETRIES = 2;
 /** Base delay before an upload retry, ms — doubles each attempt (500ms, 1000ms, ...). */
 const UPLOAD_RETRY_BASE_DELAY_MS = 500;
+
+/**
+ * The upload exceeded its time budget.
+ *
+ * Distinct from `UploadHttpError` because it must not be retried: the server
+ * carries on transcribing after the client gives up, so a retry only adds a
+ * second full transcription of the same audio.
+ */
+class UploadTimeoutError extends Error {
+  constructor() {
+    super('Upload timed out');
+    this.name = 'UploadTimeoutError';
+  }
+}
 
 /** HTTP error from the STT upload, carrying the status code so retry logic can tell client vs server errors apart. */
 class UploadHttpError extends Error {
@@ -46,12 +63,16 @@ function sleep(ms: number): Promise<void> {
 function uploadForTranscription(
   uri: string,
   deviceTokenHash: string,
+  durationMs: number,
   onProgress: (fraction: number) => void,
+  options: SpeechOptions = {},
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.timeout = REQUEST_TIMEOUT_MS;
-    xhr.open('POST', `${getApiBaseUrl()}${ENDPOINTS.stt}`);
+    // Scaled to the recording's length: transcription is slower than
+    // realtime, so a flat budget fails long confessions by construction.
+    xhr.timeout = uploadTimeoutMsFor(durationMs);
+    xhr.open('POST', `${getApiBaseUrl()}${speechToTextPath(ENDPOINTS.stt, options)}`);
     xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
 
     xhr.upload.onprogress = (event) => {
@@ -81,7 +102,7 @@ function uploadForTranscription(
     };
 
     xhr.onerror = () => reject(new UploadHttpError(0, 'Network error during upload'));
-    xhr.ontimeout = () => reject(new UploadHttpError(0, 'Upload timed out'));
+    xhr.ontimeout = () => reject(new UploadTimeoutError());
 
     const formData = new FormData();
     formData.append('audio', {
@@ -104,6 +125,17 @@ function normalizeMetering(db: number): number {
   return (clamped - METERING_FLOOR_DB) / -METERING_FLOOR_DB;
 }
 
+export interface UseAudioRecorderOptions {
+  /**
+   * Ask for the microphone and switch the audio session to recording as soon as
+   * the hook mounts (the booth does). Turn it off for a screen where voice is
+   * optional: nothing then happens until the user starts a recording.
+   */
+  prepareOnMount?: boolean;
+  /** Called with the file when the maximum duration stops the recording by itself. */
+  onAutoStop?: (uri: string, durationMs: number) => void;
+}
+
 /**
  * Custom hook for audio recording functionality.
  * Manages the full recording lifecycle:
@@ -113,7 +145,10 @@ function normalizeMetering(db: number): number {
  * - Duration tracking
  * - Error handling
  */
-export function useAudioRecorder() {
+export function useAudioRecorder({
+  prepareOnMount = true,
+  onAutoStop,
+}: UseAudioRecorderOptions = {}) {
   const [state, setState] = useState<AudioRecordingState>({
     isRecording: false,
     audioUri: null,
@@ -127,28 +162,35 @@ export function useAudioRecorder() {
   });
 
   const recordingRef = useRef<Audio.Recording | null>(null);
+  // The files this hook has made, so a new recording or leaving the booth can
+  // delete them. Only the most recent of each is ever on disk.
+  const recordingFileRef = useRef<string | null>(null);
+  const maskedFileRef = useRef<string | null>(null);
+  // False once the hook is gone. An upload or a masking request still in flight
+  // when the user leaves the booth finishes after the clean-up below has run, so
+  // whatever it writes then has to be deleted on the spot.
+  const isMountedRef = useRef(true);
   const durationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Whether this hook has put the audio session into recording mode and not yet
+  // handed it back, so unmounting can restore playback.
+  const isSessionRecordingRef = useRef(false);
+  const onAutoStopRef = useRef(onAutoStop);
+  onAutoStopRef.current = onAutoStop;
 
   /**
-   * Request microphone permission on mount.
+   * Request microphone permission on mount (unless `prepareOnMount` is off).
    * Also configures the audio mode for recording.
    */
   useEffect(() => {
+    isMountedRef.current = true;
     const setupAudio = async () => {
       try {
         const { granted } = await Audio.requestPermissionsAsync();
         setState((prev) => ({ ...prev, hasPermission: granted }));
 
         if (granted) {
-          await Audio.setAudioModeAsync({
-            allowsRecordingIOS: true,
-            playsInSilentModeIOS: true,
-            staysActiveInBackground: false,
-            interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-            interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-            shouldDuckAndroid: true,
-            playThroughEarpieceAndroid: false,
-          });
+          await configureForRecording();
+          isSessionRecordingRef.current = true;
         }
       } catch (_error: unknown) {
         setState((prev) => ({
@@ -159,42 +201,101 @@ export function useAudioRecorder() {
       }
     };
 
-    void setupAudio();
+    if (prepareOnMount) void setupAudio();
 
-    // Cleanup: stop recording if component unmounts
+    // Cleanup: stop recording if component unmounts, and delete the files it
+    // made. The review screen sits on top of the booth in the stack, so the
+    // booth only unmounts once that flow is over.
     return () => {
-      if (recordingRef.current) {
-        void recordingRef.current.stopAndUnloadAsync();
-        recordingRef.current = null;
-      }
+      isMountedRef.current = false;
+      const recording = recordingRef.current;
+      recordingRef.current = null;
+      const recordingFile = recordingFileRef.current;
+      const restorePlayback = isSessionRecordingRef.current;
+      isSessionRecordingRef.current = false;
+      // Stop first, then delete: deleting a file the recorder is still
+      // finalising would race it. Leave the audio session as playback wants it.
+      void (async () => {
+        if (recording) {
+          try {
+            await recording.stopAndUnloadAsync();
+          } catch {
+            // Never started, or already unloaded: nothing left to stop.
+          }
+        }
+        await deleteRecordingFile(recordingFile);
+        if (restorePlayback) {
+          try {
+            await configureForPlayback();
+          } catch {
+            // The next screen that plays audio sets the mode itself.
+          }
+        }
+      })();
+      void deleteRecordingFile(maskedFileRef.current);
       if (durationIntervalRef.current) {
         clearInterval(durationIntervalRef.current);
       }
     };
+    // Mount-only by design: the option picks the mode once, it is not reactive.
+  }, []);
+
+  /**
+   * Throw away a recording that was started for a booth the user has already
+   * left: stop the recorder (releasing the microphone), delete its file, and
+   * forget it. Used when leaving the booth overtakes the start.
+   */
+  const discardAbandonedRecording = useCallback(async (recording: Audio.Recording) => {
+    try {
+      await recording.stopAndUnloadAsync();
+    } catch {
+      // Never started, or already unloaded: nothing left to stop.
+    }
+    await deleteRecordingFile(recording.getURI());
+    if (recordingRef.current === recording) {
+      recordingRef.current = null;
+    }
+    if (durationIntervalRef.current) {
+      clearInterval(durationIntervalRef.current);
+      durationIntervalRef.current = null;
+    }
   }, []);
 
   /**
    * Start recording audio.
    * Must have permission and not already be recording.
    */
-  const startRecording = useCallback(async () => {
+  const startRecording = useCallback(async (): Promise<RecordingStartResult> => {
     try {
       if (!state.hasPermission) {
         const { granted } = await Audio.requestPermissionsAsync();
         if (!granted) {
           setState((prev) => ({
             ...prev,
+            hasPermission: false,
             error: 'Microphone permission denied',
           }));
-          return;
+          return 'permission_denied';
         }
         setState((prev) => ({ ...prev, hasPermission: true }));
       }
+
+      // Recording mode is set here, not only on mount, so a screen that does not
+      // prepare on mount still gets it when the user taps the mic.
+      // Always, not only when the ref is unset: it is idempotent, and a cleanup from a
+      // previous screen can still be restoring playback after this one mounted.
+      await configureForRecording();
+      isSessionRecordingRef.current = true;
 
       // Unload any previous recording
       if (recordingRef.current) {
         await recordingRef.current.stopAndUnloadAsync();
       }
+      // Recording again replaces the last take: its files are no longer needed.
+      await deleteRecordingFile(recordingFileRef.current);
+      await deleteRecordingFile(maskedFileRef.current);
+      recordingFileRef.current = null;
+      maskedFileRef.current = null;
 
       const recording = new Audio.Recording();
       await recording.prepareToRecordAsync({
@@ -224,7 +325,16 @@ export function useAudioRecorder() {
         },
       });
 
+      if (!isMountedRef.current) {
+        // The booth was left while the recorder was being prepared.
+        await discardAbandonedRecording(recording);
+        return 'failed';
+      }
+
       recordingRef.current = recording;
+      // The file exists from here on, so track it now: leaving the booth while
+      // recording, or a failure while stopping, must still be able to delete it.
+      recordingFileRef.current = recording.getURI();
 
       // Live mic amplitude, for the voice-responsive ring visualization.
       recording.setProgressUpdateInterval(METERING_UPDATE_INTERVAL_MS);
@@ -238,17 +348,31 @@ export function useAudioRecorder() {
 
       // Track duration
       const startTime = Date.now();
+      if (durationIntervalRef.current) {
+        clearInterval(durationIntervalRef.current);
+      }
       durationIntervalRef.current = setInterval(() => {
         const elapsed = Date.now() - startTime;
         setState((prev) => ({ ...prev, durationMs: elapsed }));
 
-        // Auto-stop at max duration
+        // Auto-stop at max duration, handing the file to the caller so the
+        // recording is not lost without a word.
         if (elapsed >= MAX_RECORDING_DURATION_MS) {
-          void stopRecording();
+          if (durationIntervalRef.current) {
+            clearInterval(durationIntervalRef.current);
+            durationIntervalRef.current = null;
+          }
+          void stopRecording().then((uri) => {
+            if (uri) onAutoStopRef.current?.(uri, elapsed);
+          });
         }
       }, 100);
 
       await recording.startAsync();
+      if (!isMountedRef.current) {
+        await discardAbandonedRecording(recording);
+        return 'failed';
+      }
       setState((prev) => ({
         ...prev,
         isRecording: true,
@@ -257,14 +381,16 @@ export function useAudioRecorder() {
         durationMs: 0,
         amplitude: 0,
       }));
+      return 'started';
     } catch (_error: unknown) {
       setState((prev) => ({
         ...prev,
         isRecording: false,
         error: 'Failed to start recording',
       }));
+      return 'failed';
     }
-  }, [state.hasPermission]);
+  }, [state.hasPermission, discardAbandonedRecording]);
 
   /**
    * Stop recording and return the audio file URI.
@@ -287,6 +413,13 @@ export function useAudioRecorder() {
 
       recordingRef.current = null;
 
+      // Hand the session back to playback. Without this the app stays in
+      // the recording configuration for the rest of its life, and the
+      // review screen's "play masked audio" inherits a session still set up
+      // to capture rather than play.
+      await configureForPlayback();
+      isSessionRecordingRef.current = false;
+
       if (!uri) {
         throw new Error('Recording produced no audio file');
       }
@@ -297,6 +430,12 @@ export function useAudioRecorder() {
         throw new Error('Recording file was not saved');
       }
 
+      recordingFileRef.current = uri;
+      if (!isMountedRef.current) {
+        // The booth was left while this was being stopped; nobody will use it.
+        void deleteRecordingFile(uri);
+        return null;
+      }
       setState((prev) => ({
         ...prev,
         isRecording: false,
@@ -327,17 +466,34 @@ export function useAudioRecorder() {
    * callers can fall back to a placeholder transcript instead of losing the
    * recording the user just made.
    */
-  const transcribeRecording = useCallback(async (uri: string): Promise<string | null> => {
+  const transcribeRecording = useCallback(async (uri: string, durationMs: number, options: SpeechOptions = {}): Promise<string | null> => {
     setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
 
-    const deviceTokenHash = await hashDeviceToken();
+    let deviceTokenHash: string;
+    try {
+      deviceTokenHash = await hashDeviceToken();
+    } catch (_error: unknown) {
+      // A failed identity read must not escape: the caller shows its own message.
+      setState((prev) => ({
+        ...prev,
+        isUploading: false,
+        uploadError: 'Failed to upload recording',
+      }));
+      return null;
+    }
     let lastError: unknown = null;
 
     for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
       try {
-        const transcript = await uploadForTranscription(uri, deviceTokenHash, (fraction) => {
-          setState((prev) => ({ ...prev, uploadProgress: fraction }));
-        });
+        const transcript = await uploadForTranscription(
+          uri,
+          deviceTokenHash,
+          durationMs,
+          (fraction) => {
+            setState((prev) => ({ ...prev, uploadProgress: fraction }));
+          },
+          options,
+        );
         setState((prev) => ({
           ...prev,
           isUploading: false,
@@ -348,7 +504,12 @@ export function useAudioRecorder() {
       } catch (error: unknown) {
         lastError = error;
         const isClientError = error instanceof UploadHttpError && error.httpStatus >= 400;
-        if (isClientError || attempt === MAX_UPLOAD_RETRIES) {
+        // A timeout is not transient here: the server keeps transcribing
+        // after the client gives up, so each "retry" starts another full
+        // transcription of the same audio while the user waits out another
+        // whole budget for a result that was never going to arrive sooner.
+        const isTimeout = error instanceof UploadTimeoutError;
+        if (isClientError || isTimeout || attempt === MAX_UPLOAD_RETRIES) {
           break;
         }
         await sleep(UPLOAD_RETRY_BASE_DELAY_MS * 2 ** attempt);
@@ -372,7 +533,7 @@ export function useAudioRecorder() {
    * to sidestep that — see `backend/app/api/v1/voice.py`.
    */
   const maskRecording = useCallback(
-    async (uri: string, mask: VoiceMask): Promise<string | null> => {
+    async (uri: string, mask: VoiceMask, durationMs: number): Promise<string | null> => {
       try {
         const deviceTokenHash = await hashDeviceToken();
         const formData = new FormData();
@@ -383,20 +544,37 @@ export function useAudioRecorder() {
         } as unknown as Blob);
         formData.append('mask', mask);
 
-        const response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
-          method: 'POST',
-          headers: { 'X-Device-Token-Hash': deviceTokenHash },
-          body: formData,
-        });
+        // `fetch` carries no timeout of its own, so without this the masking
+        // request could hang indefinitely and leave the booth stuck on
+        // "Processing…" with no way forward.
+        const abort = new AbortController();
+        const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
+        let response: Response;
+        try {
+          response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
+            method: 'POST',
+            headers: { 'X-Device-Token-Hash': deviceTokenHash },
+            body: formData,
+            signal: abort.signal,
+          });
+        } finally {
+          clearTimeout(abortTimer);
+        }
         if (!response.ok) {
           throw new Error(`Voice masking failed (${response.status})`);
         }
         const body = (await response.json()) as { audio_base64: string };
 
         const maskedUri = `${FileSystem.cacheDirectory}masked_${Date.now()}.wav`;
+        // Tracked before the write, so a write that fails part-way is still cleaned up.
+        maskedFileRef.current = maskedUri;
         await FileSystem.writeAsStringAsync(maskedUri, body.audio_base64, {
           encoding: FileSystem.EncodingType.Base64,
         });
+        if (!isMountedRef.current) {
+          void deleteRecordingFile(maskedUri);
+          return null;
+        }
         return maskedUri;
       } catch (_error: unknown) {
         return null;

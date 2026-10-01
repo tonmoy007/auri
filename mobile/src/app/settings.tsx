@@ -18,6 +18,7 @@ import Constants from 'expo-constants';
 import { colors } from '../theme/colors';
 import { typography, spacing, borderRadius } from '../theme';
 import { VoiceMaskSelector } from '../components/VoiceMaskSelector';
+import { GuideSettingsSection } from '../components/GuideSettingsSection';
 import { useHaptics } from '../hooks/useHaptics';
 import { useSettings } from '../hooks/useSettings';
 import { useBackendUrl } from '../hooks/useBackendUrl';
@@ -42,6 +43,10 @@ export default function SettingsScreen(): React.JSX.Element {
     defaultEnvironment,
     setDefaultVoiceMask,
     setDefaultEnvironment,
+    showGuideMode,
+    guideTradition,
+    setShowGuideMode,
+    setGuideTradition,
   } = useSettings();
   const [identityRef, setIdentityRef] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
@@ -188,6 +193,16 @@ export default function SettingsScreen(): React.JSX.Element {
           })}
         </View>
 
+        {/* Guide */}
+        <View style={styles.sectionSpaced}>
+          <GuideSettingsSection
+            showGuideMode={showGuideMode}
+            guideTradition={guideTradition}
+            onChangeShowGuideMode={setShowGuideMode}
+            onChangeGuideTradition={setGuideTradition}
+          />
+        </View>
+
         {/* Privacy & Identity */}
         <Text style={[styles.sectionTitle, styles.sectionSpaced]}>
           Privacy & Identity
@@ -199,8 +214,8 @@ export default function SettingsScreen(): React.JSX.Element {
             {identityRef ? `${identityRef}…` : 'Loading…'}
           </Text>
           <Text style={styles.identityHint}>
-            No name, email, or device info is ever stored — this reference is
-            derived locally and never leaves your device in this form.
+            No name or email is asked for. A one-way code made on this device is kept
+            with each confession so you can see your own history and replies.
           </Text>
         </View>
 

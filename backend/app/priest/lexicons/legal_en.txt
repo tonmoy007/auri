@@ -1,0 +1,25 @@
+# version: 2
+# Legal and workplace-legal questions the Guide must not answer.
+# Normalised text; "re:" lines are regular expressions.
+re:\b(sue|suing|sued) (my|the|our|him|her|them|this|that|a|an|his|their|for)\b
+lawsuit
+lawyer
+attorney
+legal action
+legal advice
+legal rights
+press charges
+unfair dismissal
+wrongful termination
+wrongfully terminated
+re:\b(they|he|she|boss|employer|manager|company|supervisor|school) (can |could |will |would |might |may |did |do |does )?(fire|sack|dismiss) me\b(?! up\b)
+re:\b(can|could|will|would|might|may) (they|he|she|my \w+|the \w+|our \w+) (fire|sack|dismiss) me\b(?! up\b)
+fired for
+get fired
+lose my job for
+employment contract
+my contract
+religious discrimination
+re:is it (legal|illegal|lawful|unlawful)
+re:can (my |the |our )?(boss|employer|manager|company|supervisor|workplace|school|landlord) (fire|sack|dismiss|terminate|suspend|discipline|evict|punish)
+re:(am i|are we) (legally|allowed by law)

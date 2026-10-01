@@ -21,9 +21,13 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # ── Import all models so autogenerate can see them ─────────────────────────
+from app.models.app_setting import AppSetting  # noqa: F401
+from app.models.audit_event import AuditEvent  # noqa: F401
 from app.models.base import Base
 from app.models.confession import Confession  # noqa: F401
-from app.models.user import AnonymousUser  # noqa: F401
+from app.models.department import Department  # noqa: F401
+from app.models.retention_run import RetentionRun  # noqa: F401
+from app.models.user import AnonymousUser, User  # noqa: F401
 
 # Convenience reference.
 target_metadata = Base.metadata

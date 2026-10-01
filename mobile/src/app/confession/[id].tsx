@@ -1,7 +1,7 @@
 // Auri — Confession booth screen
 // 3D scene with record button, voice mask selector, and status display
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { VoiceMaskSelector } from '../../components/VoiceMaskSelector';
 import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useSettings } from '../../hooks/useSettings';
+import { deleteRecordingFile } from '../../lib/recordingFiles';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
 /** Delay before the door starts swinging open on entry, ms — lets the fade-in overlay clear first. */
@@ -53,8 +54,18 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [environment, setEnvironment] = useState<Environment>(defaultEnvironment);
   const [status, setStatus] = useState<ConfessionStatus>('idle');
   const [doorOpen, setDoorOpen] = useState(false);
+  const [isExiting, setIsExiting] = useState(false);
   const recorder = useAudioRecorder();
   const haptics = useHaptics();
+  // Leaving the booth does not cancel a masking request already in flight, so the
+  // handler below checks this before moving on to a review of files that are gone.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Swing the door open shortly after mounting — the entry animation.
   useEffect(() => {
@@ -95,24 +106,63 @@ export default function ConfessionScreen(): React.JSX.Element {
       // shows an explicit error state if the transcript comes back null after
       // retries, and falls back to playing the original (unmasked) recording
       // if masking fails, rather than losing playback entirely.
+      // Both calls size their timeout from how long the recording actually
+      // ran, so a long confession is not failed by a budget meant for a
+      // short one.
+      const durationMs = recorder.durationMs;
       const [transcript, maskedAudioUri] = await Promise.all([
-        recorder.transcribeRecording(audioUri),
-        recorder.maskRecording(audioUri, voiceMask),
+        recorder.transcribeRecording(audioUri, durationMs),
+        recorder.maskRecording(audioUri, voiceMask, durationMs),
       ]);
+      if (!isMountedRef.current) return;
+      // The unmasked recording has done its job once a masked copy exists; keep
+      // it only when masking failed, because review then plays it as the fallback.
+      if (maskedAudioUri) {
+        void deleteRecordingFile(audioUri);
+      }
       setStatus('done');
       // Swing the door shut before leaving the booth — the exit animation.
       setDoorOpen(false);
       await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
+      // Review labels the recording by whether it is the masked one; when masking
+      // failed it is the confessor's own voice and must not be called anonymized.
+      const masked = maskedAudioUri ? '1' : '0';
+      if (!isMountedRef.current) return;
       router.push({
         pathname: '/review',
         params: transcript
-          ? { id, audioUri: maskedAudioUri ?? audioUri, voiceMask, transcript }
-          : { id, audioUri: maskedAudioUri ?? audioUri, voiceMask },
+          ? { id, audioUri: maskedAudioUri ?? audioUri, masked, voiceMask, transcript }
+          : { id, audioUri: maskedAudioUri ?? audioUri, masked, voiceMask },
       });
     } catch (_error: unknown) {
       setStatus('idle');
     }
   }, [recorder, id, voiceMask, haptics]);
+
+  /**
+   * Leave the booth without submitting.
+   *
+   * Always available, including mid-recording: this is a confession booth,
+   * and someone who wants out must be able to get out. Nothing has been
+   * sent at this point, so an abandoned recording is simply discarded —
+   * `useAudioRecorder` stops and unloads the hardware recording on unmount.
+   * The door closes on the way out, matching the exit choreography the
+   * submit path already uses.
+   */
+  const handleExitBooth = useCallback(async () => {
+    if (isExiting) return;
+    setIsExiting(true);
+    haptics.selectionChanged();
+    setDoorOpen(false);
+    await new Promise((resolve) => setTimeout(resolve, DOOR_CLOSE_MS));
+    // Reached directly via a deep link there is nothing to pop back to, so
+    // fall back to the landing screen rather than stranding the user here.
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.replace('/');
+    }
+  }, [isExiting, haptics]);
 
   const handleToggleEnvironment = useCallback(() => {
     haptics.selectionChanged();
@@ -136,7 +186,7 @@ export default function ConfessionScreen(): React.JSX.Element {
   const statusMessages: Record<ConfessionStatus, string> = {
     idle: 'Speak freely',
     recording: 'Recording…',
-    processing: 'Anonymizing…',
+    processing: 'Processing…',
     done: 'Ready for review',
   };
 
@@ -166,12 +216,25 @@ export default function ConfessionScreen(): React.JSX.Element {
         </ThreeCanvas>
       </Pressable>
 
-      {/* Status overlay */}
+      {/* Status overlay — the back control lives here rather than floating
+          on its own, so every persistent control stays in the one top
+          cluster this screen already groups them into. */}
       <View style={styles.statusBar}>
+        <Pressable
+          onPress={handleExitBooth}
+          disabled={isExiting}
+          accessibilityRole="button"
+          accessibilityLabel="Leave the booth"
+          accessibilityHint="Discards this recording without sending it"
+          style={styles.backButton}
+        >
+          <Text style={styles.backButtonText}>‹</Text>
+        </Pressable>
+
         {status === 'processing' ? (
           <ShimmerText style={styles.statusText}>
             {recorder.isUploading
-              ? `Anonymizing… ${Math.round(recorder.uploadProgress * 100)}%`
+              ? `Processing… ${Math.round(recorder.uploadProgress * 100)}%`
               : statusMessages[status]}
           </ShimmerText>
         ) : (
@@ -220,14 +283,31 @@ const styles = StyleSheet.create({
     zIndex: 0,
   },
   statusBar: {
+    // 52, not 60: the row is now as tall as the 44pt back-button target, so
+    // this keeps the status text at roughly its original height and leaves a
+    // gap above the environment hint at 104 instead of butting against it.
     position: 'absolute',
-    top: 60,
+    top: 52,
     left: spacing.lg,
     right: spacing.lg,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     zIndex: 10,
+  },
+  // 44x44 is the iOS HIG minimum touch target (AGENTS.md §6.1). The chevron
+  // glyph itself is small, so the tappable box is sized rather than padded.
+  backButton: {
+    width: 44,
+    height: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: -spacing.sm,
+  },
+  backButtonText: {
+    fontSize: typography.fontSize.xxl,
+    color: colors.candleGlow,
+    lineHeight: typography.fontSize.xxl,
   },
   statusText: {
     fontSize: typography.fontSize.sm,

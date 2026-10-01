@@ -36,6 +36,7 @@ export default function AnonymityScreen(): React.JSX.Element {
   const audioUri = readStringParam(rawParams, 'audioUri');
   const transcript = readStringParam(rawParams, 'transcript');
   const voiceMask = readStringParam(rawParams, 'voiceMask');
+  const masked = readStringParam(rawParams, 'masked');
   const initialEnabled = readStringParam(rawParams, 'anonymityEnabled') !== '0';
   const [selected, setSelected] = useState(initialEnabled);
   const haptics = useHaptics();
@@ -56,10 +57,11 @@ export default function AnonymityScreen(): React.JSX.Element {
         ...(audioUri ? { audioUri } : {}),
         ...(transcript ? { transcript } : {}),
         ...(voiceMask ? { voiceMask } : {}),
+        ...(masked ? { masked } : {}),
         anonymityEnabled: selected ? '1' : '0',
       },
     });
-  }, [id, audioUri, transcript, voiceMask, selected]);
+  }, [id, audioUri, transcript, voiceMask, masked, selected]);
 
   const handleCancel = useCallback(() => {
     router.back();
@@ -72,8 +74,9 @@ export default function AnonymityScreen(): React.JSX.Element {
       <View style={styles.content}>
         <Text style={styles.title}>Who can see this?</Text>
         <Text style={styles.subtitle}>
-          Your identity stays hidden either way — this only chooses whether
-          the confession carries a recipient context.
+          Your name is never attached either way — this only chooses whether
+          the confession carries a recipient context. What you say can still
+          point to you.
         </Text>
 
         <TouchableOpacity

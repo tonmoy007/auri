@@ -1,0 +1,123 @@
+# version: 4
+# Crisis phrases for priest mode: self-harm, suicide and intent to harm others.
+# Matched against the question after normalisation (casefolded, NFKC, punctuation
+# removed, apostrophes dropped so "don't" is "dont", digits in words read as letters
+# so "k1ll" is "kill"). One entry per line: a plain phrase matches whole words; a
+# line starting "re:" is a regular expression over the normalised text.
+# Policy: a false alarm is better than a miss for self-harm. The bare word suicide
+# counts, even in a study question, because the reply is gentle and the cost is low.
+# "killing me" and "killing time" are idioms and are not listed.
+
+# explicit self-harm and suicide
+re:suicid(e|al)
+kill myself
+killing myself
+kill my self
+unalive myself
+end my life
+ending my life
+end it all
+take my own life
+taking my own life
+hurt myself
+hurting myself
+harm myself
+harming myself
+re:cut(ting)? myself(?! (off|out|loose|free|some|a|an)\b)
+self harm
+selfharm
+want to die
+wanna die
+want to be dead
+wish i was dead
+wish i were dead
+wish i were not alive
+better off dead
+dont want to live
+do not want to live
+dont wanna live
+dont want to be alive
+dont want to exist
+re:overdos(e|ed|ing)\b
+re:hang(ing)? myself
+re:shoot(ing)? myself
+re:jump(ing)? (off|from) (a |the )?(bridge|roof|building|balcony)
+
+# indirect
+better off without me
+would be better off if i was gone
+would be better off if i were gone
+nobody would miss me
+no one would miss me
+no reason to live
+nothing to live for
+no point in living
+not worth living
+life is not worth living
+re:(no|whats the|what is the) point (of|in) (going on|living|carrying on|continuing)( anymore| like this| this way|$)
+re:cant go on( anymore| like this|$)
+cant do this anymore and want it to end
+dont want to be here anymore
+dont want to wake up
+wish i could disappear
+wish i could just disappear
+wish i had never been born
+wish i was never born
+re:wish i (had|was|were|would)? ?(never|not) (been |be )?(born|alive|here)
+re:(want|wish) (it|everything) (to )?(all )?(stop|end|be over)
+
+# passive ideation (added after a live evaluation showed these reached the model)
+re:\b(want|wanna|wish|hope|hoping|need) (to |i could |i would )?(just )?(disappear|vanish)( forever| for good)?\b
+re:\b(want|wanna|wish|hope|hoping|just) (to )?(never|not) wake( up)?\b
+re:\b(go to sleep|fall asleep|sleep) and (never|not) wake( up)?\b
+re:\b(i dont|i do not|i wont) wake up (tomorrow|again)\b
+re:\b(easier|better) (if|when) (i|we) (was|were|am) (not|no longer|never) (alive|here|around|born)\b
+re:\b(i|im) (was|were|am|be) no longer (alive|here|around)\b
+re:\b(wish|want|hope) (i|to) (was|were|be)? ?(not|never|no longer) (alive|here|around|exist)\b
+re:\b(end|ending) (it all|my life|things for good)\b
+re:\b(thoughts?|thinking|thought) (of|about) (not being|no longer being) (here|alive|around)\b
+re:\bnot being (here|alive|around) anymore\b
+re:\b(dont|do not|cant|cannot) see the point (of|in) (being alive|living|going on|carrying on|life)\b
+re:\bno longer want to be (alive|here|around)\b
+
+# intent to harm others
+re:\b(i|im|ill|id)( am| will| just| really| might| may| could)* (want|wanna|going|gonna|plan|planning|intend|mean|thinking of|thinking about|about)( to)? (kill|murder|shoot|stab|strangle|poison|hurt|harm|attack|beat up) (him|her|them|someone|somebody|everyone|people|my (boss|manager|coworker|co worker|colleague|supervisor|wife|husband|partner|ex|brother|sister|mother|father|mom|dad|parents?|son|daughter|children|kids?|teacher|neighbou?r|family|friend|employer|roommate))
+
+# added after the independent review: phrasings that passed to the model
+re:\b(take|taking|took|taken|takes) (my|their|his|her|your|ones) (own )?life\b
+re:\bkill(ed|ing|s)? (myself|my self|themselves|himself|herself)\b
+re:\b(i|im|ill|id|ive)( am| will| just| really)* (want|wanna|going|gonna|ready|plan|planning|decided|need) (to )?end(ing)? (it|myself)\b(?! (with|on|by|at|in|for)\b)
+re:\b(thinking of|thinking about) end(ing)? (it|myself)\b(?! (with|on|by|at|in|for)\b)
+re:\b(dont|do not) deserve (to )?(live|be alive|exist|life)\b
+re:(?<!\d )\bkms\b
+unalive
+unaliving
+re:\b(slit|slitting|slash|slashing) (my )?(wrists?|throat)\b
+re:\bcut(ting)? my (wrists?|throat)\b
+re:\b(i|ive|im)( have| am| been| keep| started)* cutting (again|more)( tonight| now| today)?$
+re:\b(going to|gonna|about to|want to|ready to) jump( in front| tonight| now| today|$)
+re:\b(saved|saving|stockpil\w+|hoard\w*) (up )?(my |the |some |all )?(pills|medication|meds|tablets)\b
+re:\bpills (saved|stockpiled)( up)?\b
+re:\b(a )?burden (to|on) (everyone|everybody|my family|my friends|others|them all)\b
+re:\b(pointless|meaningless|hopeless)\b.{0,40}\bi want out( now| today)?$
+
+# religious and passive ideation
+re:\b(pray|prayed|praying|beg|begged|begging|ask|asked|asking|wish|wished|want|wanted|hope|hoped) (every (night|day) )?(that )?(god|allah|the lord|lord|jesus) (would |to |will |could )?(take|takes|taking) me( away| home| now| soon| today| tonight| with (him|you|them)|$)
+re:\bwant(ed)? to be with \w+( \w+){0,3} in (heaven|paradise|jannah|the afterlife)\b
+re:\bi( am|m)? (ready|prepared) to (go|die|leave)\b.{0,40}\b(heaven|paradise|jannah)\b
+re:\b(heaven|paradise|jannah)\b.{0,40}\bi( am|m)? (ready|prepared) to (go|die)\b
+
+# romanised Bangla (needs a native-speaker review before real use)
+morte chai
+bachte ichha kore na
+bachte iccha kore na
+bachte ichchha kore na
+atmohotya
+atohotya
+atmahatya
+nijeke shesh kore
+
+# intent to harm others, wider forms (a named kind of person, not "the process")
+re:\b((i|id) (will|shall|am gonna|am going to|m going to|gonna|going to)|ill) (kill|murder|stab|strangle|poison|beat up|shoot) (him|her|them|everyone|everybody|someone|somebody|people|(the|that|this|those|these|my|our|his|her|their) (man|woman|person|guy|girl|boy|men|women|people|boss|manager|coworker|co worker|colleague|supervisor|teacher|neighbou?r|bully|driver|landlord|wife|husband|partner|brother|sister|mother|father|parents?|son|daughter))\b
+re:\b(want|wanna|going|gonna|plan|planning|intend|about)( to)? (kill|murder|stab|strangle|poison|attack|beat up|hurt|harm) (the|that|this|those|these) (man|woman|person|guy|girl|boy|men|women|people|boss|manager|coworker|co worker|colleague|supervisor|teacher|neighbou?r|bully|driver|landlord|students?|customers?)\b
+re:\bshoot(ing)? up (my|the|our|this) (school|office|church|mosque|temple|synagogue|workplace|work|mall|campus|class|classroom|store|shop|bank|hospital|station)\b

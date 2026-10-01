@@ -6,18 +6,23 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Final
+from typing import Final, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import parse_comma_separated_list, settings
-from app.database import get_async_session
+from app.config import settings
+from app.database import session_dependency
 from app.exceptions import DeidentificationError, RateLimitError
-from app.models.confession import Confession, ConfessionStatus
+from app.models.confession import (
+    Confession,
+    ConfessionStatus,
+    ModerationSeverity,
+)
 from app.models.user import AnonymousUser
+from app.services import crisis_response, department_service, device_identity
 from app.services.llm import LLMService
 
 logger = logging.getLogger(__name__)
@@ -66,9 +71,48 @@ class ConfessionResponse(BaseModel):
     status: ConfessionStatus
     recipient_dept: str | None
     delivered_at: datetime | None
+    severity: str
+    acknowledged_by: uuid.UUID | None
+    acknowledged_at: datetime | None
+    reviewed_by: uuid.UUID | None
+    reviewed_at: datetime | None
     counselor_response: str | None
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class ConfessorConfessionResponse(BaseModel):
+    """The device-token-scoped view of a confession, as its own confessor sees it.
+
+    Deliberately separate from :class:`ConfessionResponse`, which staff routes
+    (moderation, delivery) reuse. Staff-only fields (``reviewed_by``,
+    ``acknowledged_by``, any author id) must never be added here: the
+    confessor is told the reply comes from the organisation, and a staff
+    account id in this payload would name who wrote or approved it. A test
+    pins the exact field set.
+    """
+
+    id: uuid.UUID
+    voice_mask: str
+    transcript: str
+    ai_summary: str | None
+    category: str | None
+    pii_stripped: bool
+    status: ConfessionStatus
+    recipient_dept: str | None
+    delivered_at: datetime | None
+    severity: str
+    acknowledged_at: datetime | None
+    reviewed_at: datetime | None
+    counselor_response: str | None
+    created_at: datetime
+    updated_at: datetime
+    hr_reply: str | None
+    hr_replied_at: datetime | None
+    hr_reply_edited_at: datetime | None
+    purged_at: datetime | None
 
     model_config = {"from_attributes": True}
 
@@ -151,7 +195,9 @@ def _verify_ownership(confession: Confession, device_token_hash: str) -> None:
     Raises:
         HTTPException: 403 if the hashes do not match.
     """
-    if confession.device_token_hash != device_token_hash:
+    if confession.device_token_hash not in device_identity.lookup_codes(
+        device_token_hash
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You do not have access to this confession",
@@ -212,6 +258,21 @@ def _safe_categorize(llm_service: LLMService, text: str) -> str | None:
         return None
 
 
+def _safe_classify_sentiment(llm_service: LLMService, text: str) -> str | None:
+    """Classify tone, returning ``None`` on failure instead of blocking creation.
+
+    Sentiment only feeds aggregate reporting (11.6), so a missing label
+    costs a chart bucket, never the confession.
+    """
+    try:
+        return llm_service.classify_sentiment(text)
+    except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
+        logger.warning(
+            "sentiment classification failed, continuing without it: %s", exc
+        )
+        return None
+
+
 def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
     """Summarize *text*, returning ``None`` on failure instead of blocking creation."""
     try:
@@ -235,36 +296,50 @@ def _safe_counsel(llm_service: LLMService, text: str) -> str:
         return _FALLBACK_COUNSELOR_RESPONSE
 
 
-def _safe_moderate(llm_service: LLMService, text: str) -> bool:
-    """Run the moderation check, failing **closed** (flagged) on error.
+def _safe_moderate(llm_service: LLMService, text: str) -> ModerationSeverity:
+    """Run the moderation check, failing **closed** (held) on error.
 
     Unlike categorization/summarization, a moderation failure must not
     silently let content through — ``LLMService.moderate`` already fails
     closed internally, but any exception escaping it (network error, etc.)
-    is treated the same way here.
+    is treated the same way here. It fails to ``policy`` rather than
+    ``crisis``: a held item is safe, a false crisis alarm is noise that
+    teaches reviewers to ignore the real ones.
     """
     try:
         return llm_service.moderate(text)
     except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
-        logger.warning("moderation check failed, flagging for review: %s", exc)
-        return True
+        logger.warning("moderation check failed, holding for review: %s", exc)
+        return ModerationSeverity.policy
 
 
-def _upsert_anonymous_user(
-    session: AsyncSession,
-    user: AnonymousUser | None,
-    device_token_hash: str,
-    now: datetime,
+async def _record_submission(
+    session: AsyncSession, device_token_hash: str, now: datetime
 ) -> None:
-    """Create or refresh the anonymous-user usage record for a device.
+    """Note that a device has just submitted, for the rate limit.
+
+    One UPDATE, creating the row only if none matched, rather than changing the
+    row this request read at its start. That read was followed by several
+    seconds of model calls, and the retention job deletes exactly the records a
+    returning confessor has (their last confession is older than the window), so
+    the row may be gone by now. Changing the stale object would fail the whole
+    request, losing the confession for the sake of a record about it.
 
     Args:
         session: Active database session (mutations flushed by the caller).
-        user: Existing record for this device, or ``None`` to create one.
         device_token_hash: SHA-256 hash identifying the device.
         now: Current time, from the injected clock.
     """
-    if user is None:
+    result = await session.execute(
+        update(AnonymousUser)
+        .where(AnonymousUser.device_token_hash == device_token_hash)
+        .values(
+            last_confession_at=now,
+            confession_count=AnonymousUser.confession_count + 1,
+        )
+        .execution_options(synchronize_session=False)
+    )
+    if cast(CursorResult, result).rowcount == 0:
         session.add(
             AnonymousUser(
                 device_token_hash=device_token_hash,
@@ -272,10 +347,6 @@ def _upsert_anonymous_user(
                 confession_count=1,
             )
         )
-        return
-
-    user.last_confession_at = now
-    user.confession_count += 1
 
 
 # ── Endpoints ────────────────────────────────────────────────────────────
@@ -283,13 +354,13 @@ def _upsert_anonymous_user(
 
 @router.post(
     "",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Submit a new anonymous confession",
 )
 async def create_confession(
     body: ConfessionCreate,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
     clock: ClockDependency = Depends(get_clock),
 ) -> Confession:
     """Persist a new confession after de-identifying its transcript.
@@ -301,8 +372,12 @@ async def create_confession(
     """
     now = clock()
 
+    # A phone whose rows predate DEVICE_HASH_PEPPER is moved to the hashed form
+    # first, so its rate limit carries over instead of starting again.
+    await device_identity.upgrade_legacy_rows(session, body.device_token_hash)
+    stored_device_code = device_identity.stored_code(body.device_token_hash)
     stmt = select(AnonymousUser).where(
-        AnonymousUser.device_token_hash == body.device_token_hash
+        AnonymousUser.device_token_hash == stored_device_code
     )
     result = await session.execute(stmt)
     user = result.scalar_one_or_none()
@@ -317,26 +392,39 @@ async def create_confession(
 
     category = _safe_categorize(llm_service, deidentified_transcript)
     ai_summary = _safe_summarize(llm_service, deidentified_transcript)
+    sentiment = _safe_classify_sentiment(llm_service, deidentified_transcript)
     # Moderation runs on the ORIGINAL transcript, not the de-identified one:
     # discovered via live testing (2026-07-18) that a de-identify call can
     # itself fail (refusal, meta-commentary) and corrupt its output, which
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
-    is_flagged = _safe_moderate(llm_service, body.transcript)
-    counselor_response = _safe_counsel(llm_service, deidentified_transcript)
+    severity = _safe_moderate(llm_service, body.transcript)
+    # A crisis reply is a fixed template with configured contacts, never generated:
+    # a model that invents a helpline number is worse than no helpline (12.7).
+    counselor_response = (
+        crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE).text
+        if severity is ModerationSeverity.crisis
+        else _safe_counsel(llm_service, deidentified_transcript)
+    )
 
     confession = Confession(
-        device_token_hash=body.device_token_hash,
+        device_token_hash=stored_device_code,
         voice_mask=body.voice_mask,
         transcript=deidentified_transcript,
         category=category,
         ai_summary=ai_summary,
+        sentiment=sentiment,
         pii_stripped=True,
-        status=ConfessionStatus.flagged if is_flagged else ConfessionStatus.pending,
+        status=(
+            ConfessionStatus.pending
+            if severity is ModerationSeverity.none
+            else ConfessionStatus.flagged
+        ),
+        severity=severity.value,
         counselor_response=counselor_response,
     )
     session.add(confession)
-    _upsert_anonymous_user(session, user, body.device_token_hash, now)
+    await _record_submission(session, stored_device_code, now)
 
     await session.flush()
     await session.refresh(confession)
@@ -369,12 +457,12 @@ async def preview_confession(
 
 @router.get(
     "",
-    response_model=list[ConfessionResponse],
+    response_model=list[ConfessorConfessionResponse],
     summary="List past confessions for the requesting device",
 )
 async def list_confessions(
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> list[Confession]:
     """Return the requesting device's confession history, newest first.
 
@@ -382,10 +470,13 @@ async def list_confessions(
     should not reappear in their history. Requires the
     ``X-Device-Token-Hash`` header identifying the owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     stmt = (
         select(Confession)
         .where(
-            Confession.device_token_hash == x_device_token_hash,
+            Confession.device_token_hash.in_(
+                device_identity.lookup_codes(x_device_token_hash)
+            ),
             Confession.status != ConfessionStatus.deleted,
         )
         .order_by(Confession.created_at.desc())
@@ -396,19 +487,20 @@ async def list_confessions(
 
 @router.get(
     "/{confession_id}",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     summary="Retrieve a confession by its UUID",
 )
 async def get_confession(
     confession_id: uuid.UUID,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> Confession:
     """Return a single confession identified by ``confession_id``.
 
     Requires the ``X-Device-Token-Hash`` header to match the confession's
     owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
     return confession
@@ -422,7 +514,7 @@ async def get_confession(
 async def delete_confession(
     confession_id: uuid.UUID,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> None:
     """Mark a confession as ``deleted`` without removing the row.
 
@@ -430,6 +522,7 @@ async def delete_confession(
     appear in any forward-facing query. Requires the ``X-Device-Token-Hash``
     header to match the confession's owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
     confession.status = ConfessionStatus.deleted
@@ -437,14 +530,14 @@ async def delete_confession(
 
 @router.post(
     "/{confession_id}/forward",
-    response_model=ConfessionResponse,
+    response_model=ConfessorConfessionResponse,
     summary="Forward a confession to a recipient department",
 )
 async def forward_confession(
     confession_id: uuid.UUID,
     body: ConfessionForward,
     x_device_token_hash: str = Header(..., alias="X-Device-Token-Hash"),
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = session_dependency,
 ) -> Confession:
     """Change a confession's status to ``forwarded`` and assign a department.
 
@@ -452,6 +545,7 @@ async def forward_confession(
     request is rejected with a ``409 Conflict``. Requires the
     ``X-Device-Token-Hash`` header to match the confession's owning device.
     """
+    await device_identity.upgrade_legacy_rows(session, x_device_token_hash)
     confession = await _fetch_confession_or_404(session, confession_id)
     _verify_ownership(confession, x_device_token_hash)
 
@@ -461,7 +555,10 @@ async def forward_confession(
             detail=f"Cannot forward confession in status '{confession.status.value}'",
         )
 
-    known_departments = parse_comma_separated_list(settings.DEPARTMENTS)
+    known_departments = [
+        department.name
+        for department in await department_service.list_departments(session)
+    ]
     if body.department not in known_departments:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,

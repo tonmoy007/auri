@@ -12,12 +12,14 @@ import {
 } from 'react-native';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import { Audio } from 'expo-av';
+import { configureForPlayback } from '../lib/audioSession';
 import { colors } from '../theme/colors';
 import { typography, spacing } from '../theme';
 import { ENDPOINTS, getApiBaseUrl } from '../config/api';
 import { ShimmerText } from '../components/LoadingStates';
 import { useHaptics } from '../hooks/useHaptics';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { deleteRecordingFile } from '../lib/recordingFiles';
 import type { VoiceMask } from '../types';
 
 /**
@@ -45,11 +47,18 @@ export default function ReviewScreen(): React.JSX.Element {
   const transcriptParam = readStringParam(rawParams, 'transcript');
   const voiceMaskParam = readStringParam(rawParams, 'voiceMask') as VoiceMask | undefined;
   const anonymityParam = readStringParam(rawParams, 'anonymityEnabled');
+  // Only '1' means the recording was voice-masked; anything else is treated as the
+  // confessor's own voice, the claim that costs least if the flag is ever missing.
+  const isMasked = readStringParam(rawParams, 'masked') === '1';
   const [anonymityEnabled, setAnonymityEnabled] = useState(anonymityParam !== '0');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [hasFinishedPlaying, setHasFinishedPlaying] = useState(false);
+  const [recordingDeleted, setRecordingDeleted] = useState(false);
+  // This screen stays in the stack under the response screens, so going back to it
+  // after a send must not offer to send again or pretend to delete what was sent.
+  const [hasSubmitted, setHasSubmitted] = useState(false);
   const [summary, setSummary] = useState<string | null>(null);
   const [isSummaryLoading, setIsSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
@@ -119,6 +128,10 @@ export default function ReviewScreen(): React.JSX.Element {
   }, [anonymityParam]);
 
   const handleForward = useCallback(async () => {
+    if (hasSubmitted) {
+      setActionError('This confession was already sent.');
+      return;
+    }
     if (!hasTranscript) {
       setActionError('No transcript to submit — go back and record again.');
       return;
@@ -150,6 +163,9 @@ export default function ReviewScreen(): React.JSX.Element {
       };
 
       haptics.success();
+      // The confession is saved; the phone has no further use for the recording.
+      setHasSubmitted(true);
+      void deleteRecordingFile(audioUri).then(setRecordingDeleted);
       // A brief, deliberate AI response stands between "submitted" and
       // "gone" — the confessor sees they were heard before the flow
       // continues into anonymity routing.
@@ -168,16 +184,26 @@ export default function ReviewScreen(): React.JSX.Element {
     } finally {
       setIsSubmitting(false);
     }
-  }, [hasTranscript, transcript, voiceMask, anonymityEnabled, haptics]);
+  }, [hasSubmitted, hasTranscript, transcript, voiceMask, anonymityEnabled, haptics, audioUri]);
 
   const handleDelete = useCallback(() => {
+    if (hasSubmitted) {
+      setActionError("This confession was already sent, so it can't be deleted from here.");
+      return;
+    }
+    // The recording is handed on so the confirmation can delete it once the
+    // user confirms; "Keep it" comes back here and still needs it to play.
     router.push({
       pathname: '/delete-confirmation',
-      params: { id },
+      params: { id, ...(audioUri ? { audioUri } : {}) },
     });
-  }, [id]);
+  }, [hasSubmitted, id, audioUri]);
 
   const handlePlayback = useCallback(async () => {
+    if (recordingDeleted) {
+      setActionError('The recording was deleted from this phone when you sent your confession.');
+      return;
+    }
     if (!audioUri) {
       setActionError('No recording available to play');
       return;
@@ -194,6 +220,10 @@ export default function ReviewScreen(): React.JSX.Element {
         setHasFinishedPlaying(false);
         return;
       }
+      // The booth restores this on stop, but the review screen is also
+      // reachable directly (deep link, or a resumed app), so don't assume
+      // the session is already configured for playback.
+      await configureForPlayback();
       const { sound } = await Audio.Sound.createAsync({ uri: audioUri });
       soundRef.current = sound;
       sound.setOnPlaybackStatusUpdate((playbackStatus) => {
@@ -207,11 +237,15 @@ export default function ReviewScreen(): React.JSX.Element {
       setIsPlaying(true);
       setHasFinishedPlaying(false);
       await sound.playAsync();
-    } catch (_error: unknown) {
+    } catch (error: unknown) {
       setIsPlaying(false);
-      setActionError('Failed to play masked audio');
+      // Surface the real reason instead of swallowing it (AGENTS.md §15.1).
+      // A bare "Failed to play masked audio" gave neither the user nor the
+      // logs anything to act on.
+      const reason = error instanceof Error ? error.message : String(error);
+      setActionError(`Failed to play recording: ${reason}`);
     }
-  }, [audioUri, isPlaying]);
+  }, [audioUri, isPlaying, recordingDeleted]);
 
   const handleOpenAnonymityChoice = useCallback(() => {
     haptics.selectionChanged();
@@ -222,10 +256,11 @@ export default function ReviewScreen(): React.JSX.Element {
         ...(audioUri ? { audioUri } : {}),
         ...(transcriptParam ? { transcript: transcriptParam } : {}),
         voiceMask,
+        masked: isMasked ? '1' : '0',
         anonymityEnabled: anonymityEnabled ? '1' : '0',
       },
     });
-  }, [id, audioUri, transcriptParam, voiceMask, anonymityEnabled, haptics]);
+  }, [id, audioUri, transcriptParam, voiceMask, isMasked, anonymityEnabled, haptics]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -278,23 +313,44 @@ export default function ReviewScreen(): React.JSX.Element {
 
         {/* Audio playback */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Masked Audio</Text>
+          <Text style={styles.sectionTitle}>{isMasked ? 'Masked Audio' : 'Your Recording'}</Text>
           <TouchableOpacity
             style={styles.playbackButton}
             onPress={handlePlayback}
             activeOpacity={0.7}
             accessibilityRole="button"
-            accessibilityLabel={isPlaying ? 'Playing masked audio' : 'Play masked audio'}
+            accessibilityLabel={
+              isMasked
+                ? isPlaying
+                  ? 'Playing masked audio'
+                  : 'Play masked audio'
+                : isPlaying
+                  ? 'Playing your original recording'
+                  : 'Play your original recording'
+            }
           >
             <Text style={styles.playbackIcon}>{isPlaying ? '⏸' : '▶'}</Text>
             <Text style={styles.playbackText}>
               {isPlaying
-                ? 'Playing anonymized recording…'
+                ? isMasked
+                  ? 'Playing masked recording…'
+                  : 'Playing your original recording…'
                 : hasFinishedPlaying
-                  ? 'Replay anonymized recording'
-                  : 'Play anonymized recording'}
+                  ? isMasked
+                    ? 'Replay masked recording'
+                    : 'Replay your original recording'
+                  : isMasked
+                    ? 'Play masked recording'
+                    : 'Play your original recording'}
             </Text>
           </TouchableOpacity>
+          {!isMasked && (
+            <Text style={styles.transcriptMissingText}>
+              Voice masking didn't work, so this is your own voice. It stays on this phone
+              until you send or delete your confession, record again, or the app next
+              starts.
+            </Text>
+          )}
         </View>
 
         {/* Anonymity choice — identity is hidden either way; this picks whether

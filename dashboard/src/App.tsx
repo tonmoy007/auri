@@ -2,15 +2,33 @@ import { useCallback, useEffect, useState } from 'react'
 import { toast, Toaster } from 'sonner'
 import { BuildPanel } from '@/components/BuildPanel'
 import { ConfigTable } from '@/components/ConfigTable'
+import { AuditPanel } from '@/components/AuditPanel'
 import { ConnectionBar } from '@/components/ConnectionBar'
+import { DeliveryPanel } from '@/components/DeliveryPanel'
+import { DirectoryPanel } from '@/components/DirectoryPanel'
+import { InsightsPanel } from '@/components/InsightsPanel'
+import { PriestPanel } from '@/components/PriestPanel'
+import { PrivacyPanel } from '@/components/PrivacyPanel'
+import { QueuePanel } from '@/components/QueuePanel'
+import { RepliesPanel } from '@/components/RepliesPanel'
+import { LoginScreen } from '@/components/LoginScreen'
 import { StatusPanel } from '@/components/StatusPanel'
+import { ThemesPanel } from '@/components/ThemesPanel'
+import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { useAdminSettings } from '@/hooks/useAdminSettings'
-import { adminApi, ApiError, type ConfigResponse, type LiveKitStatus, type NgrokStatus } from '@/lib/api'
+import { useAuth } from '@/hooks/useAuth'
+import { visibleTabsFor } from '@/lib/tabAccess'
+import {
+  adminApi,
+  ApiError,
+  type ConfigResponse,
+  type LiveKitStatus,
+  type NgrokStatus,
+} from '@/lib/api'
 
 function App() {
-  const { baseUrl, adminKey, update } = useAdminSettings()
+  const { baseUrl, adminKey, updateConnection, user, signedIn, logout, authedRequest } = useAuth()
   const [config, setConfig] = useState<ConfigResponse | null>(null)
   const [ngrok, setNgrok] = useState<NgrokStatus | null>(null)
   const [livekit, setLiveKit] = useState<LiveKitStatus | null>(null)
@@ -18,156 +36,234 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [refreshingStatus, setRefreshingStatus] = useState(false)
 
+  // The legacy shared secret keeps working as an admin escape hatch, so the
+  // dashboard is reachable either by signing in or by pasting that key.
+  const usingLegacyKey = !signedIn && adminKey !== ''
+  const authorized = signedIn || usingLegacyKey
+  const visibleTabs = visibleTabsFor(user, usingLegacyKey)
+  // Only the admin/dev panels talk to /admin/*; an HR session must not fire
+  // those requests just because it can see the Insights tab.
+  const canSeeDevTabs = visibleTabs.some((tab) => tab.value === 'config')
+
   const loadConfig = useCallback(async () => {
-    if (!adminKey) {
-      setConnected(false)
-      return
-    }
+    if (!authorized || !canSeeDevTabs) return
     setLoading(true)
     try {
-      const data = await adminApi.getConfig(baseUrl, adminKey)
-      setConfig(data)
+      setConfig(await adminApi.getConfig(authedRequest))
       setConnected(true)
     } catch (err) {
       setConnected(false)
-      const message = err instanceof ApiError ? err.message : 'Could not reach backend'
-      toast.error(message)
+      toast.error(err instanceof ApiError ? err.message : 'Could not reach backend')
     } finally {
       setLoading(false)
     }
-  }, [baseUrl, adminKey])
+  }, [authorized, canSeeDevTabs, authedRequest])
 
   const loadStatus = useCallback(async () => {
-    if (!adminKey) return
+    if (!authorized || !canSeeDevTabs) return
     setRefreshingStatus(true)
     try {
       const [ngrokStatus, livekitStatus] = await Promise.all([
-        adminApi.getNgrokStatus(baseUrl, adminKey),
-        adminApi.getLiveKitStatus(baseUrl, adminKey),
+        adminApi.getNgrokStatus(authedRequest),
+        adminApi.getLiveKitStatus(authedRequest),
       ])
       setNgrok(ngrokStatus)
       setLiveKit(livekitStatus)
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Could not reach backend'
-      toast.error(message)
+      toast.error(err instanceof ApiError ? err.message : 'Could not reach backend')
     } finally {
       setRefreshingStatus(false)
     }
-  }, [baseUrl, adminKey])
+  }, [authorized, canSeeDevTabs, authedRequest])
 
   useEffect(() => {
     loadConfig()
     loadStatus()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [baseUrl, adminKey])
+  }, [loadConfig, loadStatus])
 
   const handleSave = async (key: string, value: string) => {
     try {
-      await adminApi.setConfig(baseUrl, adminKey, key, value)
+      await adminApi.setConfig(authedRequest, key, value)
       toast.success(`${key} updated`)
       await loadConfig()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Save failed'
-      toast.error(message)
+      toast.error(err instanceof ApiError ? err.message : 'Save failed')
       throw err
     }
   }
 
   const handleReset = async (key: string) => {
     try {
-      await adminApi.resetConfig(baseUrl, adminKey, key)
+      await adminApi.resetConfig(authedRequest, key)
       toast.success(`${key} reset to default`)
       await loadConfig()
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : 'Reset failed'
-      toast.error(message)
+      toast.error(err instanceof ApiError ? err.message : 'Reset failed')
       throw err
     }
+  }
+
+  if (!authorized) {
+    return (
+      <>
+        <Toaster richColors position="top-right" />
+        <LoginScreen />
+      </>
+    )
   }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-6">
       <Toaster richColors position="top-right" />
-      <header>
-        <h1 className="text-2xl font-semibold text-foreground">Auri Dashboard</h1>
-        <p className="text-sm text-muted-foreground">
-          Local dev config for the LLM chain, voice masks, and the LiveKit/ngrok tunnel.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold text-foreground">Auri Dashboard</h1>
+          <p className="text-sm text-muted-foreground">
+            {user
+              ? `Signed in as ${user.email} (${user.role})`
+              : 'Signed in with the legacy admin key'}
+          </p>
+        </div>
+        {signedIn && (
+          <Button variant="outline" onClick={logout}>
+            Sign out
+          </Button>
+        )}
       </header>
 
       <ConnectionBar
         baseUrl={baseUrl}
         adminKey={adminKey}
         connected={connected}
-        onChange={update}
+        onChange={updateConnection}
       />
 
-      <Tabs defaultValue="config">
-        <TabsList>
-          <TabsTrigger value="config">Config</TabsTrigger>
-          <TabsTrigger value="status">Status</TabsTrigger>
-          <TabsTrigger value="build">Build</TabsTrigger>
-        </TabsList>
+      {visibleTabs.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Your role has no panels available yet.
+        </p>
+      ) : (
+        <Tabs defaultValue={visibleTabs[0].value}>
+          <TabsList>
+            {visibleTabs.map((tab) => (
+              <TabsTrigger key={tab.value} value={tab.value}>
+                {tab.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        <TabsContent value="config" className="space-y-6">
-          {loading || !config ? (
-            <div className="space-y-4">
-              <Skeleton className="h-40 w-full" />
-              <Skeleton className="h-40 w-full" />
-            </div>
-          ) : (
-            <>
-              <ConfigTable
-                title="LLM Provider Chain"
-                description="Ollama → Gemini → OpenAI (auto chain); Claude is explicit-provider-only."
-                entries={config.llm}
-                onSave={handleSave}
-                onReset={handleReset}
-              />
-              <ConfigTable
-                title="Speech-to-Text"
-                description="faster-whisper model size, with OpenAI Whisper API fallback."
-                entries={config.stt}
-                onSave={handleSave}
-                onReset={handleReset}
-              />
-              <ConfigTable
-                title="Voice Masks"
-                description="SoX effect chain per mask, as a JSON list of arguments."
-                entries={config.voice_masks}
-                onSave={handleSave}
-                onReset={handleReset}
-              />
-            </>
-          )}
-        </TabsContent>
+          <TabsContent value="config" className="space-y-6">
+            {loading || !config ? (
+              <div className="space-y-4">
+                <Skeleton className="h-40 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
+            ) : (
+              <>
+                <ConfigTable
+                  title="LLM Provider Chain"
+                  description="Ollama → Gemini → OpenAI (auto chain); Claude is explicit-provider-only."
+                  entries={config.llm}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="Speech-to-Text"
+                  description="faster-whisper model size, with OpenAI Whisper API fallback."
+                  entries={config.stt}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="HR Analytics"
+                  description="Smallest bucket size an aggregate may report; smaller cohorts are suppressed."
+                  entries={config.analytics}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="Crisis Contacts"
+                  description="Helpline and employee-assistance contacts shown in the fixed crisis reply, for confessions and the Guide."
+                  entries={config.crisis}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="Guide Settings"
+                  description="Models, limits and retrieval thresholds for the Guide. The chat server address and key are set in the environment, not here."
+                  entries={config.priest}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+                <ConfigTable
+                  title="Voice Masks"
+                  description="SoX effect chain per mask, as a JSON list of arguments."
+                  entries={config.voice_masks}
+                  onSave={handleSave}
+                  onReset={handleReset}
+                />
+              </>
+            )}
+          </TabsContent>
 
-        <TabsContent value="status">
-          <StatusPanel
-            ngrok={ngrok}
-            livekit={livekit}
-            onRefresh={loadStatus}
-            refreshing={refreshingStatus}
-          />
-        </TabsContent>
-
-        <TabsContent value="build" className="space-y-6">
-          <BuildPanel
-            baseUrl={baseUrl}
-            adminKey={adminKey}
-            suggestedBackendUrl={ngrok?.public_url ?? null}
-          />
-          {config && (
-            <ConfigTable
-              title="Build Settings"
-              description="Local build-tool overrides."
-              entries={config.build}
-              onSave={handleSave}
-              onReset={handleReset}
+          <TabsContent value="status">
+            <StatusPanel
+              ngrok={ngrok}
+              livekit={livekit}
+              onRefresh={loadStatus}
+              refreshing={refreshingStatus}
             />
-          )}
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+
+          <TabsContent value="build" className="space-y-6">
+            <BuildPanel suggestedBackendUrl={ngrok?.public_url ?? null} />
+            {config && (
+              <ConfigTable
+                title="Build Settings"
+                description="Local build-tool overrides."
+                entries={config.build}
+                onSave={handleSave}
+                onReset={handleReset}
+              />
+            )}
+          </TabsContent>
+          <TabsContent value="insights">
+            <InsightsPanel />
+          </TabsContent>
+
+          <TabsContent value="queue">
+            <QueuePanel />
+          </TabsContent>
+
+          <TabsContent value="directory">
+            <DirectoryPanel />
+          </TabsContent>
+
+          <TabsContent value="delivery">
+            <DeliveryPanel />
+          </TabsContent>
+
+          <TabsContent value="replies">
+            <RepliesPanel />
+          </TabsContent>
+
+          <TabsContent value="themes">
+            <ThemesPanel />
+          </TabsContent>
+
+          <TabsContent value="privacy">
+            <PrivacyPanel />
+          </TabsContent>
+
+          <TabsContent value="priest">
+            <PriestPanel />
+          </TabsContent>
+
+          <TabsContent value="audit">
+            <AuditPanel />
+          </TabsContent>
+        </Tabs>
+      )}
     </div>
   )
 }

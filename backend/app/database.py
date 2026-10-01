@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncGenerator
 
+from fastapi import Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -22,7 +23,7 @@ DATABASE_URL: str = settings.DATABASE_URL or (
 engine = create_async_engine(
     DATABASE_URL,
     poolclass=NullPool,  # Disable pooling for serverless-friendly behaviour.
-    echo=settings.ENVIRONMENT == "development",
+    echo=settings.SQL_ECHO,
 )
 
 async_session_factory = async_sessionmaker(
@@ -45,6 +46,18 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+# One declaration, used by every route and sub-dependency.
+#
+# ``scope="function"`` makes the session's exit code (the commit) run right after
+# the handler returns, BEFORE the response is sent. The default would run it
+# afterwards, so a commit that failed could not change what the caller had
+# already been told: a confession reported saved and lost, a decision
+# acknowledged and never stored. FastAPI includes the scope in its dependency
+# cache key, so a single shared object also guarantees a request gets exactly one
+# session: mixing scopes would silently give it two.
+session_dependency = Depends(get_async_session, scope="function")
 
 
 async def check_db_connected() -> bool:

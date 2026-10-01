@@ -15,9 +15,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime system deps
+# Install runtime system deps.
+#
+# voice_mod.py shells out to two binaries: ffmpeg to transcode, then sox to
+# apply the mask's effect chain. Both must exist in *this* stage — only
+# /root/.local is copied from the builder, so an apt package installed there
+# leaves no binary behind at runtime. ffmpeg was previously installed in the
+# builder only and sox was never installed at all, so every
+# POST /api/v1/voice/mask failed in Docker while working on a host that
+# happened to have them.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
+    libpq5 ffmpeg sox \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

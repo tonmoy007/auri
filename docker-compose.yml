@@ -10,7 +10,7 @@ services:
     container_name: auri-api
     restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8010:8000"
     env_file:
       - .env
     environment:
@@ -19,6 +19,17 @@ services:
       # Container-network hostname, not the host-facing localhost default in .env —
       # otherwise the admin dashboard's LiveKit status probe always reports unreachable.
       - LIVEKIT_URL=ws://livekit:7880
+      # Same class of fix: Ollama runs on the *host*, so the .env default of
+      # localhost:11434 resolves to the container itself and fails with
+      # "[Errno 99] Cannot assign requested address". Every LLM call then
+      # falls through the chain to Gemini/OpenAI, and with no keys configured
+      # the whole chain fails — which silently costs the confession its
+      # summary and category, and makes moderation fail closed so everything
+      # lands in the review queue.
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL_DOCKER:-http://host.docker.internal:11434}
+    extra_hosts:
+      # Docker Desktop provides host.docker.internal; native Linux does not.
+      - "host.docker.internal:host-gateway"
     depends_on:
       db:
         condition: service_healthy
@@ -26,8 +37,21 @@ services:
         condition: service_started
     networks:
       - auri-net
+    volumes:
+      - ./.cache:/app/.cache:rw
+      - ./data:/app/data:rw
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # Probed with python, which the image already has. The previous `curl`
+      # probe is not installed in python:3.11-slim, so every check failed
+      # with "executable file not found" and the container sat permanently
+      # unhealthy while serving traffic fine.
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health', timeout=5).status == 200 else 1)",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -57,7 +81,7 @@ services:
       - auri-net
 
   # ---------------------------------------------------------------------------
-  # DB — PostgreSQL with pgcrypto
+  # DB — PostgreSQL (pgcrypto installed; no column is encrypted with it)
   # ---------------------------------------------------------------------------
   db:
     image: postgres:16-alpine

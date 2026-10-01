@@ -17,13 +17,16 @@ import time
 from pathlib import Path
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import require_admin_access
 from app.config import settings
-from app.database import get_async_session
-from app.services import settings_service
+from app.database import session_dependency
+from app.models.audit_event import AuditAction
+from app.models.user import User
+from app.services import audit_service, settings_service
 from app.services.voice_mod import MASKS
 
 logger = logging.getLogger(__name__)
@@ -43,6 +46,7 @@ _LLM_KEYS: tuple[str, ...] = (
     "ANTHROPIC_MODEL",
 )
 _STT_KEYS: tuple[str, ...] = ("WHISPER_MODEL",)
+_ANALYTICS_KEYS: tuple[str, ...] = ("ANALYTICS_MIN_COHORT",)
 _VOICE_MASK_KEYS: tuple[str, ...] = tuple(
     f"VOICE_MASK_{name.upper()}" for name in MASKS
 )
@@ -51,7 +55,40 @@ _VOICE_MASK_KEYS: tuple[str, ...] = tuple(
 # machine's default `java`. Empty means "inherit the backend process's own
 # JAVA_HOME".
 _BUILD_KEYS: tuple[str, ...] = ("ANDROID_JAVA_HOME",)
-ALLOWED_CONFIG_KEYS = frozenset(_LLM_KEYS + _STT_KEYS + _VOICE_MASK_KEYS + _BUILD_KEYS)
+# Contacts in the fixed crisis reply (12.7).
+_CRISIS_KEYS: tuple[str, ...] = (
+    "CRISIS_HELPLINE_NAME",
+    "CRISIS_HELPLINE_NUMBER",
+    "CRISIS_EAP_CONTACT",
+)
+# Priest mode. The chat server address, its key and the vault/index paths are
+# environment only on purpose: a dashboard edit must not be able to redirect where
+# people's questions go.
+_PRIEST_KEYS: tuple[str, ...] = (
+    "PRIEST_MODE_ENABLED",
+    "PRIEST_PERSONA_NAME",
+    "PRIEST_LLM_MODEL",
+    "PRIEST_FALLBACK_MODEL",
+    "PRIEST_LLM_TIMEOUT_SECONDS",
+    "PRIEST_TOTAL_DEADLINE_SECONDS",
+    "PRIEST_EMBED_MODEL",
+    "PRIEST_TOP_K",
+    "PRIEST_MIN_RELEVANCE_DENSE",
+    "PRIEST_MIN_RELEVANCE_BM25",
+    "PRIEST_RATE_LIMIT_PER_MINUTE",
+    "PRIEST_RATE_LIMIT_PER_DAY",
+    "PRIEST_MAX_CONCURRENCY",
+    "PRIEST_TRADITIONS_ENABLED",
+)
+ALLOWED_CONFIG_KEYS = frozenset(
+    _LLM_KEYS
+    + _STT_KEYS
+    + _VOICE_MASK_KEYS
+    + _BUILD_KEYS
+    + _ANALYTICS_KEYS
+    + _CRISIS_KEYS
+    + _PRIEST_KEYS
+)
 
 # repo_root/backend/app/api/v1/admin.py -> repo_root/mobile
 _MOBILE_DIR = Path(__file__).resolve().parents[4] / "mobile"
@@ -93,17 +130,11 @@ _MAX_LOG_LINES = 2000
 _SECRET_SUFFIXES = ("_API_KEY", "_API_SECRET")
 
 
-def require_admin(x_admin_api_key: str = Header(..., alias="X-Admin-Api-Key")) -> None:
-    """Reject the request unless it carries the configured admin secret.
-
-    Fails **closed**: an unset ``ADMIN_API_KEY`` denies every request rather
-    than leaving the dashboard open (mirrors ``require_moderator``).
-    """
-    if not settings.ADMIN_API_KEY or x_admin_api_key != settings.ADMIN_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid or missing admin credentials",
-        )
+# Admin routes accept an ``admin``-role session **or** the legacy
+# ``X-Admin-Api-Key`` shared secret, so the Phase 10 dashboard escape hatch
+# and local tooling keep working while named staff sessions become the
+# normal path. See app/api/deps.py.
+require_admin = require_admin_access
 
 
 def _mask(key: str, value: str) -> str:
@@ -137,6 +168,9 @@ class ConfigResponse(BaseModel):
     stt: list[ConfigEntry]
     voice_masks: list[ConfigEntry]
     build: list[ConfigEntry]
+    analytics: list[ConfigEntry]
+    crisis: list[ConfigEntry]
+    priest: list[ConfigEntry]
 
 
 class ConfigUpdateRequest(BaseModel):
@@ -184,18 +218,40 @@ async def get_config_all() -> ConfigResponse:
         stt=_entries(_STT_KEYS),
         voice_masks=_entries(_VOICE_MASK_KEYS),
         build=_entries(_BUILD_KEYS),
+        analytics=_entries(_ANALYTICS_KEYS),
+        crisis=_entries(_CRISIS_KEYS),
+        priest=_entries(_PRIEST_KEYS),
+    )
+
+
+async def _audit_config_write(
+    session: AsyncSession, request: Request, actor: User | None, detail: str
+) -> None:
+    """Record a config change by key and action, never the value.
+
+    A value can be an address or a secret, and the kill switch and the Ollama address
+    change where questions go, so the change must be accountable.
+    """
+    await audit_service.record(
+        session,
+        actor=actor,
+        actor_label=None if actor else audit_service.ADMIN_KEY_ACTOR_LABEL,
+        action=AuditAction.config_write,
+        source_ip=audit_service.client_ip(request),
+        detail=detail,
     )
 
 
 @router.put(
     "/config",
     response_model=ConfigEntry,
-    dependencies=[Depends(require_admin)],
     summary="Set a config override — takes effect immediately, no restart",
 )
 async def update_config(
     body: ConfigUpdateRequest,
-    session: AsyncSession = Depends(get_async_session),
+    request: Request,
+    actor: User | None = Depends(require_admin),
+    session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Upsert *body.key* = *body.value*. Rejects unknown keys and, for
     ``VOICE_MASK_*`` keys, anything that isn't a JSON list of strings."""
@@ -218,18 +274,24 @@ async def update_config(
                 detail=f"{body.key} value must be a JSON list of strings",
             )
 
-    await settings_service.set_config(session, body.key, body.value)
-    return ConfigEntry(key=body.key, value=_mask(body.key, body.value), source="db")
+    # The change and its audit row are one commit: if the audit cannot be written, the
+    # change (the kill switch, an address) must not be left live, unaudited.
+    await settings_service.stage_config(session, body.key, body.value)
+    entry = ConfigEntry(key=body.key, value=_mask(body.key, body.value), source="db")
+    await _audit_config_write(session, request, actor, f"set {body.key}")
+    settings_service.cache_config(body.key, body.value)
+    return entry
 
 
 @router.delete(
     "/config/{key}",
-    dependencies=[Depends(require_admin)],
     summary="Clear a config override, reverting it to the .env/Settings() default",
 )
 async def reset_config(
     key: str,
-    session: AsyncSession = Depends(get_async_session),
+    request: Request,
+    actor: User | None = Depends(require_admin),
+    session: AsyncSession = session_dependency,
 ) -> ConfigEntry:
     """Remove *key*'s DB override."""
     if key not in ALLOWED_CONFIG_KEYS:
@@ -237,8 +299,11 @@ async def reset_config(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Unknown config key: {key!r}",
         )
-    await settings_service.clear_config(session, key)
-    return ConfigEntry(key=key, value=_mask(key, _default_for(key)), source="default")
+    await settings_service.stage_clear(session, key)
+    entry = ConfigEntry(key=key, value=_mask(key, _default_for(key)), source="default")
+    await _audit_config_write(session, request, actor, f"cleared {key}")
+    settings_service.cache_config(key, None)
+    return entry
 
 
 @router.get(

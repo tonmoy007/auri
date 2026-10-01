@@ -55,8 +55,12 @@ def test_database_module_uses_explicit_database_url_when_set(
     importlib.reload(database_module)
 
 
-def test_database_module_builds_url_from_parts_when_unset(monkeypatch) -> None:
-    # Arrange
+def test_database_module_builds_url_from_parts_when_unset(
+    monkeypatch, tmp_path
+) -> None:
+    # Arrange — settings read ".env" from the working directory; a developer's own
+    # (with empty DB_* keys) must not decide what this test sees
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("DB_HOST", "parts-host")
     monkeypatch.setenv("DB_PORT", "6543")
