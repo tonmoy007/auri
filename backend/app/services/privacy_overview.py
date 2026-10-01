@@ -151,6 +151,8 @@ class RunSummary:
     emptied_to_shell: Bucket
     expired_replies: Bucket
     expired_devices: Bucket
+    flagged_removed: Bucket
+    unacknowledged_crisis_removed: Bucket
 
 
 @dataclass(frozen=True)
@@ -559,19 +561,20 @@ def _keeping_limits(snapshot: PrivacySnapshot) -> list[Fact]:
         )
     return [
         Fact(
-            "not_removed",
-            "A confession that is never forwarded, or that is held for review, "
-            "is kept until its author or a moderator acts on it. Only "
-            "forwarded and withdrawn ones are removed on a schedule.",
+            "unreviewed_removed",
+            "Every confession is removed "
+            f"{snapshot.retention_hours} hours after its last change, including "
+            "one that was never forwarded and one held for review that no "
+            "moderator has looked at yet. Each run of the removal job records "
+            "how many held items it removed, and how many of those were crisis "
+            "items nobody had acknowledged.",
         ),
         Fact(
             "reply_outlives",
             "When HR replies, the reply and the one-way phone code needed to "
             f"show it are kept for up to {snapshot.reply_retention_days} days "
             "after the reply, even though the confession itself goes after "
-            f"{snapshot.retention_hours} hours. If HR replies to a confession "
-            "that has not been forwarded, both are kept until it is forwarded "
-            "or withdrawn.",
+            f"{snapshot.retention_hours} hours.",
         ),
         Fact(
             "job_dependent",
@@ -636,6 +639,12 @@ def _summarise_run(run: RetentionRun, threshold: int) -> RunSummary:
         emptied_to_shell=suppress("emptied_to_shell", run.emptied_to_shell, threshold),
         expired_replies=suppress("expired_replies", run.expired_replies, threshold),
         expired_devices=suppress("expired_devices", run.expired_devices, threshold),
+        flagged_removed=suppress("flagged_removed", run.flagged_removed, threshold),
+        unacknowledged_crisis_removed=suppress(
+            "unacknowledged_crisis_removed",
+            run.unacknowledged_crisis_removed,
+            threshold,
+        ),
     )
 
 
