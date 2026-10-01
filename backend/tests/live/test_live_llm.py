@@ -27,6 +27,7 @@ async def test_the_configured_chat_server_answers_a_harmless_prompt() -> None:
         pytest.skip(
             "no chat server is configured (PRIEST_LLM_BASE_URL or THEMES_LLM_BASE_URL)"
         )
+        return
     client = ChatClient(endpoint)
 
     # Act

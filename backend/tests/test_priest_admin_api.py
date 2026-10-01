@@ -1542,11 +1542,11 @@ def test_an_odd_embedding_model_name_is_not_passed_to_the_builder(
         def wait(self) -> None:
             return None
 
-    monkeypatch.setattr(
-        priest_admin.subprocess,
-        "Popen",
-        lambda argv, **kw: started.append(kw) or FakeProcess(),
-    )
+    def fake_popen(argv: list[str], **kwargs: Any) -> FakeProcess:
+        started.append(kwargs)
+        return FakeProcess()
+
+    monkeypatch.setattr(priest_admin.subprocess, "Popen", fake_popen)
     monkeypatch.setitem(settings_service._cache, "PRIEST_EMBED_MODEL", bad)
     monkeypatch.delenv("PRIEST_EMBED_MODEL", raising=False)
 
