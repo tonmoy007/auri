@@ -173,7 +173,7 @@ Six reviewers read the Guide after the first implementation. The numbers below a
 | 42 | The English-only notice has no configured contacts; it points to the emergency number only | **Open** |
 | 43 | Deferral-matched questions are not moderated (moderation runs on the pass path only) | **Fixed** (plan 14.3): a deferral question is moderated and a crisis verdict returns the fixed crisis reply; the check has its own two-thread pool and a two-check cap with no queue, so a flood of deferral questions (which skip the rate limiter) cannot starve the pass path's moderation, and past the cap a deferral goes out unmoderated as before |
 | 44 | `PRIEST_MAX_CONCURRENCY` is read once, when the service is built | **Fixed** (plan 14.5): the limit is read on every request; raising it applies to the next question, lowering it never cancels one already running |
-| 45 | `priest_service.py` is about 790 lines, over the 400-line rule; a split is planned | **Open** |
+| 45 | `priest_service.py` is about 790 lines, over the 400-line rule; a split is planned | **Fixed** (plan 14.2): split into `service_run.py`, `service_moderation.py`, `service_pipeline.py`, `service_responses.py` and `live_chain.py`; `priest_service.py` is 384 lines and keeps generation, the live retriever and the wiring. No behaviour change; the service tests are untouched |
 | 46 | The per-device limiter identity is client-chosen (a client can vary the header); IP limiting is not added | **Open** |
 | 47 | Model-server request logging is unverified, for the vLLM server and for each Ollama | **Open** |
 | 48 | vLLM is reached over plain HTTP in the prototype | **Open**, accepted for the prototype (finding 19) |

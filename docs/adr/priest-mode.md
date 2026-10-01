@@ -35,7 +35,6 @@ D1 neutral name; D2 all traditions with an on-device filter; D3 the agent lives 
 
 - **Retries:** one retry on a connect error only, never on a timeout, inside one deadline; a 30-second experience cannot absorb AGENTS §9.1's three attempts with backoff.
 - **Configuration:** `Settings` plus the `app_settings` live layer, not YAML under `backend/config/`, because that is what the codebase actually does.
-- **File size:** `priest_service.py` (about 790 lines) exceeds the 400-line rule; a split is planned.
 
 ## Consequences and known limits
 
