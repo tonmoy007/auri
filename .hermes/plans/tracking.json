@@ -223,11 +223,12 @@
         "15.4": "completed",
         "15.5": "completed",
         "15.6": "completed",
-        "15.7": "pending",
+        "15.7": "completed",
         "15.8": "pending",
         "15.9": "blocked",
         "15.10": "blocked",
-        "15.12": "blocked"
+        "15.12": "blocked",
+        "15.11": "pending"
       }
     },
     "16": {

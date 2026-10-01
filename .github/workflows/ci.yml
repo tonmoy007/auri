@@ -105,6 +105,19 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov httpx aiosqlite -c backend/constraints.txt
           pip install -r backend/requirements.txt -r bot/requirements.txt -c backend/constraints.txt
 
+      - name: Apply, reverse and re-apply the migrations on Postgres
+        # Tests build tables with create_all on SQLite, so nothing else here ever
+        # runs a migration; a migration that failed on every fresh Postgres once
+        # shipped that way (plan task 4.5).
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic downgrade base
+        env:
+          DATABASE_URL: postgresql+asyncpg://auri:auri@localhost:5432/auri_test
+
       - name: Run Python tests
         run: pytest backend/ bot/ -v -m "not live_llm" --cov=backend --cov=bot --cov-report=xml
         env:
