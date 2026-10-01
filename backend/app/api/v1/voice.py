@@ -9,11 +9,13 @@ actual voice masking happened anywhere in the pipeline.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 import os
 import tempfile
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,6 +35,10 @@ ClockDependency = Callable[[], datetime]
 # In-process rate-limit store keyed by device token hash — same pattern as
 # POST /api/v1/stt and POST /api/v1/tts (no DB row backs this endpoint).
 _last_mask_at: dict[str, datetime] = {}
+
+# ffmpeg and SoX are blocking subprocesses: they run on their own small pool so a
+# long recording's mask never holds the event loop (plan task 16.8).
+_MASK_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="voice-mask")
 
 
 class VoiceMaskResponse(BaseModel):
@@ -120,7 +126,9 @@ async def mask_voice(
 
         modulator = VoiceModulator()
         try:
-            masked_path = modulator.modulate(tmp_path, mask)
+            masked_path = await asyncio.get_running_loop().run_in_executor(
+                _MASK_POOL, modulator.modulate, tmp_path, mask
+            )
         except Exception as exc:
             logger.error("voice masking failed: %s", exc)
             raise VoiceModulationError("could not apply voice mask") from exc

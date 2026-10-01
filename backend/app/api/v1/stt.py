@@ -8,10 +8,12 @@ app has no way to turn a recording into the `transcript` string that
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import tempfile
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -41,6 +43,11 @@ ClockDependency = Callable[[], datetime]
 # limit off of, so a lightweight module-level dict is sufficient for a
 # single-instance deployment; swap for a shared cache (Redis) if scaled out.
 _last_transcription_at: dict[str, datetime] = {}
+
+# Whisper is blocking and CPU-heavy: it runs on its own small pool so that a
+# minutes-long transcription never holds the event loop, which used to stall
+# every other request in the process until it finished (plan task 16.8).
+_TRANSCRIPTION_POOL = ThreadPoolExecutor(max_workers=2, thread_name_prefix="stt")
 
 
 class TranscriptionResponse(BaseModel):
@@ -124,7 +131,9 @@ async def transcribe_audio(
 
         transcriber = WhisperTranscriber(allow_api_fallback=not local_only)
         try:
-            transcript = transcriber.transcribe(tmp_path)
+            transcript = await asyncio.get_running_loop().run_in_executor(
+                _TRANSCRIPTION_POOL, transcriber.transcribe, tmp_path
+            )
         except Exception as exc:
             logger.error("audio transcription failed: %s", exc)
             raise STTError("could not transcribe audio") from exc
