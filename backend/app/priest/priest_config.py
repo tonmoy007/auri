@@ -103,6 +103,19 @@ def rate_limit_per_day() -> int:
     return _int("PRIEST_RATE_LIMIT_PER_DAY", 1, 100000, 40)
 
 
+def rate_limit_per_ip_per_minute() -> int:
+    """Questions one client address may ask per minute (only with a trusted proxy header).
+
+    Wider than the device limit on purpose: a whole office can share one address.
+    """
+    return _int("PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE", 1, 10000, 30)
+
+
+def rate_limit_per_ip_per_day() -> int:
+    """Questions one client address may ask per day (only with a trusted proxy header)."""
+    return _int("PRIEST_RATE_LIMIT_PER_IP_PER_DAY", 1, 1000000, 1000)
+
+
 def max_concurrency() -> int:
     """Questions answered at once per API process."""
     return _int("PRIEST_MAX_CONCURRENCY", 1, 64, 4)

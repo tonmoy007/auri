@@ -12,10 +12,12 @@ import logging
 import uuid
 from typing import Final
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response
 
+from app.config import settings
 from app.exceptions import PriestError, PriestUnavailableError
 from app.priest import metrics, priest_config
+from app.priest.client_address import client_address
 from app.priest.priest_service import (
     PriestService,
     get_priest_service,
@@ -87,6 +89,7 @@ async def priest_status(response: Response) -> PriestStatusResponse:
     dependencies=[Depends(_require_enabled)],
 )
 async def ask_priest(
+    request: Request,
     body: PriestAskRequest,
     x_device_token_hash: str = Header(
         ..., alias="X-Device-Token-Hash", min_length=16, max_length=256
@@ -103,10 +106,16 @@ async def ask_priest(
     """
     # Random on purpose: not derived from the device, the question or the time.
     request_id = str(uuid.uuid4())
-    # Crisis, deferral and unsupported-script replies are fixed text that costs nothing,
-    # so they are never refused: a person in distress must not get a 429 instead of help.
-    if not is_fixed_reply(body.question):
-        _check_rate_limit(limiter, x_device_token_hash)
+    # Crisis, deferral and unsupported-script replies are fixed text that costs no model
+    # call, so the question limits never apply: a person in distress must not get a 429
+    # instead of help. They only have a high flood ceiling of their own.
+    address = client_address(request.headers, settings.TRUSTED_PROXY_HEADER)
+    _check_rate_limit(
+        limiter,
+        x_device_token_hash,
+        address,
+        fixed_reply=is_fixed_reply(body.question),
+    )
     try:
         return await service.answer(
             body.question, body.tradition, request_id=request_id
@@ -126,10 +135,16 @@ async def ask_priest(
         raise HTTPException(status_code=500, detail=UNEXPECTED_ERROR_DETAIL) from None
 
 
-def _check_rate_limit(limiter: PriestRateLimiter, device_token_hash: str) -> None:
-    """Count the question against the device, recording a refusal in the metrics."""
+def _check_rate_limit(
+    limiter: PriestRateLimiter,
+    device_token_hash: str,
+    address: str | None,
+    *,
+    fixed_reply: bool,
+) -> None:
+    """Count the question against the device and address, recording a refusal."""
     try:
-        limiter.check_and_record(device_token_hash)
+        limiter.check_and_record(device_token_hash, address, fixed_reply=fixed_reply)
     except PriestRateLimitError:
         metrics.record_outcome("rate_limited")
         raise

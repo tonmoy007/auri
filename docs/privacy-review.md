@@ -174,7 +174,7 @@ Six reviewers read the Guide after the first implementation. The numbers below a
 | 43 | Deferral-matched questions are not moderated (moderation runs on the pass path only) | **Open** |
 | 44 | `PRIEST_MAX_CONCURRENCY` is read once, when the service is built | **Open** |
 | 45 | `priest_service.py` is about 790 lines, over the 400-line rule; a split is planned | **Open** |
-| 46 | The per-device limiter identity is client-chosen (a client can vary the header); IP limiting is not added | **Open** |
+| 46 | The per-device limiter identity is client-chosen (a client can vary the header); IP limiting is not added | **Fixed where configured** (plan 14.7): with `TRUSTED_PROXY_HEADER` set (environment only, off by default), a question must also fit a per-address window (`PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE` 30, `_PER_DAY` 1000, wide because an office can share one address). Only the named header is read, and only its last entry (the one the proxy appended); IPv6 is grouped by /64. The address is a salted HMAC key in memory only, never logged or stored. Fixed replies now have a flood ceiling (20 a minute per device), the ceiling item in finding 56. Without the setting, the limit is per device as before |
 | 47 | Model-server request logging is unverified, for the vLLM server and for each Ollama | **Open** |
 | 48 | vLLM is reached over plain HTTP in the prototype | **Open**, accepted for the prototype (finding 19) |
 | 49 | The app renders its own fixed crisis wording plus the server's contacts; the server's crisis template text is not shown | **Open** |
