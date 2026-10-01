@@ -186,6 +186,32 @@ class Settings(BaseSettings):
     LOGIN_MAX_ATTEMPTS: int = 5  # per email, before the window locks out
     LOGIN_ATTEMPT_WINDOW_SECONDS: int = 300
 
+    # Single sign-on through any OpenID Connect provider (plan 15.10). All environment
+    # only. Off unless the issuer, client id and secret, callback and dashboard URLs
+    # are all set. Password login keeps working for accounts that have one. Accounts
+    # are still created by an admin first: SSO links to an existing account by its
+    # verified email and never creates one. MFA is the provider's job.
+    OIDC_ISSUER: str = ""  # e.g. https://login.microsoftonline.com/<tenant>/v2.0
+    OIDC_CLIENT_ID: str = ""
+    OIDC_CLIENT_SECRET: str = ""
+    # This backend's callback, registered with the provider:
+    # https://<backend>/api/v1/auth/oidc/callback
+    OIDC_REDIRECT_URI: str = ""
+    # Where the dashboard is served; the callback hands the session over to it.
+    OIDC_DASHBOARD_URL: str = ""
+    OIDC_PROVIDER_LABEL: str = "Single sign-on"  # the login button's wording
+    # First sign-in links by the ID token's email claim, which must be marked
+    # verified. Some providers (Microsoft Entra) never send email_verified; turning
+    # this off there trusts the provider's own email, so only do it for a provider
+    # where users cannot set their own email address.
+    OIDC_REQUIRE_EMAIL_VERIFIED: bool = True
+    # Optional role mapping. With OIDC_ROLE_CLAIM set (for example "groups" or
+    # "roles"), the provider decides the role at every sign-in through
+    # OIDC_ROLE_MAP, a JSON object from claim value to admin, hr or moderator; an
+    # account with no mapped value is refused. Empty keeps the role set in Auri.
+    OIDC_ROLE_CLAIM: str = ""
+    OIDC_ROLE_MAP: str = ""
+
     # ── LiveKit (Phase 7) ────────────────────────────────────────────────────
     # Self-hosted only — see docker-compose.yml's `livekit` service (--dev
     # mode). Defaults match that service's devkey/secret; LAN IP (not
