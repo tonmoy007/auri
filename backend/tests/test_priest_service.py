@@ -711,6 +711,54 @@ async def test_a_saturated_service_raises_busy_with_retry_after() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_raised_concurrency_limit_applies_without_a_restart(
+    set_setting: Callable[[str, object], None],
+) -> None:
+    # Arrange — limit 1, one question holding the only slot, then the admin raises it
+    set_setting("PRIEST_MAX_CONCURRENCY", 1)
+    gate = asyncio.Event()
+    chain = FakeChain([answer_json(), answer_json()], gate=gate)
+    service = make_service(chain=chain, busy_wait_seconds=0.05)
+    first = asyncio.create_task(ask(service))
+    await asyncio.sleep(0.05)
+    set_setting("PRIEST_MAX_CONCURRENCY", 2)
+
+    # Act
+    second = asyncio.create_task(
+        ask(service, "What is the Kisa Gotami story about?", request_id="req-2")
+    )
+    await asyncio.sleep(0.05)
+    gate.set()
+    results = [await first, await second]
+
+    # Assert — the second question got the new slot instead of "busy"
+    assert [r.kind for r in results] == [AnswerKind.answer, AnswerKind.answer]
+
+
+@pytest.mark.asyncio
+async def test_a_lowered_concurrency_limit_applies_without_a_restart(
+    set_setting: Callable[[str, object], None],
+) -> None:
+    # Arrange — limit 2, one question in flight, then the admin lowers it to 1
+    set_setting("PRIEST_MAX_CONCURRENCY", 2)
+    gate = asyncio.Event()
+    chain = FakeChain([answer_json()], gate=gate)
+    service = make_service(chain=chain, busy_wait_seconds=0.05)
+    first = asyncio.create_task(ask(service))
+    await asyncio.sleep(0.05)
+    set_setting("PRIEST_MAX_CONCURRENCY", 1)
+
+    # Act
+    with pytest.raises(PriestUnavailableError) as raised:
+        await ask(service, "What is the Kisa Gotami story about?", request_id="req-2")
+
+    # Assert — the running question is untouched; the new one is busy
+    assert raised.value.code == "priest_busy"
+    gate.set()
+    assert (await first).kind is AnswerKind.answer
+
+
+@pytest.mark.asyncio
 async def test_a_slot_freed_in_time_is_used_and_released_afterwards() -> None:
     # Arrange
     service = make_service(max_concurrency=1, busy_wait_seconds=0.5)

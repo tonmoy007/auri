@@ -73,6 +73,7 @@ from app.priest.schemas import (
     PriestQuote,
     TraditionId,
 )
+from app.priest.slots import LiveSlots
 from app.priest.types import Chunk, RetrievalResult
 from app.services.deidentify import strip_pii_regex
 
@@ -299,8 +300,11 @@ class PriestService:
         self._chain = chain
         self._moderator = moderator
         self._clock = clock
-        self._slots = asyncio.Semaphore(
-            max_concurrency or priest_config.max_concurrency()
+        # The limit is read on every request, so a dashboard change applies at once.
+        self._slots = LiveSlots(
+            (lambda: max_concurrency)
+            if max_concurrency
+            else priest_config.max_concurrency
         )
         self._busy_wait = busy_wait_seconds
         self._moderation_cap = moderation_cap_seconds
@@ -349,7 +353,7 @@ class PriestService:
                 request_id, exc.code, outcome, exc.retry_after
             ) from None
         finally:
-            self._slots.release()
+            await self._slots.release()
 
     def _prepare(
         self,

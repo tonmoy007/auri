@@ -172,7 +172,7 @@ Six reviewers read the Guide after the first implementation. The numbers below a
 | 41 | Native-speaker review of the romanised-Bangla crisis lines; romanised Bangla beyond the short list is not covered | **Open** |
 | 42 | The English-only notice has no configured contacts; it points to the emergency number only | **Open** |
 | 43 | Deferral-matched questions are not moderated (moderation runs on the pass path only) | **Open** |
-| 44 | `PRIEST_MAX_CONCURRENCY` is read once, when the service is built | **Open** |
+| 44 | `PRIEST_MAX_CONCURRENCY` is read once, when the service is built | **Fixed** (plan 14.5): the limit is read on every request; raising it applies to the next question, lowering it never cancels one already running |
 | 45 | `priest_service.py` is about 790 lines, over the 400-line rule; a split is planned | **Open** |
 | 46 | The per-device limiter identity is client-chosen (a client can vary the header); IP limiting is not added | **Open** |
 | 47 | Model-server request logging is unverified, for the vLLM server and for each Ollama | **Open** |
