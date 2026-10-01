@@ -225,8 +225,8 @@
         "15.6": "pending",
         "15.7": "pending",
         "15.8": "pending",
-        "15.9": "blocked",
-        "15.10": "blocked"
+        "15.9": "completed",
+        "15.10": "pending"
       }
     },
     "16": {
@@ -251,10 +251,10 @@
         "17.5": "blocked",
         "17.6": "blocked",
         "17.7": "blocked",
-        "17.8": "pending"
+        "17.8": "completed"
       }
     }
   },
   "created_at": "2026-07-16T14:30:00+06:00",
-  "updated_at": "2026-10-01T18:30:00+06:00"
+  "updated_at": "2026-10-01T21:10:00+06:00"
 }
