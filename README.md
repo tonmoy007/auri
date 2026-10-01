@@ -91,7 +91,7 @@ auri/
 
 - Docker + Docker Compose (for Postgres, NATS, and the optional LiveKit/agent/Ollama services)
 - Python 3.11+ and a virtualenv tool (the repo's own `.venv` works — `python3 -m venv .venv`)
-- Node.js 18+ and npm
+- Node.js 22 (the version in `.nvmrc`; the dashboard's test tools need 22.22.2 or newer) and npm
 - [Expo CLI](https://docs.expo.dev/get-started/installation/) (`npx expo`) for the mobile app; Android Studio/SDK if you want to build/run on Android
 - (Optional) [ngrok](https://ngrok.com/) — needed if a real phone or an Android emulator (which cannot reach your machine's LAN IP directly) needs to reach your local backend
 

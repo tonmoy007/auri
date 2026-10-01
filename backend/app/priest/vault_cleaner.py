@@ -550,6 +550,9 @@ def clean_note(
     sections = parser.parse()
     tags = tags_of(frontmatter)
     title = _inline(scalar_text(frontmatter.get("title")), _Stats())
+    rel_path = unicodedata.normalize(
+        "NFC", rel_path
+    )  # one spelling for ids and citations
     return CleanNote(
         path=rel_path,
         title=title or parser.h1 or _clean_text(PurePosixPath(rel_path).stem),
