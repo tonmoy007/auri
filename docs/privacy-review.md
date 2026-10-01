@@ -178,7 +178,7 @@ Six reviewers read the Guide after the first implementation. The numbers below a
 | 47 | Model-server request logging is unverified, for the vLLM server and for each Ollama | **Open** |
 | 48 | vLLM is reached over plain HTTP in the prototype | **Open**, accepted for the prototype (finding 19) |
 | 49 | The app renders its own fixed crisis wording plus the server's contacts; the server's crisis template text is not shown | **Open** |
-| 50 | NFC and NFD path normalisation in the index | **Open** |
+| 50 | NFC and NFD path normalisation in the index | **Fixed** (plan 14.6): note paths are reported and chunked in NFC whatever the disk stores |
 | 51 | The app-switcher snapshot of the question is not addressed | **Open** |
 | 52 | `PUT /admin/config` does not validate Guide keys | **Open** |
 | 53 | The query embedding is sent to the Ollama at `OLLAMA_BASE_URL` (environment) without the hosted-provider or plain-http check that the chat servers and moderation get | **Fixed**: `LiveRetriever` runs the same address check and the `-cloud` refusal before it builds the embedder (found while writing this addendum). The index build still embeds vault text, not questions, without that check. |
