@@ -217,14 +217,23 @@ async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
         yield session
 
 
-@pytest_asyncio.fixture
-async def api_client(db_engine: AsyncEngine, monkeypatch) -> AsyncIterator[AsyncClient]:
-    """ASGI client bound to the test database, with a real signing secret."""
+def _use_test_signing_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every live settings object a real session-token signing secret.
+
+    Outside ``development`` the app refuses to sign with the placeholder, and CI
+    has no ``.env`` to supply one, so any fixture that mints a token needs this.
+    """
     for candidate in {
         id(settings): settings,
         **{id(o): o for o in _live_settings_objects()},
     }.values():
         monkeypatch.setattr(candidate, "SESSION_TOKEN_SECRET", TEST_SESSION_SECRET)
+
+
+@pytest_asyncio.fixture
+async def api_client(db_engine: AsyncEngine, monkeypatch) -> AsyncIterator[AsyncClient]:
+    """ASGI client bound to the test database, with a real signing secret."""
+    _use_test_signing_secret(monkeypatch)
     login_throttle.reset_all()
 
     session_factory = async_sessionmaker(bind=db_engine, expire_on_commit=False)
@@ -249,8 +258,11 @@ async def api_client(db_engine: AsyncEngine, monkeypatch) -> AsyncIterator[Async
 
 
 @pytest_asyncio.fixture
-async def make_staff(db_session: AsyncSession) -> StaffFactory:
+async def make_staff(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> StaffFactory:
     """Return a factory creating a staff account plus its bearer headers."""
+    _use_test_signing_secret(monkeypatch)
 
     async def _make(
         role: UserRole = UserRole.hr,
