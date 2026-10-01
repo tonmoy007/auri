@@ -8,7 +8,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  NODE_VERSION: "22"
+  # Node comes from .nvmrc (one place for CI, contributors and the README).
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -29,8 +29,10 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install ruff mypy
-          pip install -r backend/requirements.txt -r bot/requirements.txt
+          # The test tools are installed here too so mypy sees the same types
+          # (pytest.skip's NoReturn, fixtures) a contributor's machine does.
+          pip install ruff mypy pytest pytest-asyncio pytest-cov httpx aiosqlite -c backend/constraints.txt
+          pip install -r backend/requirements.txt -r bot/requirements.txt -c backend/constraints.txt
 
       - name: Ruff lint
         run: ruff check backend/ bot/
@@ -41,10 +43,10 @@ jobs:
       - name: Mypy type check
         run: mypy backend/ bot/ --ignore-missing-imports
 
-      - name: Set up Node ${{ env.NODE_VERSION }}
+      - name: Set up Node (from .nvmrc)
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: "npm"
           cache-dependency-path: mobile/package-lock.json
 
@@ -100,8 +102,21 @@ jobs:
       - name: Install Python dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pytest-asyncio pytest-cov httpx aiosqlite
-          pip install -r backend/requirements.txt -r bot/requirements.txt
+          pip install pytest pytest-asyncio pytest-cov httpx aiosqlite -c backend/constraints.txt
+          pip install -r backend/requirements.txt -r bot/requirements.txt -c backend/constraints.txt
+
+      - name: Apply, reverse and re-apply the migrations on Postgres
+        # Tests build tables with create_all on SQLite, so nothing else here ever
+        # runs a migration; a migration that failed on every fresh Postgres once
+        # shipped that way (plan task 4.5).
+        working-directory: backend
+        run: |
+          alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
+          alembic downgrade base
+        env:
+          DATABASE_URL: postgresql+asyncpg://auri:auri@localhost:5432/auri_test
 
       - name: Run Python tests
         run: pytest backend/ bot/ -v -m "not live_llm" --cov=backend --cov=bot --cov-report=xml
@@ -115,10 +130,10 @@ jobs:
           file: ./coverage.xml
           fail_ci_if_error: false
 
-      - name: Set up Node ${{ env.NODE_VERSION }}
+      - name: Set up Node (from .nvmrc)
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: "npm"
           cache-dependency-path: mobile/package-lock.json
 
@@ -143,10 +158,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node ${{ env.NODE_VERSION }}
+      - name: Set up Node (from .nvmrc)
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version-file: .nvmrc
           cache: "npm"
           cache-dependency-path: dashboard/package-lock.json
 
