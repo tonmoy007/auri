@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from app.api.v1.hr import get_clock
+from app.main import app
 from app.models.confession import Confession, ConfessionStatus
 from app.models.user import UserRole
 from app.services import settings_service
@@ -102,33 +104,38 @@ async def test_hr_cannot_write_or_edit_a_reply_on_a_shell(
 
 
 @pytest.mark.asyncio
-async def test_insights_do_not_count_a_shell(
+async def test_a_shell_is_counted_once_and_does_not_hold_its_week_back(
     api_client: AsyncClient,
     db_session: AsyncSession,
     make_staff: StaffFactory,
     set_setting: SettingPatcher,
 ) -> None:
-    # Arrange
+    # Arrange — two replied confessions from September's first week become shells;
+    # the retention run folds each into the Insights counts as it empties it
+    # (plan 14.12), so the emptied shell itself is never read again
     set_setting("ANALYTICS_MIN_COHORT", 2)
     settings_service._cache.pop("ANALYTICS_MIN_COHORT", None)
     _, headers = await make_staff(UserRole.hr)
-    await _make_shell(db_session)
-    await _live_pending(db_session, count=3)
-    since = (NOW - timedelta(days=10)).isoformat()
+    first_week = datetime(2026, 9, 2, 10, 0, tzinfo=timezone.utc)
+    await _make_shell(db_session, created_at=first_week)
+    await _make_shell(db_session, created_at=first_week)
+    app.dependency_overrides[get_clock] = lambda: lambda: NOW
 
     # Act
-    response = await api_client.get(
-        "/api/v1/hr/insights",
-        params={"since": since, "until": NOW.isoformat()},
-        headers=headers,
-    )
+    try:
+        body = (
+            await api_client.get(
+                "/api/v1/hr/insights", params={"month": "2026-09"}, headers=headers
+            )
+        ).json()
+    finally:
+        app.dependency_overrides.pop(get_clock, None)
 
-    # Assert
-    assert response.json()["total"] == {
-        "label": "total",
-        "count": 3,
-        "suppressed": False,
-    }
+    # Assert — frozen despite the shells, counted once each, with their real labels
+    week = body["weeks"][0]
+    assert week["frozen"] is True
+    assert week["total"] == {"label": "total", "count": 2, "suppressed": False}
+    assert [(b["label"], b["count"]) for b in week["by_category"]] == [("work", 2)]
 
 
 @pytest.mark.asyncio
@@ -248,39 +255,6 @@ async def test_a_raw_read_of_a_shell_is_not_found_rather_than_refused(
 
     # Assert
     assert response.status_code == 404
-
-
-@pytest.mark.asyncio
-async def test_insights_breakdowns_and_trend_ignore_a_shell(
-    api_client: AsyncClient,
-    db_session: AsyncSession,
-    make_staff: StaffFactory,
-    set_setting: SettingPatcher,
-) -> None:
-    # Arrange — the shell has no category or sentiment and sits in an earlier
-    # week, so counting it would add an "unlabelled" bucket and an extra week
-    set_setting("ANALYTICS_MIN_COHORT", 2)
-    settings_service._cache.pop("ANALYTICS_MIN_COHORT", None)
-    _, headers = await make_staff(UserRole.hr)
-    await _make_shell(db_session, created_at=NOW - timedelta(days=9))
-    await _live_pending(db_session, count=3)
-
-    # Act
-    body = (
-        await api_client.get(
-            "/api/v1/hr/insights",
-            params={
-                "since": (NOW - timedelta(days=12)).isoformat(),
-                "until": NOW.isoformat(),
-            },
-            headers=headers,
-        )
-    ).json()
-
-    # Assert
-    assert [b["label"] for b in body["by_category"]] == ["work"]
-    assert [b["label"] for b in body["by_sentiment"]] == ["negative"]
-    assert len(body["sentiment_trend"]) == 1
 
 
 @pytest.mark.asyncio
