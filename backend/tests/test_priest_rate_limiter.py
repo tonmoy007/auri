@@ -8,7 +8,12 @@ injected clock rather than resetting on a boundary.
 from __future__ import annotations
 
 from app.exceptions import RateLimitError
-from app.priest.rate_limiter import PriestRateLimiter, PriestRateLimitError
+from app.priest.rate_limiter import (
+    FIXED_REPLY_ADDRESS_LIMITS,
+    FIXED_REPLY_DEVICE_LIMITS,
+    PriestRateLimiter,
+    PriestRateLimitError,
+)
 
 from tests.conftest import SettingPatcher
 
@@ -278,3 +283,141 @@ def test_state_is_bounded_and_the_oldest_keys_are_dropped(
     limiter.check_and_record(devices[0])
     assert len(limiter) == 3
     _refusal(limiter, devices[4])
+
+
+# ── per-address windows and the fixed-reply ceiling (plan 14.7) ──────────────
+
+ADDRESS = "203.0.113.7"
+
+
+def _address_limits(set_setting: SettingPatcher, per_minute: int, per_day: int) -> None:
+    set_setting("PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE", per_minute)
+    set_setting("PRIEST_RATE_LIMIT_PER_IP_PER_DAY", per_day)
+
+
+def test_a_client_varying_its_device_is_still_limited_by_address(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    _limits(set_setting, per_minute=4, per_day=40)
+    _address_limits(set_setting, per_minute=3, per_day=100)
+    limiter = _limiter(FakeClock())
+    for n in range(3):
+        limiter.check_and_record(f"device-{n:024d}", ADDRESS)
+
+    # Act
+    try:
+        limiter.check_and_record("device-fresh-0123456789abcd", ADDRESS)
+    except PriestRateLimitError as exc:
+        refusal = exc
+    else:
+        raise AssertionError("expected the address window to refuse")
+
+    # Assert
+    assert 1 <= refusal.retry_after_seconds <= 60
+
+
+def test_without_an_address_only_the_device_limit_applies(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    _limits(set_setting, per_minute=4, per_day=40)
+    _address_limits(set_setting, per_minute=1, per_day=1)
+    limiter = _limiter(FakeClock())
+
+    # Act — five devices, no address known
+    for n in range(5):
+        limiter.check_and_record(f"device-{n:024d}")
+
+    # Assert
+    assert len(limiter) == 5
+
+
+def test_a_hit_refused_by_the_address_is_not_counted_for_the_device(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange — the address is full; the device has never asked
+    _limits(set_setting, per_minute=1, per_day=40)
+    _address_limits(set_setting, per_minute=1, per_day=100)
+    limiter = _limiter(FakeClock())
+    limiter.check_and_record("device-other-0123456789abcd", ADDRESS)
+    try:
+        limiter.check_and_record(DEVICE, ADDRESS)
+    except PriestRateLimitError:
+        pass
+
+    # Act — the same device from another address
+    limiter.check_and_record(DEVICE, "198.51.100.1")
+
+    # Assert — the refused hit did not use up the device's one question
+    _refusal(limiter)
+
+
+def test_devices_and_addresses_never_share_a_window(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange — a device header that happens to equal an address string
+    _limits(set_setting, per_minute=1, per_day=40)
+    _address_limits(set_setting, per_minute=1, per_day=100)
+    limiter = _limiter(FakeClock())
+    limiter.check_and_record(ADDRESS)
+
+    # Act
+    limiter.check_and_record("device-other-0123456789abcd", ADDRESS)
+
+    # Assert
+    assert len(limiter) == 3
+
+
+def test_the_address_is_never_stored(set_setting: SettingPatcher) -> None:
+    # Arrange
+    _limits(set_setting, per_minute=4, per_day=40)
+    limiter = _limiter(FakeClock())
+
+    # Act
+    limiter.check_and_record(DEVICE, ADDRESS)
+
+    # Assert
+    assert ADDRESS not in repr(vars(limiter))
+    assert ADDRESS.encode() not in repr(vars(limiter)).encode()
+
+
+def test_fixed_replies_have_a_ceiling_of_their_own(set_setting: SettingPatcher) -> None:
+    # Arrange — the question limit is used up
+    _limits(set_setting, per_minute=1, per_day=40)
+    limiter = _limiter(FakeClock())
+    limiter.check_and_record(DEVICE)
+    _refusal(limiter)
+
+    # Act — fixed replies still go through, up to their own ceiling
+    for _ in range(FIXED_REPLY_DEVICE_LIMITS.per_minute):
+        limiter.check_and_record(DEVICE, fixed_reply=True)
+    try:
+        limiter.check_and_record(DEVICE, fixed_reply=True)
+    except PriestRateLimitError as exc:
+        refusal = exc
+    else:
+        raise AssertionError("expected the fixed-reply ceiling to refuse")
+
+    # Assert
+    assert 1 <= refusal.retry_after_seconds <= 60
+
+
+def test_fixed_replies_do_not_use_up_the_question_limit(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    _limits(set_setting, per_minute=1, per_day=40)
+    limiter = _limiter(FakeClock())
+    for _ in range(10):
+        limiter.check_and_record(DEVICE, ADDRESS, fixed_reply=True)
+
+    # Act / Assert — the one question is still available
+    limiter.check_and_record(DEVICE, ADDRESS)
+    _refusal(limiter)
+
+
+def test_the_fixed_reply_address_ceiling_is_wider_than_the_device_one() -> None:
+    # An office shares one address; a flood from one device should hit first
+    assert FIXED_REPLY_ADDRESS_LIMITS.per_minute > FIXED_REPLY_DEVICE_LIMITS.per_minute
+    assert FIXED_REPLY_ADDRESS_LIMITS.per_day > FIXED_REPLY_DEVICE_LIMITS.per_day
