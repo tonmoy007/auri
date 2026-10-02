@@ -37,6 +37,9 @@ _INT_RANGES: Final[dict[str, tuple[int, int, int]]] = {
     "PRIEST_TOTAL_DEADLINE_SECONDS": (5, 300, 30),
     "PRIEST_RATE_LIMIT_PER_MINUTE": (1, 1000, 4),
     "PRIEST_RATE_LIMIT_PER_DAY": (1, 100000, 40),
+    # Per client address (plan 14.7): wide, because an office can share one address.
+    "PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE": (1, 10000, 30),
+    "PRIEST_RATE_LIMIT_PER_IP_PER_DAY": (1, 1000000, 1000),
     "PRIEST_MAX_CONCURRENCY": (1, 64, 4),
 }
 _FLOAT_RANGES: Final[dict[str, tuple[float, float]]] = {
@@ -135,6 +138,25 @@ def rate_limit_per_minute() -> int:
 def rate_limit_per_day() -> int:
     """Questions one device may ask per day."""
     return _int("PRIEST_RATE_LIMIT_PER_DAY", *_INT_RANGES["PRIEST_RATE_LIMIT_PER_DAY"])
+
+
+def rate_limit_per_ip_per_minute() -> int:
+    """Questions one client address may ask per minute (only with a trusted proxy header).
+
+    Wider than the device limit on purpose: a whole office can share one address.
+    """
+    return _int(
+        "PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE",
+        *_INT_RANGES["PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE"],
+    )
+
+
+def rate_limit_per_ip_per_day() -> int:
+    """Questions one client address may ask per day (only with a trusted proxy header)."""
+    return _int(
+        "PRIEST_RATE_LIMIT_PER_IP_PER_DAY",
+        *_INT_RANGES["PRIEST_RATE_LIMIT_PER_IP_PER_DAY"],
+    )
 
 
 def max_concurrency() -> int:
