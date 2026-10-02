@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     VOICE_MASK_RATE_LIMIT_SECONDS: int = (
         10  # cost-abuse guard on POST /api/v1/voice/mask
     )
+    # The header a reverse proxy in front of the backend sets to the client's address
+    # (for example X-Real-IP from nginx), used for a per-address Guide limit (plan
+    # 14.7). Empty, the default, means no proxy is trusted and no address limit runs.
+    # Environment only: set it only when every request reaches the backend through
+    # that proxy, and the proxy overwrites the header, or a client can choose it.
+    TRUSTED_PROXY_HEADER: str = ""
 
     # ── HR analytics (Phase 11) ──────────────────────────────────────────
     # Smallest bucket size an aggregate may report. Anything smaller is
@@ -100,6 +106,11 @@ class Settings(BaseSettings):
     PRIEST_MIN_RELEVANCE_BM25: float = 18.8
     PRIEST_RATE_LIMIT_PER_MINUTE: int = Field(default=4, ge=1)
     PRIEST_RATE_LIMIT_PER_DAY: int = Field(default=40, ge=1)
+    # Per client address, on top of the per-device limits, and only when
+    # TRUSTED_PROXY_HEADER is set (plan 14.7). Wide because one office can share an
+    # address.
+    PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE: int = Field(default=30, ge=1)
+    PRIEST_RATE_LIMIT_PER_IP_PER_DAY: int = Field(default=1000, ge=1)
     PRIEST_MAX_CONCURRENCY: int = Field(default=4, ge=1, le=64)
     # JSON list of tradition ids; empty means all.
     PRIEST_TRADITIONS_ENABLED: str = ""
