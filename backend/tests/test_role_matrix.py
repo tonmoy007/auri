@@ -85,6 +85,12 @@ KEYED_ROUTES: set[StaffRoute] = {
 OPEN_ROUTES: set[StaffRoute] = {
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),
+    # Single sign-on (plan 15.10): the steps before a session exists. The callback
+    # and the exchange each need a single-use secret only this sign-in holds.
+    ("GET", "/api/v1/auth/oidc"),
+    ("GET", "/api/v1/auth/oidc/start"),
+    ("GET", "/api/v1/auth/oidc/callback"),
+    ("POST", "/api/v1/auth/oidc/exchange"),
     ("GET", "/api/v1/health"),
     ("GET", "/health"),
     ("POST", "/api/v1/confessions"),

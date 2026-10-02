@@ -122,6 +122,22 @@ export const authApi = {
 
   me: (baseUrl: string, auth: Credentials) =>
     apiRequest<StaffUser>(baseUrl, '/auth/me', auth),
+
+  /** Whether the login screen should offer single sign-on (plan 15.10). */
+  ssoStatus: (baseUrl: string) =>
+    apiRequest<SsoStatus>(baseUrl, '/auth/oidc', {}),
+
+  /** Trade the one-time code from the SSO callback for a session. */
+  ssoExchange: (baseUrl: string, code: string) =>
+    apiRequest<TokenPair>(baseUrl, '/auth/oidc/exchange', {}, {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }),
+}
+
+export interface SsoStatus {
+  enabled: boolean
+  label: string | null
 }
 
 export interface AuditEvent {
