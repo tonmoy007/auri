@@ -86,6 +86,8 @@ export function PriestComposer({
     if (seenClearCountRef.current === clearCount) return;
     seenClearCountRef.current = clearCount;
     transcriptGuard.bump();
+    // The dropped transcript need not be waited for: stop polling for it.
+    recorder.cancelProcessing();
     setIsTranscribing(false);
     setVoiceIssue(null);
     if (recorder.isRecording) {

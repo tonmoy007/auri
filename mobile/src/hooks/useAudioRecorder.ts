@@ -14,8 +14,17 @@ import {
   getApiBaseUrl,
 } from '../config/api';
 import { hashDeviceToken } from '../lib/deviceToken';
+import { expoDownloadPort } from '../lib/maskedDownload';
+import { downloadMaskedAudio, maskedDownloadUrl, maskUploadUrl } from '../lib/maskedDownloadCore';
 import { deleteRecordingFile } from '../lib/recordingFiles';
-import { speechToTextPath, type SpeechOptions } from '../lib/speechRoute';
+import { transcriptionJobPath, type SpeechOptions } from '../lib/speechRoute';
+import { transcriptionJobPort } from '../lib/transcriptionJob';
+import {
+  pollTranscriptionJob,
+  readUploadReply,
+  type JobOutcome,
+  type UploadReply,
+} from '../lib/transcriptionJobCore';
 
 /** Metering readings quieter than this (dBFS) normalize to 0 amplitude — below typical mic noise floor. */
 const METERING_FLOOR_DB = -60;
@@ -40,6 +49,14 @@ class UploadTimeoutError extends Error {
   }
 }
 
+/** The user cancelled the upload. Never retried. */
+class UploadCancelledError extends Error {
+  constructor() {
+    super('Upload cancelled');
+    this.name = 'UploadCancelledError';
+  }
+}
+
 /** HTTP error from the STT upload, carrying the status code so retry logic can tell client vs server errors apart. */
 class UploadHttpError extends Error {
   constructor(
@@ -56,7 +73,9 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Upload a recorded audio file to the STT endpoint and resolve with its transcript.
+ * Upload a recorded audio file to start a background transcription (plan 16.2)
+ * and resolve with the server's reply: a job id to poll, or, from a server
+ * without job mode, the transcript itself.
  * Uses XMLHttpRequest instead of fetch — fetch's RN implementation has no
  * upload-progress event, and this is the only way to drive a progress indicator.
  */
@@ -65,15 +84,23 @@ function uploadForTranscription(
   deviceTokenHash: string,
   durationMs: number,
   onProgress: (fraction: number) => void,
+  signal: AbortSignal,
   options: SpeechOptions = {},
-): Promise<string> {
+): Promise<UploadReply & { kind: 'job' | 'transcript' }> {
   return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new UploadCancelledError());
+      return;
+    }
     const xhr = new XMLHttpRequest();
-    // Scaled to the recording's length: transcription is slower than
-    // realtime, so a flat budget fails long confessions by construction.
+    // Scaled to the recording's length, as before job mode, so a server
+    // without it still has the time to answer in full.
     xhr.timeout = uploadTimeoutMsFor(durationMs);
-    xhr.open('POST', `${getApiBaseUrl()}${speechToTextPath(ENDPOINTS.stt, options)}`);
+    xhr.open('POST', `${getApiBaseUrl()}${transcriptionJobPath(ENDPOINTS.stt, options)}`);
     xhr.setRequestHeader('X-Device-Token-Hash', deviceTokenHash);
+    const onCancel = () => xhr.abort();
+    signal.addEventListener('abort', onCancel);
+    const settle = () => signal.removeEventListener('abort', onCancel);
 
     xhr.upload.onprogress = (event) => {
       if (event.lengthComputable) {
@@ -82,12 +109,18 @@ function uploadForTranscription(
     };
 
     xhr.onload = () => {
+      settle();
       if (xhr.status >= 200 && xhr.status < 300) {
+        let reply: UploadReply = { kind: 'malformed' };
         try {
-          const body = JSON.parse(xhr.responseText) as { transcript: string };
-          resolve(body.transcript);
+          reply = readUploadReply(xhr.status, JSON.parse(xhr.responseText));
         } catch {
+          reply = { kind: 'malformed' };
+        }
+        if (reply.kind === 'malformed') {
           reject(new UploadHttpError(xhr.status, 'Malformed transcription response'));
+        } else {
+          resolve(reply);
         }
         return;
       }
@@ -101,8 +134,18 @@ function uploadForTranscription(
       reject(new UploadHttpError(xhr.status, detail ?? `Upload failed (${xhr.status})`));
     };
 
-    xhr.onerror = () => reject(new UploadHttpError(0, 'Network error during upload'));
-    xhr.ontimeout = () => reject(new UploadTimeoutError());
+    xhr.onerror = () => {
+      settle();
+      reject(new UploadHttpError(0, 'Network error during upload'));
+    };
+    xhr.ontimeout = () => {
+      settle();
+      reject(new UploadTimeoutError());
+    };
+    xhr.onabort = () => {
+      settle();
+      reject(new UploadCancelledError());
+    };
 
     const formData = new FormData();
     formData.append('audio', {
@@ -137,6 +180,62 @@ export interface UseAudioRecorderOptions {
 }
 
 /**
+ * Upload *uri* for masking and return the one-time download id.
+ *
+ * `fetch` carries no timeout of its own, so without the abort the request could
+ * hang and leave the booth stuck on "Processing…" with no way forward.
+ */
+async function requestMaskedDownload(
+  uri: string,
+  mask: VoiceMask,
+  durationMs: number,
+  deviceTokenHash: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('audio', { uri, name: 'confession.aac', type: 'audio/aac' } as unknown as Blob);
+  formData.append('mask', mask);
+  const abort = new AbortController();
+  const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
+  // The user's Cancel ends the request as the time budget would.
+  const onCancel = () => abort.abort();
+  signal.addEventListener('abort', onCancel);
+  if (signal.aborted) abort.abort();
+  try {
+    const response = await fetch(maskUploadUrl(getApiBaseUrl()), {
+      method: 'POST',
+      headers: { 'X-Device-Token-Hash': deviceTokenHash },
+      body: formData,
+      signal: abort.signal,
+    });
+    if (!response.ok) {
+      throw new Error(`Voice masking failed (${response.status})`);
+    }
+    const body = (await response.json()) as { download_id: string };
+    return body.download_id;
+  } finally {
+    clearTimeout(abortTimer);
+    signal.removeEventListener('abort', onCancel);
+  }
+}
+
+/** What to tell the user when a background transcription did not produce text. */
+function jobFailureMessage(outcome: Exclude<JobOutcome, { kind: 'ready' }>): string | null {
+  switch (outcome.kind) {
+    case 'cancelled':
+      return null;
+    case 'failed':
+      return outcome.code === 'no_text'
+        ? 'No speech was heard in the recording'
+        : 'Transcription failed';
+    case 'gone':
+      return 'The transcription expired before it could be collected';
+    case 'timed_out':
+      return 'Transcription took too long';
+  }
+}
+
+/**
  * Custom hook for audio recording functionality.
  * Manages the full recording lifecycle:
  * - Permission requests
@@ -159,6 +258,7 @@ export function useAudioRecorder({
     isUploading: false,
     uploadProgress: 0,
     uploadError: null,
+    transcriptionPhase: null,
   });
 
   const recordingRef = useRef<Audio.Recording | null>(null);
@@ -176,6 +276,9 @@ export function useAudioRecorder({
   const isSessionRecordingRef = useRef(false);
   const onAutoStopRef = useRef(onAutoStop);
   onAutoStopRef.current = onAutoStop;
+  // One per transcription or masking still running, so Cancel and leaving the
+  // screen can stop them: the upload, the polling and the download.
+  const inFlightRef = useRef(new Set<AbortController>());
 
   /**
    * Request microphone permission on mount (unless `prepareOnMount` is off).
@@ -208,6 +311,8 @@ export function useAudioRecorder({
     // booth only unmounts once that flow is over.
     return () => {
       isMountedRef.current = false;
+      for (const controller of inFlightRef.current) controller.abort();
+      inFlightRef.current.clear();
       const recording = recordingRef.current;
       recordingRef.current = null;
       const recordingFile = recordingFileRef.current;
@@ -456,10 +561,16 @@ export function useAudioRecorder({
   }, []);
 
   /**
-   * Upload a recorded audio file for transcription, retrying transient
-   * failures with exponential backoff.
+   * Upload a recorded audio file for transcription and wait for the transcript,
+   * retrying transient upload failures with exponential backoff.
    *
-   * Retries on network errors, timeouts, and 5xx responses (up to
+   * The upload starts a background job (plan 16.2) and the hook then polls for
+   * it, so a long recording no longer holds one request open for minutes. The
+   * poll survives a lost connection and the app being backgrounded; it ends when
+   * the job finishes, is gone, runs past its deadline, or is cancelled with
+   * `cancelProcessing`.
+   *
+   * The upload retries on network errors and 5xx responses (up to
    * `MAX_UPLOAD_RETRIES` extra attempts); a 4xx response means the request
    * itself is bad (empty/oversized audio, rate limit) and won't succeed on
    * retry, so it fails immediately. Returns `null` — never throws — so
@@ -467,58 +578,96 @@ export function useAudioRecorder({
    * recording the user just made.
    */
   const transcribeRecording = useCallback(async (uri: string, durationMs: number, options: SpeechOptions = {}): Promise<string | null> => {
-    setState((prev) => ({ ...prev, isUploading: true, uploadProgress: 0, uploadError: null }));
+    setState((prev) => ({
+      ...prev,
+      isUploading: true,
+      uploadProgress: 0,
+      uploadError: null,
+      transcriptionPhase: 'uploading',
+    }));
+    const finish = (transcript: string | null, uploadError: string | null): string | null => {
+      if (isMountedRef.current) {
+        setState((prev) => ({
+          ...prev,
+          isUploading: false,
+          uploadProgress: transcript === null ? prev.uploadProgress : 1,
+          uploadError,
+          transcriptionPhase: null,
+        }));
+      }
+      return transcript;
+    };
 
     let deviceTokenHash: string;
     try {
       deviceTokenHash = await hashDeviceToken();
     } catch (_error: unknown) {
       // A failed identity read must not escape: the caller shows its own message.
-      setState((prev) => ({
-        ...prev,
-        isUploading: false,
-        uploadError: 'Failed to upload recording',
-      }));
-      return null;
+      return finish(null, 'Failed to upload recording');
     }
-    let lastError: unknown = null;
 
-    for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
-      try {
-        const transcript = await uploadForTranscription(
-          uri,
-          deviceTokenHash,
-          durationMs,
-          (fraction) => {
-            setState((prev) => ({ ...prev, uploadProgress: fraction }));
-          },
-          options,
-        );
-        setState((prev) => ({
-          ...prev,
-          isUploading: false,
-          uploadProgress: 1,
-          uploadError: null,
-        }));
-        return transcript;
-      } catch (error: unknown) {
-        lastError = error;
-        const isClientError = error instanceof UploadHttpError && error.httpStatus >= 400;
-        // A timeout is not transient here: the server keeps transcribing
-        // after the client gives up, so each "retry" starts another full
-        // transcription of the same audio while the user waits out another
-        // whole budget for a result that was never going to arrive sooner.
-        const isTimeout = error instanceof UploadTimeoutError;
-        if (isClientError || isTimeout || attempt === MAX_UPLOAD_RETRIES) {
+    const controller = new AbortController();
+    inFlightRef.current.add(controller);
+    try {
+      let reply: (UploadReply & { kind: 'job' | 'transcript' }) | null = null;
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt <= MAX_UPLOAD_RETRIES; attempt++) {
+        try {
+          reply = await uploadForTranscription(
+            uri,
+            deviceTokenHash,
+            durationMs,
+            (fraction) => {
+              setState((prev) => ({ ...prev, uploadProgress: fraction }));
+            },
+            controller.signal,
+            options,
+          );
           break;
+        } catch (error: unknown) {
+          lastError = error;
+          if (error instanceof UploadCancelledError || controller.signal.aborted) {
+            return finish(null, null);
+          }
+          const isClientError = error instanceof UploadHttpError && error.httpStatus >= 400;
+          // A timeout is not transient here: the server keeps working after the
+          // client gives up, so each "retry" starts another full transcription
+          // of the same audio while the user waits out another whole budget.
+          const isTimeout = error instanceof UploadTimeoutError;
+          if (isClientError || isTimeout || attempt === MAX_UPLOAD_RETRIES) {
+            break;
+          }
+          await sleep(UPLOAD_RETRY_BASE_DELAY_MS * 2 ** attempt);
         }
-        await sleep(UPLOAD_RETRY_BASE_DELAY_MS * 2 ** attempt);
       }
-    }
 
-    const message = lastError instanceof Error ? lastError.message : 'Failed to upload recording';
-    setState((prev) => ({ ...prev, isUploading: false, uploadError: message }));
-    return null;
+      if (reply === null) {
+        const message = lastError instanceof Error ? lastError.message : 'Failed to upload recording';
+        return finish(null, message);
+      }
+      if (reply.kind === 'transcript') return finish(reply.transcript, null);
+
+      if (isMountedRef.current) {
+        setState((prev) => ({ ...prev, uploadProgress: 1, transcriptionPhase: 'transcribing' }));
+      }
+      const outcome = await pollTranscriptionJob(
+        transcriptionJobPort(deviceTokenHash),
+        reply.jobId,
+        controller.signal,
+      );
+      if (outcome.kind === 'ready') return finish(outcome.transcript, null);
+      return finish(null, jobFailureMessage(outcome));
+    } finally {
+      inFlightRef.current.delete(controller);
+    }
+  }, []);
+
+  /**
+   * Stop every transcription and masking this hook has running. Each one
+   * resolves `null`, as a failure would, and the recording stays on the device.
+   */
+  const cancelProcessing = useCallback(() => {
+    for (const controller of inFlightRef.current) controller.abort();
   }, []);
 
   /**
@@ -527,57 +676,44 @@ export function useAudioRecorder({
    * the caller fall back to playing the original (unmasked) recording
    * instead of losing playback entirely.
    *
-   * Uses `fetch` + base64 rather than the STT upload's XHR/blob approach:
-   * RN's `fetch().blob()` handling is unreliable on this stack (new
-   * architecture/Fabric), and the backend returns base64 JSON specifically
-   * to sidestep that — see `backend/app/api/v1/voice.py`.
+   * The server holds the masked WAV for one download (plan 16.4) and
+   * expo-file-system streams it straight to the cache, rather than receiving
+   * it as base64 JSON held in memory (about 33.6 MB for five minutes). RN's
+   * `fetch().blob()` stays avoided: it is unreliable on this stack.
    */
   const maskRecording = useCallback(
     async (uri: string, mask: VoiceMask, durationMs: number): Promise<string | null> => {
+      const controller = new AbortController();
+      inFlightRef.current.add(controller);
       try {
         const deviceTokenHash = await hashDeviceToken();
-        const formData = new FormData();
-        formData.append('audio', {
+        const downloadId = await requestMaskedDownload(
           uri,
-          name: 'confession.aac',
-          type: 'audio/aac',
-        } as unknown as Blob);
-        formData.append('mask', mask);
-
-        // `fetch` carries no timeout of its own, so without this the masking
-        // request could hang indefinitely and leave the booth stuck on
-        // "Processing…" with no way forward.
-        const abort = new AbortController();
-        const abortTimer = setTimeout(() => abort.abort(), uploadTimeoutMsFor(durationMs));
-        let response: Response;
-        try {
-          response = await fetch(`${getApiBaseUrl()}${ENDPOINTS.voiceMask}`, {
-            method: 'POST',
-            headers: { 'X-Device-Token-Hash': deviceTokenHash },
-            body: formData,
-            signal: abort.signal,
-          });
-        } finally {
-          clearTimeout(abortTimer);
-        }
-        if (!response.ok) {
-          throw new Error(`Voice masking failed (${response.status})`);
-        }
-        const body = (await response.json()) as { audio_base64: string };
-
+          mask,
+          durationMs,
+          deviceTokenHash,
+          controller.signal,
+        );
         const maskedUri = `${FileSystem.cacheDirectory}masked_${Date.now()}.wav`;
         // Tracked before the write, so a write that fails part-way is still cleaned up.
         maskedFileRef.current = maskedUri;
-        await FileSystem.writeAsStringAsync(maskedUri, body.audio_base64, {
-          encoding: FileSystem.EncodingType.Base64,
-        });
-        if (!isMountedRef.current) {
+        const saved = await downloadMaskedAudio(
+          expoDownloadPort,
+          maskedDownloadUrl(getApiBaseUrl(), downloadId),
+          maskedUri,
+          { 'X-Device-Token-Hash': deviceTokenHash },
+          uploadTimeoutMsFor(durationMs),
+          controller.signal,
+        );
+        if (!saved || !isMountedRef.current || controller.signal.aborted) {
           void deleteRecordingFile(maskedUri);
           return null;
         }
         return maskedUri;
       } catch (_error: unknown) {
         return null;
+      } finally {
+        inFlightRef.current.delete(controller);
       }
     },
     [],
@@ -597,6 +733,7 @@ export function useAudioRecorder({
       isUploading: false,
       uploadProgress: 0,
       uploadError: null,
+      transcriptionPhase: null,
     });
   }, [state.hasPermission]);
 
@@ -606,6 +743,7 @@ export function useAudioRecorder({
     stopRecording,
     transcribeRecording,
     maskRecording,
+    cancelProcessing,
     reset,
   };
 }

@@ -8,7 +8,9 @@ clock (AGENTS.md §16.5) and a cleared rate-limit store (AGENTS.md §16.3).
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import threading
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from pathlib import Path
@@ -239,3 +241,41 @@ async def test_mask_voice_different_token_not_rate_limited(
     # Assert
     assert first_response.status_code == 200
     assert second_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_mask_does_not_block_other_requests(
+    client: AsyncClient, tmp_path: Path
+) -> None:
+    # Arrange — the first mask can only finish once the second has run; if SoX ran
+    # on the event loop the second could never start (plan task 16.8)
+    second_has_run = threading.Event()
+
+    def fake_modulate(self: object, audio_path: Path, mask: str) -> str:
+        first = Path(audio_path).read_bytes().startswith(b"first")
+        out = tmp_path / ("first.wav" if first else "second.wav")
+        if first and not second_has_run.wait(timeout=3):
+            raise RuntimeError("blocked")
+        second_has_run.set()
+        out.write_bytes(b"masked " + (b"first" if first else b"second"))
+        return str(out)
+
+    with patch("app.api.v1.voice.VoiceModulator.modulate", fake_modulate):
+        # Act
+        first, second = await asyncio.gather(
+            client.post(
+                "/api/v1/voice/mask",
+                files={"audio": ("a.aac", b"first recording", "audio/aac")},
+                headers={"X-Device-Token-Hash": DEVICE_HASH},
+            ),
+            client.post(
+                "/api/v1/voice/mask",
+                files={"audio": ("b.aac", b"second recording", "audio/aac")},
+                headers={"X-Device-Token-Hash": OTHER_DEVICE_HASH},
+            ),
+        )
+
+    # Assert
+    assert first.status_code == 200
+    assert base64.b64decode(first.json()["audio_base64"]) == b"masked first"
+    assert base64.b64decode(second.json()["audio_base64"]) == b"masked second"

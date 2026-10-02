@@ -226,22 +226,23 @@
         "15.6": "completed",
         "15.7": "completed",
         "15.8": "pending",
-        "15.9": "blocked",
-        "15.10": "blocked",
+        "15.9": "completed",
+        "15.10": "pending",
         "15.12": "blocked",
         "15.11": "pending"
       }
     },
     "16": {
-      "status": "pending",
+      "status": "in_progress",
       "tasks": {
-        "16.1": "pending",
-        "16.2": "pending",
-        "16.3": "blocked",
-        "16.4": "pending",
-        "16.5": "pending",
-        "16.6": "pending",
-        "16.7": "blocked"
+        "16.1": "completed",
+        "16.2": "completed",
+        "16.3": "completed",
+        "16.4": "completed",
+        "16.5": "completed",
+        "16.6": "completed",
+        "16.7": "blocked",
+        "16.8": "completed"
       }
     },
     "17": {
@@ -254,7 +255,7 @@
         "17.5": "blocked",
         "17.6": "blocked",
         "17.7": "blocked",
-        "17.8": "pending"
+        "17.8": "completed"
       }
     }
   },
