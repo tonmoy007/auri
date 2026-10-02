@@ -6,64 +6,96 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 
 ## ✨ Features
 
-- **Immersive 3D Booth** — Interactive candlelit confessional built with React Three Fiber
-- **AI STT/TTS Agent** — Whisper transcription + Edge-TTS voice response
-- **Voice Modulation** — 5 voice masks (Warm, Robotic, Ethereal, Deep, Random) via SoX
-- **Anonymity Modes** — Fully blind or "someone in your team" context — your choice at send-time
-- **Telegram Delivery** — Confessions delivered posted to the chosen department's Telegram chat
-- **Moderation** — AI-flagged content queued to designated moderator for review
-- **Guide (off by default)** — an AI companion that answers questions from a study library of world religions and cites the notes it used. Auri keeps no questions or answers; the model server's own logging is not yet verified (prototype). Crisis questions get a fixed message with contacts, never a generated one
-- **Forward or Delete** — Send to a department, or delete it
+**For employees (the mobile app)**
+
+- **Immersive 3D Booth** — Interactive candlelit confessional built with React Three Fiber, with a door, drifting dust, a voice-responsive ring and a camera dolly while you speak
 - **3 Environments** — Classic booth, forest glade, rooftop at night
+- **AI STT/TTS Agent** — Whisper transcription (run in the background for long recordings, up to 5 minutes) and an Edge-TTS voice response
+- **Voice Modulation** — 5 voice masks (Warm, Robotic, Ethereal, Deep, Random) via SoX, with the masked audio available to review before sending
+- **Anonymity Modes** — Fully blind or "someone in your team" context — your choice at send-time
+- **Forward or Delete** — Send to a department, or delete it
+- **A reply that comes back** — After a confession the app shows a short supportive response. Crisis content gets a fixed message with configured contacts, never a generated one. HR can later write an anonymous organisational reply, shown in your history
+- **Guide (off by default)** — An AI companion that answers questions from a study library of world religions and cites the notes it used. Auri keeps no questions or answers; the model server's own logging is not yet verified (prototype). It stays behind a kill switch until the pilot checklist passes
+
+**For staff (the dashboard)**
+
+- **Roles** — `admin`, `hr` and `moderator`, each seeing only their own tabs. Sign in with a password or any OpenID Connect provider (Entra ID, Google Workspace, Okta, Keycloak)
+- **Queue** — Moderation of AI-flagged content, with crisis items pinned to the top. Moderation also still works from the Telegram bot
+- **Insights, Themes and Delivery** — Counts by week, category and department with small groups hidden, recurring themes with a weekly digest, and a view of what was forwarded where and what is stuck
+- **Replies and Directory** — Write anonymous organisational replies; manage the departments confessions are forwarded to
+- **Privacy and Audit** — The live retention settings and what is and is not protected, plus an append-only log of every read of confession content
+- **Admin tools** — Live config (LLM chain, STT model, voice masks), ngrok and LiveKit status, APK builds, and the Guide's index and usage
+
+**Delivery**
+
+- **Telegram Delivery** — Confessions are posted to the chosen department's Telegram chat
+- **Moderation** — AI-flagged content is held for review before delivery
 
 ## 🏗️ Architecture
 
 | Layer | Stack |
 |-------|-------|
-| Mobile | React Native + Expo |
+| Mobile | React Native + Expo (SDK 52) |
 | 3D UI | React Three Fiber + drei + Three.js |
-| Backend | FastAPI + WebSocket |
+| Backend | FastAPI + SQLAlchemy + Alembic |
+| Staff dashboard | Vite + React 19 + TypeScript + Tailwind 4 + shadcn/ui |
 | STT | OpenAI Whisper / faster-whisper |
 | TTS | Edge-TTS |
 | Voice Mod | SoX pitch/formant |
 | AI Agent | Local Ollama first, with Gemini or OpenAI as configurable fallbacks (Claude optional) |
+| Guide and themes | Any OpenAI-compatible chat server (for example vLLM), with a local Ollama fallback |
+| Real-time voice | Self-hosted LiveKit SFU + LiveKit Agents worker (connectivity only so far) |
 | DB | PostgreSQL |
-| Delivery | Telegram Bot (python-telegram-bot) |
+| Delivery | Telegram Bot (python-telegram-bot), NATS |
+| Observability | Prometheus `/metrics`, optional Sentry, structured logs |
+| CI/CD | GitHub Actions: lint, tests (migrations applied and reversed on Postgres), dashboard, build, Trivy; gated deploy to GHCR |
+
+One deployment serves one organisation: see [`docs/adr/tenancy.md`](docs/adr/tenancy.md).
 
 ## 📱 The Flow
 
 ```
 [Enter Auri] → Pick Voice Mask → AI greets you
     ↓
-[Speak] → STT transcribes, and the recording is voice-masked
+[Speak] → The recording is voice-masked and transcribed in the background
     ↓
-[AI processes] → Replaces recognised details, categorizes, summarizes
+[AI processes] → Replaces recognised details, categorizes, summarizes, checks for crisis or policy issues
     ↓
 [Review] → Transcription | AI Summary | Voice-masked Audio
     ↓
 [Choose] → Fully blind / "Someone in your team"
     ↓
 [Act] → Send | Forward to a department | Delete
+    ↓
+[Reply] → A supportive response now; an HR reply later, if there is one
 ```
 
-## 🗺️ Roadmap
+## 🗺️ Status
 
-| Phase | Days | What |
-|-------|------|------|
-| 1 | 2 | 3D Booth scene (candle, particles, rings, door) |
-| 2 | 2.5 | Recording + Voice Modulation + STT |
-| 3 | 2 | LLM Agent + TTS |
-| 4 | 2.5 | Telegram Bot + Forward/Delete + Moderation |
-| 5 | 1 | Environment variants + Haptics + Sound |
+Work is organised into phases tracked in [`.hermes/plans/`](.hermes/plans/) (the plan, and `tracking.json` for the live task status). Roughly:
+
+| Phases | What | State |
+|--------|------|-------|
+| 1-5 | 3D booth, recording and voice masking, AI agent, Telegram bot, environments | Done, except real sound design (needs audio assets) and the optional RVC voice conversion |
+| 6 | Data lifecycle, observability, release readiness | Mostly done; store metadata and device end-to-end tests still open |
+| 7 | Live LiveKit voice conversation | Connectivity only; the conversation itself is not built |
+| 8-10 | App settings, review fixes, local dev stack and config dashboard | Done |
+| 11 | HR operations dashboard: roles, audit, insights, queue, delivery, replies, themes, privacy panel | Done |
+| 12 | Counselor response quality: prompt files and the deterministic crisis reply are done; evaluation, structured replies, guardrails and a model bench are next | In progress |
+| 13 | Guide over the study library | Built; the mobile and real-stack verification is open |
+| 14-17 | Privacy and safety debt, release hygiene, recording robustness, Guide quality gates | Mostly done; the Guide pilot is a no-go until its gates are met ([checklist](docs/runbooks/priest-launch-checklist.md)) |
 
 ## 🛡️ Privacy
 
-- No user accounts and no name asked for — a one-way code made on the device is kept with each confession, so someone with database access could tell which confessions came from one phone
+- No user accounts and no name asked for — a one-way code made on the device is kept with each confession, so someone with database access could tell which confessions came from one phone (set `DEVICE_HASH_PEPPER` to make that code useless on its own)
 - Audio is processed in temporary files on the server and deleted afterwards (if a speech fallback provider is configured, the audio may be sent to it); the phone deletes its own copies (the unmasked recording once masking succeeds, the rest when a confession is sent or deleted, or at the next app start)
 - Recognised personal details are replaced before the text is stored (by the model, or by simple pattern matching if it fails); it can miss some, so what a confession says can still point to its author
 - Nothing is encrypted at the column level; protect the database and its backups accordingly
 - The recipient receives no sender name or device details, but sees a summary and up to the first 1,000 characters of the transcript; HR sees the summary, category and exact send time of every confession that is not deleted, and staff can read the full text of held and forwarded ones
-- The dashboard's Privacy tab states what is kept, for how long, and what is not protected, from the live configuration
+- Most HR screens show the summary, category and mood. Opening the full transcript of an item held for review from an HR screen needs a written reason, which is logged; the Queue tab shows moderators and HR the full text of held items without one. Every dashboard read of confession content is recorded in an audit trail that admins can read; reads through Telegram are not
+- Counts and charts hide any group smaller than `ANALYTICS_MIN_COHORT` (default 5), so a small department cannot be picked out
+- Every confession is purged `RETENTION_HOURS` after its last change, whatever its status, once the retention job runs. A confession with an unread HR reply is kept as a reply-only shell for `REPLY_RETENTION_DAYS`
+- The dashboard's Privacy tab states what is kept, for how long, and what is not protected, from the live configuration. The full review is in [`docs/privacy-review.md`](docs/privacy-review.md)
 
 ## 🗂️ Project Structure
 
@@ -71,17 +103,24 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 auri/
 ├── backend/          FastAPI app (API, DB models, services, LiveKit agent worker)
 │   ├── app/
-│   │   ├── api/v1/       REST endpoints (confessions, moderation, delivery, admin, ...)
-│   │   ├── services/     LLM, STT, TTS, voice-mod, live settings, retention
+│   │   ├── api/v1/       REST endpoints (confessions, moderation, delivery, hr, audit, auth, admin, priest, ...)
+│   │   ├── services/     LLM, STT, TTS, voice-mod, retention, insights, themes, audit, auth
+│   │   ├── priest/       The Guide: retrieval, answer validation, safety routing
+│   │   ├── llm/prompts/  Versioned prompt files (.md with frontmatter)
 │   │   ├── models/       SQLAlchemy models
-│   │   └── agent.py      LiveKit Agents worker entrypoint (Phase 7/10.7)
+│   │   └── agent.py      LiveKit Agents worker entrypoint
 │   ├── alembic/           DB migrations
+│   ├── scripts/           Evaluation scripts
 │   └── tests/
 ├── bot/               Telegram delivery/moderation bot (python-telegram-bot)
 ├── mobile/            Expo / React Native app (the confession booth UI)
-├── dashboard/         Admin/config dashboard — Vite + React + shadcn/ui (local dev only)
+├── dashboard/         Staff dashboard — Vite + React + shadcn/ui
+├── docs/              ADRs (docs/adr), runbooks (docs/runbooks), privacy review and reports
+├── .hermes/plans/     The implementation plan and live task tracking
+├── .github/workflows/ CI, gated deploy, and a latest-dependencies check
 ├── docker-compose.yml Full local stack: db, nats, api, bot, livekit, agent, ollama
 ├── Dockerfile.api / Dockerfile.agent / bot/Dockerfile
+├── AGENTS.md          Development rules (read this before contributing)
 └── Makefile           Shortcuts for everything below
 ```
 
@@ -160,17 +199,21 @@ cd mobile && npx expo start
 
 Press `a` for Android or `i` for iOS. The app's build-time backend URL comes from `EXPO_PUBLIC_API_URL`/`EXPO_PUBLIC_WS_URL` (see `mobile/src/config/api.ts`) — but you don't need to rebuild to change it: **Settings → Developer → Backend URL** lets you override it live on an already-installed app (persisted via `expo-secure-store`, survives app restarts). This is how you point a running app at an ngrok tunnel instead of your LAN IP — useful since Android emulators can't reach your machine's real LAN IP by default (physical devices on the same Wi-Fi can, though).
 
-### 6. Run the admin dashboard (local dev only)
+### 6. Run the staff dashboard
 
 ```bash
 cd dashboard && npm install && npm run dev
 ```
 
-Opens on `http://localhost:5173`. Enter your backend URL and `ADMIN_API_KEY` (from `.env`) in the connection bar. From there you can:
+Opens on `http://localhost:5173`. Enter your backend URL, then sign in:
 
-- **Config** — live-edit LLM provider/model, STT model, voice-mask effect chains; changes take effect immediately, no backend restart
-- **Status** — ngrok tunnel + self-hosted LiveKit reachability
-- **Build** — trigger `gradlew assembleRelease` for the mobile app with a chosen backend URL baked in, and download the resulting APK
+- **Password** — the first admin comes from `ADMIN_BOOTSTRAP_EMAIL` and `ADMIN_BOOTSTRAP_PASSWORD` in `.env`, applied once while there are no users. That admin creates every other account and sets its role (`admin`, `hr` or `moderator`)
+- **Single sign-on** — set the `OIDC_*` variables to let staff sign in through an OpenID Connect provider. An admin still creates each account first. See [`docs/adr/staff-sso.md`](docs/adr/staff-sso.md)
+- **Shared admin key** — `ADMIN_API_KEY` still works as an escape hatch and shows every tab. Prefer named accounts, which leave an audit trail
+
+Each role sees only its own tabs: HR sees Insights, Queue, Directory, Delivery, Replies, Themes and Privacy; a moderator sees Queue; an admin sees Config, Status, Build, Guide, Audit and Privacy.
+
+The deploy workflow builds the API and bot images only; the dashboard is not part of it.
 
 ### 7. Everyday commands
 
@@ -178,11 +221,21 @@ Opens on `http://localhost:5173`. Enter your backend URL and `ADMIN_API_KEY` (fr
 make lint          # ruff + mypy (backend/bot) + eslint + tsc (mobile)
 make lint-fix       # auto-fix what ruff can
 make test           # pytest backend/ bot/ with coverage
+make ci             # every CI check locally: Python, dashboard and mobile
+make db-revision msg="what changed"   # new Alembic migration
+make db-rollback    # undo the last migration
 make docker-logs     # tail every running container
 make clean           # nuke caches, venvs, node_modules, build output
 ```
 
-Every commit is expected to pass lint + its own tests — see `AGENTS.md` for the full workflow/commit discipline this repo follows.
+Every commit is expected to pass lint + its own tests — see `AGENTS.md` for the full workflow, commit and testing rules this repo follows, and `ORCHESTRATOR.md` for how plan tasks are tracked.
+
+## 📚 Documentation
+
+- [`AGENTS.md`](AGENTS.md) and [`ORCHESTRATOR.md`](ORCHESTRATOR.md) — development rules and plan discipline
+- [`docs/adr/`](docs/adr/) — decisions: staff SSO, one company per deployment, the recording limit, the Guide
+- [`docs/runbooks/`](docs/runbooks/) — deploy and rollback, the Guide's model server, the Guide pilot checklist
+- [`docs/privacy-review.md`](docs/privacy-review.md) — what each finding was and where it stands
 
 ## ⚙️ Configuration
 
@@ -192,8 +245,11 @@ A few settings worth knowing about specifically:
 
 - **`LLMService(provider="auto")`** tries Ollama (local/free) → Gemini → OpenAI, first non-empty reply wins. Claude is available but only via explicit `provider="claude"`, never part of the auto chain.
 - **LiveKit** defaults (`LIVEKIT_URL`/`LIVEKIT_API_KEY`/`LIVEKIT_API_SECRET`) match the self-hosted `livekit` Docker service's `--dev` mode (`devkey`/`secret`) — no cloud account needed for local dev.
-- **DB-backed live config** — LLM provider/model, `WHISPER_MODEL`, and voice-mask effect chains can be overridden at runtime via the admin dashboard/API without restarting the backend (DB-first, `.env`/`Settings()` as fallback).
-- **`ADMIN_API_KEY`** gates every `/api/v1/admin/*` route (`X-Admin-Api-Key` header) — generate a real random value, don't ship the placeholder.
+- **DB-backed live config** — LLM provider/model, `WHISPER_MODEL`, voice-mask effect chains, crisis contacts and the minimum group size can be overridden at runtime from the dashboard without restarting the backend (DB-first, `.env`/`Settings()` as fallback).
+- **Staff access** — `ADMIN_BOOTSTRAP_EMAIL`/`ADMIN_BOOTSTRAP_PASSWORD` create the first admin; `SESSION_TOKEN_SECRET` signs sessions (signing refuses to run outside `ENVIRONMENT=development` without a real one); the `OIDC_*` block turns on single sign-on and can map a provider claim to a role. `ADMIN_API_KEY` is the legacy shared secret for `/api/v1/admin/*` — generate a real random value, don't ship the placeholder.
+- **Data retention** — `RETENTION_HOURS`, `REPLY_RETENTION_DAYS` and `DEVICE_HASH_PEPPER` (at least 32 characters). Run the purge with `python -m app.services.retention` on a schedule.
+- **Guide and themes** — `PRIEST_MODE_ENABLED` is off by default. `PRIEST_*` and `THEMES_LLM_*` point at an OpenAI-compatible server; plain `http` to a public address is refused unless you opt in. `CRISIS_HELPLINE_NAME`, `CRISIS_HELPLINE_NUMBER` and `CRISIS_EAP_CONTACT` fill the fixed crisis reply.
+- **Observability** — `GET /metrics` needs `METRICS_API_KEY` as a bearer token when set; `SENTRY_DSN` is optional. Leave `SQL_ECHO` off anywhere real confessions are stored.
 
 ---
 
