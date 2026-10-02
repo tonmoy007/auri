@@ -15,6 +15,7 @@ from app.exceptions import (
 )
 from app.llm.prompt_loader import load_prompt
 from app.models.confession import ModerationSeverity
+from app.schemas.counsel import CounselReply, parse_counsel_reply
 from app.services.settings_service import get_config
 
 logger = logging.getLogger(__name__)
@@ -175,23 +176,26 @@ class LLMService:
             raise SummarizationError("LLM summarization failed to produce a summary")
         return result
 
-    def counsel(self, text: str) -> str:
+    def counsel(self, text: str) -> CounselReply:
         """Produce a compassionate, priest-like response to a confession.
 
         Modeled on how a confessor listens: acknowledge what was shared,
         validate that it took courage to say it aloud, offer one gentle
         reflection (never clinical advice or doctrine), and close with a
-        brief affirmation that the person has been heard.
+        brief affirmation that the person has been heard. The model is asked
+        for JSON, which is validated into separate parts the app can draw
+        on their own.
 
         Args:
             text: Already de-identified transcript.
 
         Returns:
-            A short (3-4 sentence) response addressed directly to the
-            confessor.
+            The reply as a :class:`CounselReply`; ``render()`` gives the same
+            content as one paragraph.
 
         Raises:
-            CounselingError: If the LLM fails to produce a response.
+            CounselingError: If the LLM fails to produce a response, or its
+                output is not valid JSON that fits the schema.
         """
         prompt = self._build_delimited_prompt(
             instruction=load_prompt("counsel").render(),
@@ -202,7 +206,7 @@ class LLMService:
         if not result.strip():
             logger.error("counseling response generation returned an empty result")
             raise CounselingError("LLM failed to produce a counseling response")
-        return result
+        return parse_counsel_reply(result)
 
     def moderate(self, text: str) -> ModerationSeverity:
         """Classify why *text* needs human review before delivery, if it does.

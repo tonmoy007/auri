@@ -6,10 +6,10 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Final, cast
+from typing import Annotated, Final, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from app.models.confession import (
     ModerationSeverity,
 )
 from app.models.user import AnonymousUser
+from app.schemas.counsel import CounselReply, CounselTone, lenient_counsel_reply
 from app.services import crisis_response, department_service, device_identity
 from app.services.llm import LLMService
 
@@ -34,10 +35,13 @@ ClockDependency = Callable[[], datetime]
 # Shown instead of leaving the confessor with silence if the LLM call for a
 # counseling response fails — the confession itself still saves fine either
 # way (AGENTS.md §15.1 "safe fallback" pattern), only this reply degrades.
-_FALLBACK_COUNSELOR_RESPONSE: Final[str] = (
-    "Thank you for trusting this space with what you carried in. Whatever "
-    "it is, you don't have to hold it alone — it has been heard."
+_FALLBACK_COUNSELOR_REPLY: Final[CounselReply] = CounselReply(
+    acknowledgement="Thank you for trusting this space with what you carried in.",
+    reflection="Whatever it is, you don't have to hold it alone.",
+    closing="It has been heard.",
+    tone=CounselTone.warm,
 )
+_FALLBACK_COUNSELOR_RESPONSE: Final[str] = _FALLBACK_COUNSELOR_REPLY.render()
 
 
 # ── Pydantic request/response schemas ────────────────────────────────────
@@ -107,6 +111,9 @@ class ConfessorConfessionResponse(BaseModel):
     acknowledged_at: datetime | None
     reviewed_at: datetime | None
     counselor_response: str | None
+    counselor_reply: Annotated[
+        CounselReply | None, BeforeValidator(lenient_counsel_reply)
+    ] = None
     created_at: datetime
     updated_at: datetime
     hr_reply: str | None
@@ -284,16 +291,32 @@ def _safe_summarize(llm_service: LLMService, text: str) -> str | None:
         return None
 
 
-def _safe_counsel(llm_service: LLMService, text: str) -> str:
+def _safe_counsel(llm_service: LLMService, text: str) -> CounselReply:
     """Generate a compassionate response to *text*, degrading to a fixed
-    fallback message (rather than ``None``) on failure — a confessor should
+    fallback reply (rather than ``None``) on failure — a confessor should
     never see an empty response after submitting.
     """
     try:
         return llm_service.counsel(text)
     except Exception as exc:  # noqa: BLE001 — deliberate fail-safe boundary around an external call (LLM/HTTP/Telegram); narrowing would risk missing real failure modes
         logger.warning("counseling response generation failed, using fallback: %s", exc)
-        return _FALLBACK_COUNSELOR_RESPONSE
+        return _FALLBACK_COUNSELOR_REPLY
+
+
+def _counselor_parts(
+    llm_service: LLMService, severity: ModerationSeverity, text: str
+) -> tuple[str, CounselReply | None]:
+    """The reply shown to the confessor, as text and (when generated) as parts.
+
+    A crisis reply is a fixed template with configured contacts, never generated:
+    a model that invents a helpline number is worse than no helpline (12.7). It has
+    no structured parts.
+    """
+    if severity is ModerationSeverity.crisis:
+        template = crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE)
+        return template.text, None
+    reply = _safe_counsel(llm_service, text)
+    return reply.render(), reply
 
 
 def _safe_moderate(llm_service: LLMService, text: str) -> ModerationSeverity:
@@ -399,12 +422,8 @@ async def create_confession(
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
     severity = _safe_moderate(llm_service, body.transcript)
-    # A crisis reply is a fixed template with configured contacts, never generated:
-    # a model that invents a helpline number is worse than no helpline (12.7).
-    counselor_response = (
-        crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE).text
-        if severity is ModerationSeverity.crisis
-        else _safe_counsel(llm_service, deidentified_transcript)
+    counselor_response, counselor_reply = _counselor_parts(
+        llm_service, severity, deidentified_transcript
     )
 
     confession = Confession(
@@ -422,6 +441,9 @@ async def create_confession(
         ),
         severity=severity.value,
         counselor_response=counselor_response,
+        counselor_reply=counselor_reply.model_dump(mode="json")
+        if counselor_reply
+        else None,
     )
     session.add(confession)
     await _record_submission(session, stored_device_code, now)

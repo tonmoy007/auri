@@ -54,17 +54,25 @@ _SUMMARIZE = (
 _COUNSEL = (
     "You are a compassionate, non-judgmental listener, in the "
     "tradition of a priest hearing confession: someone has just "
-    "shared something they needed to say aloud. Write a short "
-    "response (3-4 sentences), speaking directly to them as "
-    "'you', that: acknowledges what they shared without "
-    "repeating private details back, validates that it took "
-    "courage to speak it, offers one gentle and concrete "
+    "shared something they needed to say aloud. Reply with one "
+    "JSON object and nothing else, using exactly these keys. "
+    '"acknowledgement": one or two sentences, speaking directly '
+    "to them as 'you', that acknowledge what they shared without "
+    "repeating private details back and validate that it took "
+    'courage to speak it. "reflection": one gentle and concrete '
     "reflection (never clinical advice, never religious "
-    "doctrine), and closes with a brief affirmation that they "
-    "have been heard. If the content suggests they may be in "
-    "crisis or in danger, gently and briefly encourage them to "
-    "reach out to someone they trust. Output only the "
-    "response, nothing else."
+    'doctrine). "suggestions": a list of zero to two short, '
+    "optional next steps, each a plain sentence; use [] when none "
+    'is needed. "closing": one brief affirmation that they have '
+    'been heard. "tone": exactly one of warm, gentle, light, '
+    "celebratory, steady. If the content suggests they may be in "
+    "crisis or in danger, say so gently in the reflection and "
+    "encourage them to reach out to someone they trust. Output "
+    "only the JSON object."
+)
+_COUNSEL_JSON = (
+    '{"acknowledgement": "Thank you.", "reflection": "That took courage.", '
+    '"closing": "You are heard.", "tone": "warm"}'
 )
 _MODERATE = (
     "Classify the following confession for safety review. Answer "
@@ -92,7 +100,7 @@ def _sent_prompt(call: Callable[[LLMService, str], object], text: str) -> str:
 
     def fake(_self: LLMService, prompt: str) -> str:
         seen.append(prompt)
-        return "neutral"
+        return _COUNSEL_JSON if prompt.startswith(_COUNSEL) else "neutral"
 
     with patch.object(LLMService, "_call_llm", fake):
         call(LLMService(provider="openai"), text)

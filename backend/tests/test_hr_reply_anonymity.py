@@ -47,6 +47,7 @@ EXPECTED_CONFESSOR_FIELDS = {
     "acknowledged_at",
     "reviewed_at",
     "counselor_response",
+    "counselor_reply",
     "created_at",
     "updated_at",
     "hr_reply",
