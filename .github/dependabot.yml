@@ -3,14 +3,20 @@
 # (including the audits and Trivy) judges each one; nothing merges on its own.
 #
 # Python: requirements.txt holds lower bounds and backend/constraints.txt the
-# tested versions (15.1). A Dependabot pip PR bumps what it finds; regenerate the
-# constraints file as its header describes before merging one.
+# tested versions (15.1). Dependabot bumps each package on its own, without a
+# resolver run across the whole set, so its pip PRs pinned versions that cannot
+# install together (livekit-agents caps openai, numpy and others) and raised
+# lower bounds to the newest release. Pip version updates are therefore off
+# (open-pull-requests-limit: 0); security updates still open PRs. Upgrades go
+# through the constraints regeneration its header describes, with the weekly
+# "Latest dependencies" workflow as the early warning.
 version: 2
 updates:
   - package-ecosystem: pip
     directory: /backend
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       python-backend:
         patterns: ["*"]
@@ -19,6 +25,7 @@ updates:
     directory: /bot
     schedule:
       interval: weekly
+    open-pull-requests-limit: 0
     groups:
       python-bot:
         patterns: ["*"]
@@ -30,6 +37,11 @@ updates:
     groups:
       dashboard-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # The Node types follow the runtime in .nvmrc (22); a newer major would type
+      # APIs that Node 22 does not have. Bump them with .nvmrc.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: npm
     directory: /mobile
@@ -53,6 +65,16 @@ updates:
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "react-native-*"
         update-types: ["version-update:semver-major", "version-update:semver-minor"]
+      # Majors elsewhere (@react-three/fiber 9, drei 10, typescript-eslint 8) need
+      # React 19 or config migrations that ride along with the SDK upgrade.
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      # three is still 0.x, so a minor release can break the scene, which only a
+      # device can check (17.6); it moves with @react-three/* in 15.13.
+      - dependency-name: "three"
+        update-types: ["version-update:semver-minor"]
+      - dependency-name: "@types/three"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: docker
     directories: ["/", "/bot"]
