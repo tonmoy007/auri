@@ -150,10 +150,16 @@ def crisis_response(run: QuestionRun) -> PriestAnswerResponse:
 
 def english_only_response(run: QuestionRun) -> PriestAnswerResponse:
     """A fixed notice for a script the Guide cannot answer; no retrieval, no model."""
+    reply = safety_router.english_only_reply()
     return PriestAnswerResponse(
         request_id=run.request_id,
         kind=AnswerKind.not_covered,
-        notice=safety_router.english_only_text(),
+        notice=reply.text,
+        contacts=[
+            CrisisContactOut(label=c.label, detail=c.detail, dial=c.dial)
+            for c in reply.contacts
+        ]
+        or None,
     )
 
 

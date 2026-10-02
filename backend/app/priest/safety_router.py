@@ -296,9 +296,22 @@ def is_unsupported_script(text: str) -> bool:
     return foreign > 0 and foreign * 2 >= len(letters)
 
 
-def english_only_text() -> str:
-    """The fixed reply for a question in a script the Guide does not support."""
-    return load_template("english_only.md").text
+def english_only_reply() -> crisis_response.CrisisResponse:
+    """The fixed reply for a question in a script the Guide does not support.
+
+    The notice points to the emergency number, and to the organisation's configured
+    contacts when there are any, so a person writing in distress in another language
+    still has somewhere to turn. The contacts come back as data too, for a client that
+    wants to offer a call button.
+    """
+    text = load_template("english_only.md").text
+    found = crisis_response.contacts()
+    if not found:
+        return crisis_response.CrisisResponse(text=text, contacts=[])
+    listed = "; ".join(f"{c.label}: {c.detail}" for c in found)
+    return crisis_response.CrisisResponse(
+        text=f"{text} You can also reach: {listed}.", contacts=found
+    )
 
 
 def ruling_footer_text() -> str:
