@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { speechToTextPath } from './speechRoute';
+import { speechToTextPath, transcriptionJobPath } from './speechRoute';
 
 describe('speechToTextPath', () => {
   it('uses the plain route for a confession', () => {
@@ -11,6 +11,15 @@ describe('speechToTextPath', () => {
     // A hosted provider must never hear a person's question
     expect(speechToTextPath('/api/v1/stt', { localOnly: true })).toBe(
       '/api/v1/stt?local_only=true',
+    );
+  });
+});
+
+describe('transcriptionJobPath', () => {
+  it('asks for a background job, keeping the local-only rule', () => {
+    expect(transcriptionJobPath('/api/v1/stt')).toBe('/api/v1/stt?mode=job');
+    expect(transcriptionJobPath('/api/v1/stt', { localOnly: true })).toBe(
+      '/api/v1/stt?mode=job&local_only=true',
     );
   });
 });
