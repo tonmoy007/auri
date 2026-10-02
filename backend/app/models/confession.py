@@ -5,8 +5,10 @@ from __future__ import annotations
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     ColumnElement,
     DateTime,
@@ -148,6 +150,11 @@ class Confession(Base):
         Text,
         nullable=True,
         comment="LLM-generated compassionate reflection returned to the confessor after submission",
+    )
+    counselor_reply: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        comment="The same counselor reply as structured parts (acknowledgement, reflection, suggestions, closing, tone); counselor_response holds the rendered text. Null for a crisis reply, which is a fixed template",
     )
     hr_reply: Mapped[str | None] = mapped_column(
         Text,

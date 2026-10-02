@@ -234,6 +234,7 @@ def _replied(
     confession.sentiment = "negative"
     confession.recipient_dept = "HR"
     confession.counselor_response = "you are heard"
+    confession.counselor_reply = {"acknowledgement": "you are heard"}
     confession.severity = "crisis"
     confession.reviewed_by = uuid.uuid4()
     confession.reviewed_at = updated_at
@@ -284,6 +285,7 @@ async def test_emptying_clears_everything_that_describes_the_confession(
     assert row.transcript == ""
     assert (row.ai_summary, row.category, row.sentiment) == (None, None, None)
     assert (row.recipient_dept, row.counselor_response) == (None, None)
+    assert row.counselor_reply is None
     assert (row.severity, row.reviewed_by, row.acknowledged_by) == ("none", None, None)
     assert (row.reviewed_at, row.acknowledged_at) == (None, None)
 

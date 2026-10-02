@@ -58,6 +58,20 @@ class CounselReply(BaseModel):
         return " ".join(parts)
 
 
+def lenient_counsel_reply(value: object) -> object:
+    """For a response field: a stored reply that no longer fits the schema reads as absent.
+
+    A row edited by hand, or written under an older schema, must not turn a read of the
+    confessor's own history into an error; the rendered text column still has the reply.
+    """
+    if value is None or isinstance(value, CounselReply):
+        return value
+    try:
+        return CounselReply.model_validate(value)
+    except ValidationError:
+        return None
+
+
 def _first_json_object(raw: str) -> object:
     """Decode the first JSON object in *raw*, ignoring a code fence or surrounding prose."""
     unfenced = _FENCE.sub("", raw.strip())

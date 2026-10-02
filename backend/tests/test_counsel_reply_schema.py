@@ -12,6 +12,7 @@ from app.schemas.counsel import (
     MAX_SUGGESTIONS,
     CounselReply,
     CounselTone,
+    lenient_counsel_reply,
     parse_counsel_reply,
 )
 
@@ -183,3 +184,24 @@ def test_a_reply_with_a_private_detail_never_leaks_through_the_error() -> None:
 
     # Assert
     assert SECRET not in str(caught.value)
+
+
+def test_a_stored_reply_that_fits_the_schema_is_read_back_as_a_reply() -> None:
+    # Arrange
+    stored = payload()
+
+    # Act
+    value = lenient_counsel_reply(stored)
+
+    # Assert
+    assert isinstance(value, CounselReply)
+    assert value.closing == "You have been heard here."
+
+
+@pytest.mark.parametrize("stored", [None, "text", 7, {}, {"tone": "furious"}, []])
+def test_a_stored_reply_that_does_not_fit_reads_as_absent(stored: object) -> None:
+    # Act
+    value = lenient_counsel_reply(stored)
+
+    # Assert
+    assert value is None

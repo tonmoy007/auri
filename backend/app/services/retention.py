@@ -223,6 +223,7 @@ async def empty_replied_confessions(
             sentiment=None,
             recipient_dept=None,
             counselor_response=None,
+            counselor_reply=None,
             severity=ModerationSeverity.none.value,
             reviewed_by=None,
             reviewed_at=None,

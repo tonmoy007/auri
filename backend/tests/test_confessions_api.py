@@ -22,7 +22,11 @@ from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
-from app.api.v1.confessions import _FALLBACK_COUNSELOR_RESPONSE, get_clock
+from app.api.v1.confessions import (
+    _FALLBACK_COUNSELOR_REPLY,
+    _FALLBACK_COUNSELOR_RESPONSE,
+    get_clock,
+)
 from app.database import get_async_session
 from app.main import app
 from app.models.base import Base
@@ -547,6 +551,44 @@ async def test_create_confession_includes_counselor_response(
 
 
 @pytest.mark.asyncio
+async def test_create_confession_stores_and_returns_the_structured_reply(
+    client: AsyncClient,
+) -> None:
+    # Arrange
+    reply = make_counsel_reply("You have been heard.")
+    payload = {
+        "device_token_hash": DEVICE_HASH,
+        "voice_mask": "warm",
+        "transcript": "raw with john@example.com",
+    }
+
+    # Act
+    with (
+        patch(
+            "app.api.v1.confessions.LLMService.deidentify",
+            return_value=DEIDENTIFIED_TEXT,
+        ),
+        patch("app.api.v1.confessions.LLMService.categorize", return_value="work"),
+        patch("app.api.v1.confessions.LLMService.summarize", return_value="A summary."),
+        patch(
+            "app.api.v1.confessions.LLMService.moderate",
+            return_value=ModerationSeverity.none,
+        ),
+        patch("app.api.v1.confessions.LLMService.counsel", return_value=reply),
+    ):
+        created = await client.post("/api/v1/confessions", json=payload)
+    fetched = await client.get(
+        f"/api/v1/confessions/{created.json()['id']}",
+        headers={"X-Device-Token-Hash": DEVICE_HASH},
+    )
+
+    # Assert
+    assert created.json()["counselor_reply"] == reply.model_dump(mode="json")
+    assert created.json()["counselor_response"] == reply.render()
+    assert fetched.json()["counselor_reply"] == reply.model_dump(mode="json")
+
+
+@pytest.mark.asyncio
 async def test_create_confession_falls_back_when_counsel_fails(
     client: AsyncClient,
 ) -> None:
@@ -583,6 +625,9 @@ async def test_create_confession_falls_back_when_counsel_fails(
     # Assert
     assert response.status_code == 201
     assert response.json()["counselor_response"] == _FALLBACK_COUNSELOR_RESPONSE
+    assert response.json()["counselor_reply"] == _FALLBACK_COUNSELOR_REPLY.model_dump(
+        mode="json"
+    )
 
 
 @pytest.mark.asyncio

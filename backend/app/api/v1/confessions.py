@@ -6,10 +6,10 @@ import logging
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Final, cast
+from typing import Annotated, Final, cast
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 from sqlalchemy import CursorResult, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,7 +22,7 @@ from app.models.confession import (
     ModerationSeverity,
 )
 from app.models.user import AnonymousUser
-from app.schemas.counsel import CounselReply, CounselTone
+from app.schemas.counsel import CounselReply, CounselTone, lenient_counsel_reply
 from app.services import crisis_response, department_service, device_identity
 from app.services.llm import LLMService
 
@@ -111,6 +111,9 @@ class ConfessorConfessionResponse(BaseModel):
     acknowledged_at: datetime | None
     reviewed_at: datetime | None
     counselor_response: str | None
+    counselor_reply: Annotated[
+        CounselReply | None, BeforeValidator(lenient_counsel_reply)
+    ] = None
     created_at: datetime
     updated_at: datetime
     hr_reply: str | None
@@ -300,17 +303,20 @@ def _safe_counsel(llm_service: LLMService, text: str) -> CounselReply:
         return _FALLBACK_COUNSELOR_REPLY
 
 
-def _counselor_text(
+def _counselor_parts(
     llm_service: LLMService, severity: ModerationSeverity, text: str
-) -> str:
-    """The reply shown to the confessor.
+) -> tuple[str, CounselReply | None]:
+    """The reply shown to the confessor, as text and (when generated) as parts.
 
     A crisis reply is a fixed template with configured contacts, never generated:
-    a model that invents a helpline number is worse than no helpline (12.7).
+    a model that invents a helpline number is worse than no helpline (12.7). It has
+    no structured parts.
     """
     if severity is ModerationSeverity.crisis:
-        return crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE).text
-    return _safe_counsel(llm_service, text).render()
+        template = crisis_response.render(crisis_response.CONFESSION_CLOSING_LINE)
+        return template.text, None
+    reply = _safe_counsel(llm_service, text)
+    return reply.render(), reply
 
 
 def _safe_moderate(llm_service: LLMService, text: str) -> ModerationSeverity:
@@ -416,7 +422,9 @@ async def create_confession(
     # would silently blind the safety check reading it. Moderating raw text
     # instead makes this check's reliability independent of deidentify's.
     severity = _safe_moderate(llm_service, body.transcript)
-    counselor_response = _counselor_text(llm_service, severity, deidentified_transcript)
+    counselor_response, counselor_reply = _counselor_parts(
+        llm_service, severity, deidentified_transcript
+    )
 
     confession = Confession(
         device_token_hash=stored_device_code,
@@ -433,6 +441,9 @@ async def create_confession(
         ),
         severity=severity.value,
         counselor_response=counselor_response,
+        counselor_reply=counselor_reply.model_dump(mode="json")
+        if counselor_reply
+        else None,
     )
     session.add(confession)
     await _record_submission(session, stored_device_code, now)

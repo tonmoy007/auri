@@ -137,7 +137,7 @@ async def test_a_crisis_confession_gets_the_template_and_never_asks_the_model(
         ),
         patch(
             "app.api.v1.confessions.LLMService.counsel",
-            return_value="call 999-FAKE-NUMBER",
+            return_value=make_counsel_reply("call 999-FAKE-NUMBER"),
         ) as counsel,
     ):
         response = await api_client.post("/api/v1/confessions", json=payload)
@@ -146,6 +146,7 @@ async def test_a_crisis_confession_gets_the_template_and_never_asks_the_model(
     assert response.status_code == 201
     text = response.json()["counselor_response"]
     assert NUMBER in text and "FAKE" not in text
+    assert response.json()["counselor_reply"] is None
     counsel.assert_not_called()
 
 
