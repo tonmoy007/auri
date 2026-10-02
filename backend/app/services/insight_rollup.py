@@ -25,6 +25,7 @@ _LABEL_CHARS: Final = 128
 # Upper bounds in hours, in order; anything at or past the last is ">72h".
 _DELIVERY_BUCKETS: Final = ((1, "<1h"), (6, "1-6h"), (24, "6-24h"), (72, "24-72h"))
 _LONGEST_DELIVERY: Final = ">72h"
+DELIVERY_BANDS: Final = (*(label for _, label in _DELIVERY_BUCKETS), _LONGEST_DELIVERY)
 
 Key = tuple[date, str, str]
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
@@ -32,7 +32,7 @@ from app.services import (
     audit_service,
     confession_access,
     hr_reply_service,
-    insights_service,
+    insight_weeks,
 )
 
 router = APIRouter(prefix="/hr", tags=["hr"])
@@ -301,34 +301,31 @@ class BucketResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-class SentimentPointResponse(BaseModel):
-    """Sentiment split for one ISO week."""
+class WeekInsightsResponse(BaseModel):
+    """One fixed week. Until it is frozen, ``total`` is null and every list empty."""
 
     label: str
-    buckets: list[BucketResponse]
+    start: date
+    end: date
+    frozen: bool
+    total: BucketResponse | None
+    by_day: list[BucketResponse]
+    by_category: list[BucketResponse]
+    by_sentiment: list[BucketResponse]
+    by_department: list[BucketResponse]
+    by_status: list[BucketResponse]
+    delivery: list[BucketResponse]
+    delivery_time: list[BucketResponse]
 
     model_config = {"from_attributes": True}
 
 
 class InsightsResponse(BaseModel):
-    """Aggregate reporting payload, already suppressed server-side."""
+    """A month as its fixed weeks, already suppressed server-side."""
 
-    range_start: datetime
-    range_end: datetime
+    month: str
     min_cohort: int
-    total: BucketResponse
-    volume_by_day: list[BucketResponse]
-    volume_by_week: list[BucketResponse]
-    by_category: list[BucketResponse]
-    by_sentiment: list[BucketResponse]
-    by_department: list[BucketResponse]
-    forwarded: BucketResponse
-    blind: BucketResponse
-    flagged: BucketResponse
-    flagged_rate: float | None
-    delivered: BucketResponse
-    median_hours_to_delivery: float | None
-    sentiment_trend: list[SentimentPointResponse]
+    weeks: list[WeekInsightsResponse]
 
     model_config = {"from_attributes": True}
 
@@ -336,29 +333,30 @@ class InsightsResponse(BaseModel):
 @router.get(
     "/insights",
     response_model=InsightsResponse,
-    summary="Aggregate confession reporting with small-cohort suppression (HR)",
+    summary="Aggregate reporting by fixed week, with small-cohort suppression (HR)",
 )
 async def read_insights(
     request: Request,
-    since: datetime | None = Query(None),
-    until: datetime | None = Query(None),
+    month: str | None = Query(
+        None,
+        pattern=r"^\d{4}-(0[1-9]|1[0-2])$",
+        description="Calendar month as YYYY-MM; the current UTC month when omitted",
+    ),
     session: AsyncSession = session_dependency,
     actor: User = Depends(require_hr_role),
+    clock: ClockDependency = Depends(get_clock),
 ) -> InsightsResponse:
-    """Return aggregates over the requested window (default: last 30 days).
+    """Return one month as its four fixed weeks (plan 14.1).
 
-    Every bucket smaller than ``ANALYTICS_MIN_COHORT`` comes back
-    suppressed. The client is never sent a number it is expected to hide.
+    Only fixed periods can be asked for, so two answers never overlap partly and
+    cannot be subtracted to isolate a few days. A week has figures only once it is
+    frozen; every figure below ``ANALYTICS_MIN_COHORT`` comes back suppressed.
     """
-    end = until or datetime.now(timezone.utc)
-    start = since or end - timedelta(days=insights_service.DEFAULT_RANGE_DAYS)
-    if start > end:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="'since' must not be after 'until'",
-        )
-
-    insights = await insights_service.build_insights(session, start, end)
+    now = clock()
+    year, number = (
+        (int(p) for p in month.split("-")) if month else (now.year, now.month)
+    )
+    insights = await insight_weeks.build_month(session, year, number, now)
     await audit_service.record(
         session,
         actor=actor,

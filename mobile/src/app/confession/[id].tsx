@@ -21,6 +21,7 @@ import { useAudioRecorder } from '../../hooks/useAudioRecorder';
 import { useHaptics } from '../../hooks/useHaptics';
 import { useSettings } from '../../hooks/useSettings';
 import { deleteRecordingFile } from '../../lib/recordingFiles';
+import { processingMessage } from '../../lib/processingMessage';
 import type { VoiceMask, ConfessionStatus, Environment } from '../../types';
 
 /** Delay before the door starts swinging open on entry, ms — lets the fade-in overlay clear first. */
@@ -57,6 +58,9 @@ export default function ConfessionScreen(): React.JSX.Element {
   const [isExiting, setIsExiting] = useState(false);
   const recorder = useAudioRecorder();
   const haptics = useHaptics();
+  // Set by Cancel while processing, so the result that then comes back (null,
+  // as for a failure) returns the booth to idle instead of opening review.
+  const isCancelledRef = useRef(false);
   // Leaving the booth does not cancel a masking request already in flight, so the
   // handler below checks this before moving on to a review of files that are gone.
   const isMountedRef = useRef(true);
@@ -94,6 +98,7 @@ export default function ConfessionScreen(): React.JSX.Element {
   }, [recorder, haptics]);
 
   const handleStopRecording = useCallback(async () => {
+    isCancelledRef.current = false;
     setStatus('processing');
     haptics.recordStop();
     try {
@@ -115,6 +120,13 @@ export default function ConfessionScreen(): React.JSX.Element {
         recorder.maskRecording(audioUri, voiceMask, durationMs),
       ]);
       if (!isMountedRef.current) return;
+      if (isCancelledRef.current) {
+        // The take stays on the device until the next recording replaces it or
+        // the booth is left; recording again is the way to retry.
+        if (maskedAudioUri) void deleteRecordingFile(maskedAudioUri);
+        setStatus('idle');
+        return;
+      }
       // The unmasked recording has done its job once a masked copy exists; keep
       // it only when masking failed, because review then plays it as the fallback.
       if (maskedAudioUri) {
@@ -163,6 +175,13 @@ export default function ConfessionScreen(): React.JSX.Element {
       router.replace('/');
     }
   }, [isExiting, haptics]);
+
+  // Stop waiting for the transcript and the masked audio (plan 16.2).
+  const handleCancelProcessing = useCallback(() => {
+    isCancelledRef.current = true;
+    haptics.selectionChanged();
+    recorder.cancelProcessing();
+  }, [recorder, haptics]);
 
   const handleToggleEnvironment = useCallback(() => {
     haptics.selectionChanged();
@@ -233,9 +252,11 @@ export default function ConfessionScreen(): React.JSX.Element {
 
         {status === 'processing' ? (
           <ShimmerText style={styles.statusText}>
-            {recorder.isUploading
-              ? `Processing… ${Math.round(recorder.uploadProgress * 100)}%`
-              : statusMessages[status]}
+            {processingMessage(
+              recorder.transcriptionPhase,
+              recorder.uploadProgress,
+              statusMessages[status],
+            )}
           </ShimmerText>
         ) : (
           <Text style={styles.statusText}>{statusMessages[status]}</Text>
@@ -268,6 +289,18 @@ export default function ConfessionScreen(): React.JSX.Element {
           onStart={handleStartRecording}
           onStop={handleStopRecording}
         />
+        {/* A long recording takes minutes to transcribe; the wait can always be left. */}
+        {status === 'processing' ? (
+          <Pressable
+            onPress={handleCancelProcessing}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel processing"
+            accessibilityHint="Stops waiting for the transcript. Record again to retry."
+            style={styles.cancelButton}
+          >
+            <Text style={styles.cancelButtonText}>Cancel</Text>
+          </Pressable>
+        ) : null}
       </View>
     </SafeAreaView>
   );
@@ -333,6 +366,20 @@ const styles = StyleSheet.create({
     right: 0,
     alignItems: 'center',
     zIndex: 10,
+  },
+  // 44pt minimum touch target (AGENTS.md §6.1).
+  cancelButton: {
+    minHeight: 44,
+    minWidth: 88,
+    marginTop: spacing.md,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+  },
+  cancelButtonText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.candleGlow,
+    letterSpacing: 1,
   },
   environmentHint: {
     position: 'absolute',

@@ -16,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { router, Stack } from 'expo-router';
+import { usePreventScreenCapture } from 'expo-screen-capture';
 import { colors } from '../../theme/colors';
 import { borderRadius, spacing, typography } from '../../theme';
 import { CitationSheet } from '../../components/CitationSheet';
@@ -24,6 +25,7 @@ import { PriestMessage } from '../../components/PriestMessage';
 import { usePriestConversation, type ChatMessage } from '../../hooks/usePriestConversation';
 import { usePriestStatus } from '../../hooks/usePriestStatus';
 import { PriestCrisisCard } from '../../components/PriestCrisisCard';
+import { useAppSwitcherCover } from '../../hooks/useAppSwitcherCover';
 import { useReducedMotion } from '../../hooks/useReducedMotion';
 import { useRetryCountdown } from '../../hooks/useRetryCountdown';
 import { hasAcknowledgedPriestIntro, useSettings } from '../../hooks/useSettings';
@@ -130,6 +132,11 @@ export default function PriestScreen(): React.JSX.Element {
   const maxChars = status?.max_question_chars ?? 0;
   const conversation = usePriestConversation(tradition, maxChars);
   const reduceMotion = useReducedMotion();
+  // Keeps the question out of the app-switcher thumbnail (plan 16.6). On Android
+  // FLAG_SECURE blanks the snapshot and blocks screenshots while this screen is
+  // open; on iOS it blocks screen recording, and the cover below hides the snapshot.
+  usePreventScreenCapture('guide-conversation');
+  const isCovered = useAppSwitcherCover();
   const listRef = useRef<FlatList<ChatMessage>>(null);
   const [gate, setGate] = useState<Gate>('checking');
   const [gateAttempt, setGateAttempt] = useState(0);
@@ -283,7 +290,20 @@ export default function PriestScreen(): React.JSX.Element {
         )
       )}
 
-      <CitationSheet citation={openCitation} onClose={() => setOpenCitation(null)} />
+      {/* A Modal draws in its own window, above any cover, so the sheet is hidden
+          while covered and comes back when the app is active again. */}
+      <CitationSheet
+        citation={isCovered ? null : openCitation}
+        onClose={() => setOpenCitation(null)}
+      />
+      {/* Last, so it sits above the rest of the screen. */}
+      {isCovered ? (
+        <View
+          style={styles.cover}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -292,6 +312,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.boothDark,
+  },
+  cover: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: colors.boothDark,
+    zIndex: 100,
+    elevation: 100,
   },
   flex: {
     flex: 1,

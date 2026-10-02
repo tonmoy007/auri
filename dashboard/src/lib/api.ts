@@ -169,28 +169,33 @@ export interface Bucket {
   suppressed: boolean
 }
 
-export interface SentimentPoint {
+/**
+ * One fixed week (days 1–7, 8–14, 15–21 or 22–end of the month). Until it is
+ * frozen — ended, and every confession in it removed under the retention rule —
+ * `total` is `null` and every list is empty.
+ */
+export interface WeekInsights {
   label: string
-  buckets: Bucket[]
-}
-
-export interface Insights {
-  range_start: string
-  range_end: string
-  min_cohort: number
-  total: Bucket
-  volume_by_day: Bucket[]
-  volume_by_week: Bucket[]
+  start: string
+  end: string
+  frozen: boolean
+  total: Bucket | null
+  by_day: Bucket[]
   by_category: Bucket[]
   by_sentiment: Bucket[]
   by_department: Bucket[]
-  forwarded: Bucket
-  blind: Bucket
-  flagged: Bucket
-  flagged_rate: number | null
-  delivered: Bucket
-  median_hours_to_delivery: number | null
-  sentiment_trend: SentimentPoint[]
+  by_status: Bucket[]
+  /** "delivered" and "not_delivered". */
+  delivery: Bucket[]
+  /** Delivery-time bands: <1h, 1-6h, 6-24h, 24-72h, >72h. */
+  delivery_time: Bucket[]
+}
+
+/** A month as its fixed weeks; no month total is reported beside them. */
+export interface Insights {
+  month: string
+  min_cohort: number
+  weeks: WeekInsights[]
 }
 
 export type ThemeSentimentStatus = 'ok' | 'suppressed' | 'no_previous_period'
@@ -515,10 +520,9 @@ export const auditApi = {
 }
 
 export const hrApi = {
-  getInsights: (request: Requester, range: { since: string; until: string }) => {
-    const query = new URLSearchParams({ since: range.since, until: range.until })
-    return request<Insights>(`/hr/insights?${query.toString()}`)
-  },
+  /** `month` is `YYYY-MM`; only fixed periods can be asked for (plan 14.1). */
+  getInsights: (request: Requester, month: string) =>
+    request<Insights>(`/hr/insights?${new URLSearchParams({ month }).toString()}`),
 
   getThemes: (request: Requester, days: number) =>
     request<ThemesReport>(`/hr/themes?days=${days}`),
