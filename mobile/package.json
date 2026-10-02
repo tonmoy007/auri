@@ -18,8 +18,8 @@
     "e2e:test:ios": "detox test --configuration ios.sim.debug"
   },
   "dependencies": {
-    "@react-three/drei": "~9.114.0",
-    "@react-three/fiber": "~8.17.0",
+    "@react-three/drei": "~9.122.0",
+    "@react-three/fiber": "~8.18.0",
     "axios": "^1.20.0",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
@@ -48,13 +48,13 @@
     "three": "~0.186.1"
   },
   "devDependencies": {
-    "@types/node": "~20.17.0",
+    "@types/node": "~20.19.43",
     "@types/react": "~18.3.0",
     "@types/three": "~0.186.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
     "eslint": "^8.57.0",
-    "typescript": "~5.3.3",
-    "vitest": "^4.1.10"
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11"
   }
 }
