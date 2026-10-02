@@ -160,6 +160,7 @@ export default function ReviewScreen(): React.JSX.Element {
       const created = (await response.json()) as {
         id: string;
         counselor_response: string | null;
+        counselor_reply?: unknown;
       };
 
       haptics.success();
@@ -174,6 +175,9 @@ export default function ReviewScreen(): React.JSX.Element {
         params: {
           id: created.id,
           counselorResponse: created.counselor_response ?? '',
+          // The parts travel as one JSON string (route params are strings); the
+          // response screen checks its shape and falls back to the text above.
+          ...(created.counselor_reply ? { counselorReply: JSON.stringify(created.counselor_reply) } : {}),
           anonymityEnabled: anonymityEnabled ? '1' : '0',
         },
       });
