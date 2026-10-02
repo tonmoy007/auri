@@ -17,6 +17,8 @@ interface AuthContextValue {
   user: StaffUser | null
   signedIn: boolean
   login: (email: string, password: string) => Promise<StaffUser>
+  /** Finish a single sign-on with the one-time code the callback returned. */
+  completeSso: (code: string) => Promise<StaffUser>
   logout: () => Promise<void>
   /** Issue an authenticated request, refreshing the session once on 401. */
   authedRequest: <T>(path: string, init?: RequestInit) => Promise<T>
@@ -52,6 +54,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string) => {
       const tokens = await authApi.login(baseUrl, email, password)
+      accessToken.current = tokens.access_token
+      refreshToken.current = tokens.refresh_token
+      setUser(tokens.user)
+      return tokens.user
+    },
+    [baseUrl],
+  )
+
+  const completeSso = useCallback(
+    async (code: string) => {
+      const tokens = await authApi.ssoExchange(baseUrl, code)
       accessToken.current = tokens.access_token
       refreshToken.current = tokens.refresh_token
       setUser(tokens.user)
@@ -105,10 +118,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       signedIn: user !== null,
       login,
+      completeSso,
       logout,
       authedRequest,
     }),
-    [baseUrl, adminKey, update, user, login, logout, authedRequest],
+    [baseUrl, adminKey, update, user, login, completeSso, logout, authedRequest],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

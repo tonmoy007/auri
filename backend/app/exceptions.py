@@ -94,6 +94,18 @@ class DuplicateUserError(DatabaseError):
     """Raised when creating a staff account whose email is already registered."""
 
 
+class OidcError(AuriError):
+    """A single sign-on attempt failed.
+
+    ``code`` is one of a fixed set the dashboard shows (``failed``, ``no_account``,
+    ``cancelled``); the message is for the log and never names a person.
+    """
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(message)
+        self.code = code
+
+
 class AuthConfigurationError(AuriError):
     """Raised when session signing is attempted without a real secret configured."""
 

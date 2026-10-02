@@ -39,6 +39,7 @@ class AuditAction(str, enum.Enum):
     priest_reindex = "priest.reindex"
     priest_activate = "priest.activate"
     config_write = "config.write"
+    auth_login_oidc = "auth.login_oidc"
 
 
 class ContentTier(str, enum.Enum):
