@@ -195,6 +195,8 @@ class Scenario:
     # Whether the audit commit is the route's first commit (themes commits earlier,
     # in its service, so a failing commit there proves nothing about the audit row).
     audit_is_first_commit: bool = True
+    # What success looks like: the SSO callback answers with a redirect.
+    ok_statuses: tuple[int, ...] = (200, 201, 202, 204)
 
 
 async def _summary_list(
@@ -387,6 +389,34 @@ async def _config_reset(
     return await client.delete("/api/v1/admin/config/PRIEST_TOP_K", headers=headers)
 
 
+async def _sso_login(
+    client: AsyncClient, headers: Headers, db: AsyncSession
+) -> Response:
+    """A whole SSO sign-in for the hr account, through a fake provider (plan 15.10)."""
+    from urllib.parse import parse_qs, urlsplit
+
+    from app.api.v1.auth_oidc import _provider_or_404
+    from app.services.oidc_sessions import oidc_sessions
+
+    from tests.fake_oidc import FakeIdp
+
+    idp = FakeIdp()
+    provider = idp.provider()
+    app.dependency_overrides[_provider_or_404] = lambda: provider
+    oidc_sessions.clear()
+    try:
+        start = await client.get("/api/v1/auth/oidc/start")
+        query = parse_qs(urlsplit(start.headers["location"]).query)
+        idp.claims = {"nonce": query["nonce"][0], "email": "hr@example.com"}
+        return await client.get(
+            "/api/v1/auth/oidc/callback",
+            params={"state": query["state"][0], "code": "c"},
+        )
+    finally:
+        app.dependency_overrides.pop(_provider_or_404, None)
+        oidc_sessions.clear()
+
+
 HR = UserRole.hr
 SCENARIOS: dict[str, Scenario] = {
     "summary-list": Scenario(HR, ("confession.list", "summary"), _summary_list),
@@ -426,11 +456,14 @@ SCENARIOS: dict[str, Scenario] = {
     # the setting and its audit row are staged together and committed once
     "config-set": Scenario(UserRole.admin, ("config.write", None), _config_set),
     "config-reset": Scenario(UserRole.admin, ("config.write", None), _config_reset),
+    "sso-login": Scenario(
+        HR, ("auth.login_oidc", None), _sso_login, ok_statuses=(302,)
+    ),
 }
 
 
 def test_every_audit_call_site_has_a_scenario() -> None:
-    # Arrange — 17 record() call sites; approve and reject share one helper per caller
+    # Arrange — 18 record() call sites; approve and reject share one helper per caller
     # (staff session, bot key), and config set and reset share one helper, so the
     # scenarios cover all of them. A new site should add a scenario here.
     import pathlib
@@ -443,8 +476,8 @@ def test_every_audit_call_site_has_a_scenario() -> None:
     )
 
     # Act / Assert
-    assert sites == 17
-    assert len(SCENARIOS) >= 17
+    assert sites == 18
+    assert len(SCENARIOS) >= 18
 
 
 # ── The audit service itself ─────────────────────────────────────────────
@@ -513,7 +546,7 @@ async def test_each_audited_route_leaves_a_durable_row(
     response = await scenario.request(durable_client, headers, db_session)
 
     # Assert
-    assert response.status_code in (200, 201, 202, 204)
+    assert response.status_code in scenario.ok_statuses
     assert await _audit_rows(db_engine) == [scenario.audit]
 
 
@@ -746,7 +779,7 @@ async def test_nothing_touches_the_database_after_the_audit_commit(
     response = await scenario.request(client, headers, db_session)
 
     # Assert
-    assert response.status_code in (200, 201, 202, 204)
+    assert response.status_code in scenario.ok_statuses
     assert log.calls.count("commit:audit") == 1
     after_audit = log.calls[log.calls.index("commit:audit") + 1 :]
     assert after_audit == []

@@ -122,7 +122,7 @@ async def login(
     await record_login(session, user, now)
     await session.commit()
 
-    return _issue_tokens(user, now)
+    return issue_tokens(user, now)
 
 
 @router.post(
@@ -146,7 +146,7 @@ async def refresh(
     if user is None or not user.is_active or claims.token_version != user.token_version:
         raise CredentialsRequired
 
-    return _issue_tokens(user, clock())
+    return issue_tokens(user, clock())
 
 
 @router.post(
@@ -174,8 +174,8 @@ async def read_current_user(user: User = Depends(get_current_user)) -> User:
     return user
 
 
-def _issue_tokens(user: User, now: datetime) -> TokenResponse:
-    """Build a token pair and identity payload for *user* at *now*."""
+def issue_tokens(user: User, now: datetime) -> TokenResponse:
+    """Build a token pair and identity payload for *user* at *now* (also used by SSO)."""
     return TokenResponse(
         access_token=create_access_token(user, now),
         refresh_token=create_refresh_token(user, now),

@@ -99,6 +99,12 @@ class User(Base):
         nullable=True,
         comment="Timestamp of the account's most recent successful login",
     )
+    oidc_subject: Mapped[str | None] = mapped_column(
+        String(512),
+        nullable=True,
+        unique=True,
+        comment="Single sign-on identity (issuer and subject) linked at first SSO login",
+    )
     token_version: Mapped[int] = mapped_column(
         Integer,
         nullable=False,
