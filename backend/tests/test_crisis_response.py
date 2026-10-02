@@ -15,6 +15,7 @@ from app.services import crisis_response
 from httpx import AsyncClient
 
 from tests.conftest import SettingPatcher
+from tests.counsel_replies import make_counsel_reply
 
 HELPLINE = "Lifeline"
 NUMBER = "+880 1234-567890"
@@ -174,10 +175,14 @@ async def test_a_non_crisis_confession_still_gets_a_generated_reply(
             return_value=ModerationSeverity.none,
         ),
         patch(
-            "app.api.v1.confessions.LLMService.counsel", return_value="You were heard."
+            "app.api.v1.confessions.LLMService.counsel",
+            return_value=make_counsel_reply("You were heard."),
         ),
     ):
         response = await api_client.post("/api/v1/confessions", json=payload)
 
     # Assert
-    assert response.json()["counselor_response"] == "You were heard."
+    assert (
+        response.json()["counselor_response"]
+        == make_counsel_reply("You were heard.").render()
+    )

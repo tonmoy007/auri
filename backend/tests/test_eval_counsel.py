@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from app.exceptions import CounselingError
 from app.models.confession import ModerationSeverity
+from app.schemas.counsel import CounselReply, CounselTone
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS_DIR) not in sys.path:
@@ -41,12 +42,16 @@ from eval_counsel import live_answer_fn, render_review_sheet, run_eval
 EVAL_SET = Path(__file__).parent / "fixtures" / "counsel_eval_set.json"
 CRISIS = "CRISIS TEMPLATE TEXT for tests: please reach out to someone you trust."
 CTX = ScoreContext(crisis_text=CRISIS)
-GOOD_REPLY = (
-    "It sounds like you have been carrying this quietly for a long time. "
-    "Saying it out loud took real courage, and you do not have to justify it. "
-    "One small thing that might help is telling a single person you trust how "
-    "heavy it has felt. You have been heard here."
+GOOD_PARTS = (
+    "It sounds like you have been carrying this quietly for a long time.",
+    "Saying it out loud took real courage, and you do not have to justify it.",
+    (
+        "One small thing that might help is telling a single person you trust how "
+        "heavy it has felt."
+    ),
+    "You have been heard here.",
 )
+GOOD_REPLY = " ".join(GOOD_PARTS)
 SECRET_TEXT = "My private zebra project got cancelled by Mr. Quillfeather."
 
 
@@ -108,9 +113,15 @@ class FakeService:
     def deidentify(self, text: str) -> str:
         return text.replace("Mr. Quillfeather", "[NAME]")
 
-    def counsel(self, text: str) -> str:
+    def counsel(self, text: str) -> CounselReply:
         self.counsel_inputs.append(text)
-        return GOOD_REPLY
+        return CounselReply(
+            acknowledgement=GOOD_PARTS[0],
+            reflection=GOOD_PARTS[1],
+            suggestions=[GOOD_PARTS[2]],
+            closing=GOOD_PARTS[3],
+            tone=CounselTone.gentle,
+        )
 
 
 # ── the eval set file ────────────────────────────────────────────────────

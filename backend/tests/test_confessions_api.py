@@ -32,6 +32,8 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from tests.counsel_replies import make_counsel_reply
+
 pytestmark = pytest.mark.usefixtures("no_model_calls")
 
 FROZEN_NOW = datetime(2026, 7, 17, 12, 0, 0)  # noqa: DTZ001 — deliberately naive, see module docstring
@@ -529,7 +531,7 @@ async def test_create_confession_includes_counselor_response(
         ),
         patch(
             "app.api.v1.confessions.LLMService.counsel",
-            return_value="You have been heard.",
+            return_value=make_counsel_reply("You have been heard."),
         ) as mock_counsel,
     ):
         response = await client.post("/api/v1/confessions", json=payload)
@@ -537,7 +539,10 @@ async def test_create_confession_includes_counselor_response(
     # Assert
     body = response.json()
     assert response.status_code == 201
-    assert body["counselor_response"] == "You have been heard."
+    assert (
+        body["counselor_response"]
+        == make_counsel_reply("You have been heard.").render()
+    )
     mock_counsel.assert_called_once_with(DEIDENTIFIED_TEXT)
 
 

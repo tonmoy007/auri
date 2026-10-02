@@ -7,6 +7,7 @@ auto-provider chain order) runs for real.
 
 from __future__ import annotations
 
+import json
 from unittest.mock import Mock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from app.exceptions import (
     SentimentError,
     SummarizationError,
 )
+from app.schemas.counsel import CounselTone
 from app.services.deidentify import strip_pii_regex
 from app.services.llm import LLMService
 
@@ -125,17 +127,27 @@ def test_summarize_raises_summarization_error_on_empty_llm_response() -> None:
         service.summarize("some confession text")
 
 
-def test_counsel_returns_llm_response_when_non_empty() -> None:
+def test_counsel_returns_the_parsed_reply_when_the_llm_answers_in_json() -> None:
     # Arrange
     service = LLMService(provider="openai")
-    llm_reply = "You have been heard. That took courage to say."
+    llm_reply = json.dumps(
+        {
+            "acknowledgement": "That took courage to say.",
+            "reflection": "Naming it is a real first step.",
+            "suggestions": ["Tell one person you trust."],
+            "closing": "You have been heard.",
+            "tone": "gentle",
+        }
+    )
 
     # Act
     with patch.object(LLMService, "_call_openai", return_value=llm_reply):
-        response = service.counsel("some confession text")
+        reply = service.counsel("some confession text")
 
     # Assert
-    assert response == llm_reply
+    assert reply.acknowledgement == "That took courage to say."
+    assert reply.suggestions == ["Tell one person you trust."]
+    assert reply.tone is CounselTone.gentle
 
 
 def test_counsel_raises_counseling_error_on_empty_llm_response() -> None:
@@ -145,6 +157,28 @@ def test_counsel_raises_counseling_error_on_empty_llm_response() -> None:
     # Act / Assert
     with (
         patch.object(LLMService, "_call_openai", return_value="   "),
+        pytest.raises(CounselingError),
+    ):
+        service.counsel("some confession text")
+
+
+@pytest.mark.parametrize(
+    "llm_reply",
+    [
+        "You have been heard. That took courage to say.",
+        '{"acknowledgement": "Thank you."}',
+        "```json\n{not json}\n```",
+    ],
+)
+def test_counsel_raises_counseling_error_when_the_reply_is_not_the_json_contract(
+    llm_reply: str,
+) -> None:
+    # Arrange
+    service = LLMService(provider="openai")
+
+    # Act / Assert
+    with (
+        patch.object(LLMService, "_call_openai", return_value=llm_reply),
         pytest.raises(CounselingError),
     ):
         service.counsel("some confession text")

@@ -70,6 +70,10 @@ _COUNSEL = (
     "encourage them to reach out to someone they trust. Output "
     "only the JSON object."
 )
+_COUNSEL_JSON = (
+    '{"acknowledgement": "Thank you.", "reflection": "That took courage.", '
+    '"closing": "You are heard.", "tone": "warm"}'
+)
 _MODERATE = (
     "Classify the following confession for safety review. Answer "
     "with exactly one word:\n"
@@ -96,7 +100,7 @@ def _sent_prompt(call: Callable[[LLMService, str], object], text: str) -> str:
 
     def fake(_self: LLMService, prompt: str) -> str:
         seen.append(prompt)
-        return "neutral"
+        return _COUNSEL_JSON if prompt.startswith(_COUNSEL) else "neutral"
 
     with patch.object(LLMService, "_call_llm", fake):
         call(LLMService(provider="openai"), text)

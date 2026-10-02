@@ -169,7 +169,8 @@ def live_answer_fn(*, service: LLMService | None = None) -> AnswerFn:
                 "route": ROUTE_CRISIS,
                 "reply": crisis_response.render(closing).text,
             }
-        return {"route": ROUTE_COUNSEL, "reply": llm.counsel(llm.deidentify(item.text))}
+        reply = llm.counsel(llm.deidentify(item.text))
+        return {"route": ROUTE_COUNSEL, "reply": reply.render()}
 
     async def answer(item: EvalItem) -> Reply:
         return await asyncio.to_thread(_reply, item)

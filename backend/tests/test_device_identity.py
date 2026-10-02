@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.confession_seeding import add_confession
 from tests.conftest import SettingPatcher
+from tests.counsel_replies import make_counsel_reply
 
 PEPPER = "p" * 40
 OTHER_PEPPER = "q" * 40
@@ -300,7 +301,8 @@ async def _submit(client: AsyncClient, code: str):
             return_value="neutral",
         ),
         patch(
-            "app.api.v1.confessions.LLMService.counsel", return_value="You were heard."
+            "app.api.v1.confessions.LLMService.counsel",
+            return_value=make_counsel_reply("You were heard."),
         ),
         patch(
             "app.api.v1.confessions.LLMService.moderate",
