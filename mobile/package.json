@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@react-three/drei": "~9.114.0",
-    "@react-three/fiber": "~8.17.0",
+    "@react-three/fiber": "~9.8.1",
     "axios": "^1.7.9",
     "expo": "~52.0.0",
     "expo-asset": "~11.0.5",
