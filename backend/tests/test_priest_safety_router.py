@@ -547,13 +547,55 @@ def test_bengali_script_is_detected(text: str, expected: bool) -> None:
     assert safety_router.is_unsupported_script(text) is expected
 
 
-def test_the_english_only_notice_says_so_and_points_to_emergency_help() -> None:
+def test_the_english_only_notice_says_so_and_points_to_emergency_help(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NUMBER", "")
+    set_setting("CRISIS_EAP_CONTACT", "")
+
     # Act
-    text = safety_router.english_only_text()
+    reply = safety_router.english_only_reply()
 
     # Assert — a person writing in distress in another language is not left with nothing
-    assert "English" in text
-    assert "emergency number" in text
+    assert "English" in reply.text
+    assert "emergency number" in reply.text
+    assert reply.contacts == []
+
+
+def test_the_english_only_notice_carries_the_configured_contacts(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NAME", "Lifeline")
+    set_setting("CRISIS_HELPLINE_NUMBER", "+880 1234-567890")
+    set_setting("CRISIS_EAP_CONTACT", "eap@example.org")
+    template = safety_router.load_template("english_only.md").text
+
+    # Act
+    reply = safety_router.english_only_reply()
+
+    # Assert
+    assert reply.text == (
+        f"{template} You can also reach: Lifeline: +880 1234-567890; "
+        "Employee assistance: eap@example.org."
+    )
+    assert [c.dial for c in reply.contacts] == ["+8801234567890", None]
+
+
+def test_the_english_only_notice_drops_a_contact_that_is_not_safe_to_publish(
+    set_setting: SettingPatcher,
+) -> None:
+    # Arrange
+    set_setting("CRISIS_HELPLINE_NUMBER", "call <b>me</b>")
+    set_setting("CRISIS_EAP_CONTACT", "<script>")
+
+    # Act
+    reply = safety_router.english_only_reply()
+
+    # Assert
+    assert reply.contacts == []
+    assert "<" not in reply.text
 
 
 # ── review fixes: phrasings that used to reach retrieval and the model ────────

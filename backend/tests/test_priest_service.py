@@ -1286,10 +1286,12 @@ async def test_the_default_service_reports_a_missing_index_as_unavailable(
 
 
 @pytest.mark.asyncio
-async def test_a_bengali_question_gets_the_english_only_notice_and_no_model_work() -> (
-    None
-):
+async def test_a_bengali_question_gets_the_english_only_notice_and_no_model_work(
+    set_setting: Callable[[str, object], None],
+) -> None:
     # Arrange
+    set_setting("CRISIS_HELPLINE_NAME", "Help Line")
+    set_setting("CRISIS_HELPLINE_NUMBER", "0123 456 789")
     retriever, chain = FakeRetriever(), FakeChain([answer_json()])
     service = make_service(retriever=retriever, chain=chain)
 
@@ -1298,7 +1300,11 @@ async def test_a_bengali_question_gets_the_english_only_notice_and_no_model_work
 
     # Assert
     assert response.kind is AnswerKind.not_covered
-    assert response.notice == safety_router.english_only_text()
+    assert response.notice == safety_router.english_only_reply().text
+    assert "Help Line: 0123 456 789" in (response.notice or "")
+    assert [(c.label, c.detail, c.dial) for c in response.contacts or []] == [
+        ("Help Line", "0123 456 789", "0123456789")
+    ]
     assert retriever.calls == [] and chain.calls == []
     assert response.points == [] and response.citations == []
 

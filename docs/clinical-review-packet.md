@@ -14,7 +14,7 @@ The wording below was written by engineers and tuned against test phrasings and 
 2. Harm to others is deliberately tighter than self-harm, to avoid telling people who mention a conflict, leaving a faith or coming out to call emergency help. Confirm where the line should be.
 3. Passive ideation ("I wish I could just disappear", "I pray God takes me") triggers the crisis reply. Idioms ("this deadline is killing me") do not.
 4. Abuse and harassment disclosures get a referral, the configured contacts and a line that the booth is not anonymous. Only first-person disclosures ("my manager harassed me", "I was abused") trigger it, not scripture or news-style sentences.
-5. A question in Bengali script gets an English-only notice that points to the emergency number (the Guide cannot read Bangla yet). Romanised Bangla has a short phrase list only.
+5. A question in Bengali script gets an English-only notice that points to the emergency number and lists the organisation's configured contacts (the Guide cannot read Bangla yet). Romanised Bangla has a short phrase list only.
 6. The Guide's crisis reply does not alert anyone at the company. If the organisation wants a crisis in the Guide to reach a person, that is a design change, not a wording change.
 
 ## The fixed texts, exactly as users see them
@@ -150,7 +150,7 @@ From the automated tests. Please add phrasings you think are missing or wrong; t
 ## Known gaps (please judge how serious)
 
 - Romanised Bangla beyond a short list is not covered; a native speaker should check the lines that are.
-- A question in Bengali script gets the English-only notice with no helpline contacts, only the emergency number.
+- A question in Bengali script gets the English-only notice: the emergency-number line, then the organisation's configured contacts when there are any.
 - Questions that match a referral (abuse, medical, legal) are not also checked by the local moderation model, so a crisis hidden inside one is not caught by that second check.
 - Indirect or coded language, long messages that bury a crisis phrase, and misspellings beyond simple obfuscation can pass to the study library.
 - The crisis reply names no specific service; it shows whatever the organisation configured (`CRISIS_HELPLINE_NAME`, `CRISIS_HELPLINE_NUMBER`, `CRISIS_EAP_CONTACT`), or a compiled-in message that says to call the local emergency number.
