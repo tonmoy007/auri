@@ -23,6 +23,8 @@ from app.main import app
 from app.services.audio_probe import duration_seconds
 from httpx import ASGITransport, AsyncClient
 
+from tests.conftest import SettingPatcher
+
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 needs_ffprobe = pytest.mark.skipif(
     shutil.which("ffprobe") is None, reason="ffprobe not installed"
@@ -93,10 +95,10 @@ def test_without_ffprobe_the_duration_is_unknown(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 @pytest.mark.parametrize("endpoint", ["/api/v1/stt", "/api/v1/voice/mask"])
 async def test_a_recording_over_the_limit_is_refused_before_any_work(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch, endpoint: str
+    client: AsyncClient, set_setting: SettingPatcher, endpoint: str
 ) -> None:
     # Arrange — a 3-second limit and a 5-second recording
-    monkeypatch.setattr("app.config.settings.MAX_RECORDING_SECONDS", 3)
+    set_setting("MAX_RECORDING_SECONDS", 3)
     files = {"audio": ("long.wav", _wav(5), "audio/wav")}
 
     # Act
@@ -117,10 +119,10 @@ async def test_a_recording_over_the_limit_is_refused_before_any_work(
 @needs_ffprobe
 @pytest.mark.asyncio
 async def test_a_recording_inside_the_limit_is_transcribed(
-    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+    client: AsyncClient, set_setting: SettingPatcher
 ) -> None:
     # Arrange — the limit has a small margin for encoder padding
-    monkeypatch.setattr("app.config.settings.MAX_RECORDING_SECONDS", 3)
+    set_setting("MAX_RECORDING_SECONDS", 3)
     files = {"audio": ("ok.wav", _wav(3.2), "audio/wav")}
 
     # Act

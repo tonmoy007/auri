@@ -220,7 +220,7 @@
       "tasks": {
         "15.1": "completed",
         "15.2": "completed",
-        "15.3": "pending",
+        "15.3": "completed",
         "15.4": "completed",
         "15.5": "completed",
         "15.6": "completed",
@@ -228,8 +228,9 @@
         "15.8": "pending",
         "15.9": "completed",
         "15.10": "completed",
-        "15.12": "blocked",
-        "15.11": "pending"
+        "15.12": "completed",
+        "15.11": "pending",
+        "15.13": "pending"
       }
     },
     "16": {
