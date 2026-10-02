@@ -90,7 +90,7 @@ ci-python: ## CI's Python lint, type check and tests (no .env, test environment)
 	ENVIRONMENT=test pytest backend/ bot/ -q -m "not live_llm"
 
 ci-dashboard: ## CI's dashboard job
-	cd dashboard && npm ci && npx tsc -p tsconfig.app.json --noEmit && npm run lint && npm test && npm run build
+	cd dashboard && npm ci && npm audit --audit-level=high && npx tsc -p tsconfig.app.json --noEmit && npm run lint && npm test && npm run build
 
 ci-mobile: ## CI's mobile lint, type check and tests
 	cd mobile && npm ci && npx eslint . --ext .ts,.tsx && npx tsc --noEmit && npx vitest run --passWithNoTests
