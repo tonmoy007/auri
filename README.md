@@ -81,7 +81,7 @@ Work is organised into phases tracked in [`.hermes/plans/`](.hermes/plans/) (the
 | 7 | Live LiveKit voice conversation | Connectivity only; the conversation itself is not built |
 | 8-10 | App settings, review fixes, local dev stack and config dashboard | Done |
 | 11 | HR operations dashboard: roles, audit, insights, queue, delivery, replies, themes, privacy panel | Done |
-| 12 | Counselor response quality: prompt files and the deterministic crisis reply are done; evaluation, structured replies, guardrails and a model bench are next | In progress |
+| 12 | Counselor response quality: prompt files, the deterministic crisis reply, the evaluation set and the scoring harness are done; structured replies, guardrails and a model bench are next | In progress |
 | 13 | Guide over the study library | Built; the mobile and real-stack verification is open |
 | 14-17 | Privacy and safety debt, release hygiene, recording robustness, Guide quality gates | Mostly done; the Guide pilot is a no-go until its gates are met ([checklist](docs/runbooks/priest-launch-checklist.md)) |
 
