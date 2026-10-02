@@ -1,8 +1,8 @@
 // Auri — Guide crisis card
 // A distinct, prominent card for a crisis reply. Its words are fixed in
-// priestPresentation, and its buttons only open the phone's own dialer (a
-// `tel:` link built from a strictly validated number); nothing goes over the
-// network from here.
+// priestPresentation, with the server's own fixed template text shown beside
+// them. Its buttons only open the phone's own dialer (a `tel:` link built from
+// a strictly validated number); nothing goes over the network from here.
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -58,6 +58,11 @@ export function PriestCrisisCard({
         {block.heading}
       </Text>
       <Text style={styles.body}>{block.body}</Text>
+      {block.serverText ? (
+        <Text style={styles.serverText} selectable>
+          {block.serverText}
+        </Text>
+      ) : null}
       {block.contacts.map((contact, index) => (
         <View key={`${index}-${contact.label}-${contact.detail}`} style={styles.contactRow}>
           <View style={styles.contactText}>
@@ -106,6 +111,12 @@ const styles = StyleSheet.create({
     fontSize: typography.fontSize.md,
     lineHeight: 24,
     color: colors.slate200,
+  },
+  serverText: {
+    marginTop: spacing.sm,
+    fontSize: typography.fontSize.md,
+    lineHeight: 24,
+    color: colors.slate300,
   },
   contactRow: {
     flexDirection: 'row',

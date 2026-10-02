@@ -10,6 +10,7 @@ import {
   CRISIS_EMERGENCY_LINE,
   GUIDE_TRADITION_NOTE,
   HELP_NOW_HEADING,
+  MAX_SERVER_CRISIS_TEXT_CHARS,
   errorAnnouncement,
   formatWait,
   pendingStageAt,
@@ -383,6 +384,39 @@ describe('presentAnswer: crisis', () => {
     expect(crisis?.emergencyLine).toContain('local emergency number');
   });
 
+  it("shows the server's crisis text beside the fixed words", () => {
+    // Arrange
+    const serverText = 'Auri does not keep this conversation. Reach out to Lifeline: 0800 123 456.';
+    const reply = response({ kind: 'crisis', notice: `  ${serverText}  ` });
+
+    // Act
+    const crisis = blockOfType(presentAnswer(reply).blocks, 'crisis');
+
+    // Assert
+    expect(crisis?.serverText).toBe(serverText);
+    expect(crisis?.body).toContain('your safety matters');
+  });
+
+  it.each([
+    ['missing', null],
+    ['blank', '   '],
+    ['not text', 42],
+    ['too long to be the fixed template', 'x'.repeat(MAX_SERVER_CRISIS_TEXT_CHARS + 1)],
+  ])('leaves the server text out when it is %s', (_label, notice) => {
+    // Arrange
+    const reply = response({
+      kind: 'crisis',
+      notice: notice as unknown as PriestAnswerResponse['notice'],
+    });
+
+    // Act
+    const crisis = blockOfType(presentAnswer(reply).blocks, 'crisis');
+
+    // Assert
+    expect(crisis?.serverText).toBeNull();
+    expect(crisis?.body).toContain('your safety matters');
+  });
+
   it('still produces a crisis block with no contacts when the server sent none', () => {
     // Arrange
     const reply = response({ kind: 'crisis', contacts: null });
@@ -710,6 +744,7 @@ describe('presentHelpNow', () => {
     expect(block.heading).toBe(HELP_NOW_HEADING);
     expect(block.emergencyLine).toBe(CRISIS_EMERGENCY_LINE);
     expect(block.contacts.map((c) => c.telUrl)).toEqual(['tel:0800123456', null]);
+    expect(block.serverText).toBeNull();
   });
 
   it('still shows the emergency line when no contacts are known', () => {

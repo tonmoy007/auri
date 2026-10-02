@@ -7,7 +7,9 @@
 // Two rules shape this file. Labels on quotes come from the server (built there
 // from note metadata), never from here, so the app cannot claim "scripture says".
 // And the crisis card's words are fixed in this file: a crisis reply must not
-// depend on text the server, or a model behind it, produced.
+// depend on text the server, or a model behind it, produced. The server's own crisis
+// text (a fixed template, never generated) is shown beside those words, never in
+// place of them, so the card is complete even when that text is missing or odd.
 
 import {
   type PriestAnswerResponse,
@@ -32,6 +34,8 @@ export const CRISIS_BODY =
   'What you shared sounds really heavy, and your safety matters more than anything ' +
   'else here. If you can, reach out to someone you trust or to a local crisis line. ' +
   'You do not have to carry this alone.';
+/** The longest server crisis text the card will show; the real template is far shorter. */
+export const MAX_SERVER_CRISIS_TEXT_CHARS = 1000;
 export const CRISIS_EMERGENCY_LINE =
   'If you are in immediate danger, contact your local emergency number.';
 export const EMPTY_CONVERSATION_TEXT =
@@ -117,6 +121,8 @@ export type DisplayBlock =
       type: 'crisis';
       heading: string;
       body: string;
+      /** The server's fixed crisis template, shown beside `body`; null when absent or unusable. */
+      serverText: string | null;
       emergencyLine: string;
       contacts: CrisisContactPresentation[];
     }
@@ -220,6 +226,13 @@ export function presentCrisisContacts(contacts: unknown): CrisisContactPresentat
   });
 }
 
+/** The server's crisis text if it is a reasonable string, else null. */
+function presentServerCrisisText(notice: unknown): string | null {
+  if (typeof notice !== 'string') return null;
+  const text = notice.trim();
+  return text.length > 0 && text.length <= MAX_SERVER_CRISIS_TEXT_CHARS ? text : null;
+}
+
 function presentCrisis(reply: PriestAnswerResponse): AnswerPresentation {
   return {
     kind: 'crisis',
@@ -228,6 +241,7 @@ function presentCrisis(reply: PriestAnswerResponse): AnswerPresentation {
         type: 'crisis',
         heading: CRISIS_HEADING,
         body: CRISIS_BODY,
+        serverText: presentServerCrisisText(reply.notice),
         emergencyLine: CRISIS_EMERGENCY_LINE,
         contacts: presentCrisisContacts(reply.contacts),
       },
@@ -243,6 +257,7 @@ export function presentHelpNow(contacts: unknown): CrisisBlock {
     type: 'crisis',
     heading: HELP_NOW_HEADING,
     body: HELP_NOW_BODY,
+    serverText: null,
     emergencyLine: CRISIS_EMERGENCY_LINE,
     contacts: presentCrisisContacts(contacts),
   };
