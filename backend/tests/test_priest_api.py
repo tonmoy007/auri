@@ -22,7 +22,7 @@ from app.database import get_async_session
 from app.exceptions import PriestIndexError, PriestUnavailableError
 from app.main import create_app
 from app.priest import metrics
-from app.priest.rate_limiter import PriestRateLimiter
+from app.priest.rate_limiter import FIXED_REPLY_DEVICE_LIMITS, PriestRateLimiter
 from app.priest.schemas import (
     AnswerKind,
     CrisisContactOut,
@@ -877,3 +877,94 @@ async def test_a_refusal_by_the_real_service_is_counted_once_not_twice(
     # Assert
     assert response.status_code == 503
     assert _outcomes() == {"error": 1}
+
+
+# ── POST /ask: the per-address limit behind a trusted proxy (plan 14.7) ─────
+
+
+def _device(n: int) -> str:
+    return f"{n:032d}"
+
+
+@pytest.mark.asyncio
+async def test_a_client_varying_its_device_header_is_limited_by_address(
+    env: Env, set_setting: SettingPatcher
+) -> None:
+    # Arrange
+    set_setting("TRUSTED_PROXY_HEADER", "X-Real-IP")
+    set_setting("PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE", 3)
+    for n in range(3):
+        headers = {"X-Device-Token-Hash": _device(n), "X-Real-IP": "203.0.113.7"}
+        assert (await env.ask(headers=headers)).status_code == 200
+
+    # Act
+    response = await env.ask(
+        headers={"X-Device-Token-Hash": _device(99), "X-Real-IP": "203.0.113.7"}
+    )
+
+    # Assert
+    assert response.status_code == 429
+    assert response.json() == {"detail": "rate_limited"}
+    assert len(env.service.calls) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_untrusted_forwarded_header_is_ignored(
+    env: Env, set_setting: SettingPatcher
+) -> None:
+    # Arrange — the deployment trusts X-Real-IP; the client sends X-Forwarded-For
+    set_setting("TRUSTED_PROXY_HEADER", "X-Real-IP")
+    set_setting("PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE", 1)
+
+    # Act
+    statuses = [
+        (
+            await env.ask(
+                headers={
+                    "X-Device-Token-Hash": _device(n),
+                    "X-Forwarded-For": "203.0.113.7",
+                }
+            )
+        ).status_code
+        for n in range(3)
+    ]
+
+    # Assert — no address is known, so only the device limit applies
+    assert statuses == [200, 200, 200]
+
+
+@pytest.mark.asyncio
+async def test_without_a_trusted_header_no_address_limit_runs(
+    env: Env, set_setting: SettingPatcher
+) -> None:
+    # Arrange — the default: no proxy trusted
+    set_setting("TRUSTED_PROXY_HEADER", "")
+    set_setting("PRIEST_RATE_LIMIT_PER_IP_PER_MINUTE", 1)
+
+    # Act
+    statuses = [
+        (
+            await env.ask(
+                headers={"X-Device-Token-Hash": _device(n), "X-Real-IP": "203.0.113.7"}
+            )
+        ).status_code
+        for n in range(3)
+    ]
+
+    # Assert
+    assert statuses == [200, 200, 200]
+
+
+@pytest.mark.asyncio
+async def test_fixed_replies_stop_at_their_flood_ceiling(env: Env) -> None:
+    # Arrange
+    crisis = {"question": "I want to kill myself"}
+    for _ in range(FIXED_REPLY_DEVICE_LIMITS.per_minute):
+        assert (await env.ask(crisis)).status_code == 200
+
+    # Act
+    response = await env.ask(crisis)
+
+    # Assert
+    assert response.status_code == 429
+    assert response.json() == {"detail": "rate_limited"}
