@@ -9,8 +9,11 @@ store (AGENTS.md §16.3).
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -207,3 +210,37 @@ async def test_transcribe_audio_different_token_not_rate_limited(
     # Assert
     assert first_response.status_code == 200
     assert second_response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_transcription_does_not_block_other_requests(
+    client: AsyncClient,
+) -> None:
+    # Arrange — device A's transcription can only finish once device B's has run.
+    # If Whisper ran on the event loop, B could never start and A would time out.
+    b_has_run = threading.Event()
+
+    def fake_transcribe(self: object, audio_path: str | Path) -> str:
+        if Path(audio_path).read_bytes().startswith(b"first"):
+            return "first" if b_has_run.wait(timeout=3) else ""
+        b_has_run.set()
+        return "second"
+
+    with patch("app.api.v1.stt.WhisperTranscriber.transcribe", fake_transcribe):
+        # Act
+        first, second = await asyncio.gather(
+            client.post(
+                "/api/v1/stt",
+                files={"audio": ("a.m4a", b"first recording", "audio/m4a")},
+                headers={"X-Device-Token-Hash": DEVICE_HASH},
+            ),
+            client.post(
+                "/api/v1/stt",
+                files={"audio": ("b.m4a", b"second recording", "audio/m4a")},
+                headers={"X-Device-Token-Hash": OTHER_DEVICE_HASH},
+            ),
+        )
+
+    # Assert
+    assert (first.status_code, first.json()) == (200, {"transcript": "first"})
+    assert (second.status_code, second.json()) == (200, {"transcript": "second"})
