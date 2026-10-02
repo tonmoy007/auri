@@ -15,7 +15,7 @@ Speak your truth in a candlelit 3D booth. AI listens, processes, and lets you fo
 - **Anonymity Modes** — Fully blind or "someone in your team" context — your choice at send-time
 - **Forward or Delete** — Send to a department, or delete it
 - **A reply that comes back** — After a confession the app shows a short supportive response. Crisis content gets a fixed message with configured contacts, never a generated one. HR can later write an anonymous organisational reply, shown in your history
-- **Guide (off by default)** — An AI companion that answers questions from a study library of world religions and cites the notes it used. Auri keeps no questions or answers; the model server's own logging is not yet verified (prototype). It stays behind a kill switch until the pilot checklist passes
+- **Guide (off by default)** — An AI companion that answers questions from a study library of world religions and cites the notes it used. Auri keeps no questions or answers; the model server's own logging is not yet verified (prototype). Crisis questions, and questions in a script it cannot read, get a fixed message with the organisation's contacts, never a generated one. It stays behind a kill switch until the pilot checklist passes
 
 **For staff (the dashboard)**
 
