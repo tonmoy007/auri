@@ -1,5 +1,5 @@
 # ---- Build stage ----
-FROM python:3.11-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /app
 
@@ -12,7 +12,7 @@ COPY bot/requirements.txt backend/constraints.txt ./
 RUN pip install --no-cache-dir --user -r requirements.txt -c constraints.txt
 
 # ---- Runtime stage ----
-FROM python:3.11-slim
+FROM python:3.14-slim
 
 WORKDIR /app
 
